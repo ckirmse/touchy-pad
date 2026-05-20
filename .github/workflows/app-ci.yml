@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IDF_VERSION: "v6.0.1"
+      FIRMWARE_BOARD: "jc4827w543"
     defaults:
       run:
         working-directory: app
@@ -61,6 +62,9 @@ jobs:
           mkdir -p "$HOME/esp"
           if [ ! -d "$HOME/esp/esp-idf/.git" ]; then
             git clone --branch "${IDF_VERSION}" --single-branch https://github.com/espressif/esp-idf.git "$HOME/esp/esp-idf"
+          else
+            git -C "$HOME/esp/esp-idf" fetch --force --depth 1 origin "${IDF_VERSION}"
+            git -C "$HOME/esp/esp-idf" checkout --force FETCH_HEAD
           fi
           cd "$HOME/esp/esp-idf"
           ./install.sh esp32s3
@@ -71,18 +75,13 @@ jobs:
           SYS_PYTHON: python3
         run: just build-proto-py
 
-      - name: Configure firmware build directory
-        working-directory: ${{ github.workspace }}
-        run: |
-          source "$HOME/esp/esp-idf/export.sh"
-          idf.py -C firmware -DBOARD=waveshare_s3_lcd_7b set-target esp32s3
-
-      - name: Build firmware
+      - name: Configure and build firmware
         working-directory: ${{ github.workspace }}
         env:
           SYS_PYTHON: python3
         run: |
           source "$HOME/esp/esp-idf/export.sh"
+          idf.py -C firmware -DBOARD="${FIRMWARE_BOARD}" set-target esp32s3
           just firmware build
 
       - name: Install dependencies
