@@ -107,6 +107,7 @@ esp_err_t nv3041a_wait_idle(nv3041a_handle_t dev)
 
 // NV3041A commands (subset; full set in the Arduino_GFX header).
 #define NV3041A_SLPOUT  0x11
+#define NV3041A_INVON   0x21
 #define NV3041A_DISPON  0x29
 #define NV3041A_CASET   0x2A
 #define NV3041A_RASET   0x2B
@@ -363,6 +364,11 @@ esp_err_t nv3041a_create(const nv3041a_config_t *cfg, nv3041a_handle_t *out)
     ESP_RETURN_ON_ERROR(nv_send_cmd(dev, NV3041A_SLPOUT), TAG, "slpout");
     ESP_RETURN_ON_ERROR(nv3041a_wait_idle(dev), TAG, "slpout drain");
     vTaskDelay(pdMS_TO_TICKS(120));
+    // The NV3041A panel powers up in display-inversion-on mode by default;
+    // INVON flips it to the correct polarity (without this all colours appear
+    // complemented — green shows as purple, white shows as black, etc.).
+    ESP_RETURN_ON_ERROR(nv_send_cmd(dev, NV3041A_INVON), TAG, "invon");
+    ESP_RETURN_ON_ERROR(nv3041a_wait_idle(dev), TAG, "invon drain");
     ESP_RETURN_ON_ERROR(nv_send_cmd(dev, NV3041A_DISPON), TAG, "dispon");
     ESP_RETURN_ON_ERROR(nv3041a_wait_idle(dev), TAG, "dispon drain");
     vTaskDelay(pdMS_TO_TICKS(50));

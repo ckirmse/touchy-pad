@@ -201,12 +201,12 @@ lv_obj_t *build_label(lv_obj_t *parent, const touchy_Widget &w)
 {
     lv_obj_t *lbl = lv_label_create(parent);
     lv_label_set_text(lbl, w.kind.label.text);
+    // Ensure text is fully opaque regardless of theme defaults.
+    lv_obj_set_style_text_opa(lbl, LV_OPA_COVER, 0);
+    ESP_LOGI(TAG, "build_label id='%s' text='%.40s' font_size=%d",
+             w.id, w.kind.label.text, (int)w.kind.label.font_size);
     // font_size is advisory: we only honour it if a matching Montserrat
     // build-in is compiled. Anything else falls back to theme default.
-    if (w.kind.label.font_size > 0) {
-        ESP_LOGD(TAG, "label %s requested font_size=%d (using theme default)",
-                 w.id, (int)w.kind.label.font_size);
-    }
     return lbl;
 }
 
@@ -302,8 +302,12 @@ lv_obj_t *build_log(lv_obj_t *parent, const touchy_Widget &)
 
 void apply_style(lv_obj_t *obj, const touchy_Widget &w)
 {
+    ESP_LOGI(TAG, "apply_style id='%s' has_style=%d", w.id, (int)w.has_style);
     if (!w.has_style) return;
     const auto &s = w.style;
+    ESP_LOGI(TAG, "  bg_color=0x%06lx text_color=0x%06lx radius=%ld border_w=%ld pad=%ld",
+             (unsigned long)s.bg_color, (unsigned long)s.text_color,
+             (long)s.radius, (long)s.border_w, (long)s.pad);
     if (s.bg_color != 0) {
         lv_obj_set_style_bg_color(obj, color_from_u32(s.bg_color), 0);
         lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
@@ -346,6 +350,8 @@ void apply_grid_cell(lv_obj_t *obj, const touchy_Widget &w)
         col_span = w.cell.col_span > 0 ? w.cell.col_span : 1;
         row_span = w.cell.row_span > 0 ? w.cell.row_span : 1;
     }
+    ESP_LOGI(TAG, "apply_grid_cell id='%s' col=%ld row=%ld col_span=%ld row_span=%ld",
+             w.id, (long)col, (long)row, (long)col_span, (long)row_span);
     lv_obj_set_grid_cell(obj,
                          LV_GRID_ALIGN_STRETCH, col, col_span,
                          LV_GRID_ALIGN_STRETCH, row, row_span);

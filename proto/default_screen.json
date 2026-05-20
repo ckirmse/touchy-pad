@@ -10,7 +10,7 @@
     {
       "id": "msg",
       "cell": {"col": 0, "row": 0, "colSpan": 1, "rowSpan": 1},
-      "style": {"textColor": 16777215},
+      "style": {"bgColor": 65280, "textColor": 16777215},
       "label": {
         "text": "No screens configured. Please configure with the Touchy-Pad app.",
         "fontSize": 20
