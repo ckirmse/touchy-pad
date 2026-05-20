@@ -201,10 +201,26 @@ lv_obj_t *build_label(lv_obj_t *parent, const touchy_Widget &w)
 {
     lv_obj_t *lbl = lv_label_create(parent);
     lv_label_set_text(lbl, w.kind.label.text);
+    // LVGL 9 base object default is opaque white background; make labels
+    // transparent unless the caller explicitly sets a bg_color via Style.
+    lv_obj_set_style_bg_opa(lbl, LV_OPA_TRANSP, 0);
     // Ensure text is fully opaque regardless of theme defaults.
     lv_obj_set_style_text_opa(lbl, LV_OPA_COVER, 0);
-    ESP_LOGI(TAG, "build_label id='%s' text='%.40s' font_size=%d",
-             w.id, w.kind.label.text, (int)w.kind.label.font_size);
+    // Text alignment within the label's bounding box.
+    if (w.kind.label.text_align != touchy_TextAlign_TEXT_ALIGN_AUTO) {
+        static const lv_text_align_t map[] = {
+            LV_TEXT_ALIGN_AUTO,
+            LV_TEXT_ALIGN_LEFT,
+            LV_TEXT_ALIGN_CENTER,
+            LV_TEXT_ALIGN_RIGHT,
+        };
+        int idx = (int)w.kind.label.text_align;
+        if (idx >= 0 && idx < 4)
+            lv_obj_set_style_text_align(lbl, map[idx], 0);
+    }
+    ESP_LOGI(TAG, "build_label id='%s' text='%.40s' font_size=%d text_align=%d",
+             w.id, w.kind.label.text, (int)w.kind.label.font_size,
+             (int)w.kind.label.text_align);
     // font_size is advisory: we only honour it if a matching Montserrat
     // build-in is compiled. Anything else falls back to theme default.
     return lbl;
@@ -466,6 +482,11 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
         return false;
     }
 
+    // LVGL 9 creates screens with an opaque white background by default.
+    // Use black so transparent widgets show dark rather than white.
+    lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+
     if (S.has_layout) apply_layout(scr, S.layout);
     const bool absolute_layout =
         !S.has_layout || S.layout.kind == touchy_Layout_Kind_ABSOLUTE;
@@ -499,6 +520,7 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
         } else {
             apply_rect(obj, w, absolute_layout);
         }
+        if (w.centered) lv_obj_center(obj);
     }
 
     lv_screen_load(scr);

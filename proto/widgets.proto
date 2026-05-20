@@ -161,12 +161,21 @@ message Button {
     repeated Action on_click = 2;   // see widgets.options for max count
 }
 
+// Text alignment within a label widget. Maps directly to lv_text_align_t.
+enum TextAlign {
+    TEXT_ALIGN_AUTO   = 0;  // follow LVGL default / locale direction
+    TEXT_ALIGN_LEFT   = 1;
+    TEXT_ALIGN_CENTER = 2;
+    TEXT_ALIGN_RIGHT  = 3;
+}
+
 message Label {
     string text      = 1;
     // 0 = theme default. Otherwise: closest available Montserrat size
     // compiled into the firmware (see CONFIG_LV_FONT_MONTSERRAT_* in
     // firmware/sdkconfig.defaults).
-    int32  font_size = 2;
+    int32     font_size  = 2;
+    TextAlign text_align = 3;
 }
 
 message Slider {
@@ -234,6 +243,9 @@ message Widget {
     Style  style = 3;
     // Only meaningful when the enclosing screen's Layout.kind == GRID.
     GridCell cell = 4;
+    // If true, lv_obj_center() is called on the LVGL object after placement.
+    // Useful for centering a label inside its grid cell.
+    bool centered = 5;
     oneof kind {
         Button   button   = 10;
         Label    label    = 11;
