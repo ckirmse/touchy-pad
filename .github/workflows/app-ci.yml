@@ -86,7 +86,7 @@ jobs:
           source "$HOME/esp/esp-idf/export.sh"
           idf.py -C firmware set-target esp32s3
           idf.py -C firmware -DBOARD="${FIRMWARE_BOARD}" reconfigure
-          just firmware build
+          just firmware-build
 
       - name: Install dependencies
         run: poetry install --no-interaction
