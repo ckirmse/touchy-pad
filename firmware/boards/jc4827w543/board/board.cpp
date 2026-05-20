@@ -20,6 +20,15 @@ i2c_master_bus_handle_t board_get_i2c_bus(void)
     return s_i2c_bus;
 }
 
+// The backlight GPIO is configured as an output by display_init(). Toggling
+// it here is safe from any task; gpio_set_level() is not ISR-only.
+extern "C" void board_backlight_set(bool on)
+{
+    if (BOARD_LCD_GPIO_BACKLIGHT != GPIO_NUM_NC) {
+        gpio_set_level(BOARD_LCD_GPIO_BACKLIGHT, on ? 1 : 0);
+    }
+}
+
 extern "C" void board_init(void)
 {
     ESP_LOGI(TAG, "Initialising shared I2C bus (SCL=%d SDA=%d)",

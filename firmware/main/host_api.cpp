@@ -4,6 +4,7 @@
 
 #include "host_api.h"
 
+#include "backlight.h"
 #include "fs.h"
 #include "protobuf.h"
 #include "screens.h"
@@ -216,7 +217,15 @@ static void dispatch(const touchy_Command *cmd, touchy_Response *resp)
     }
 
     case touchy_Command_screen_wake_tag:
+        backlight_wake();
+        resp->code = touchy_ResultCode_RESULT_OK;
+        break;
+
     case touchy_Command_screen_sleep_timeout_tag:
+        backlight_set_timeout(cmd->cmd.screen_sleep_timeout.timeout_ms);
+        resp->code = touchy_ResultCode_RESULT_OK;
+        break;
+
     case touchy_Command_sys_reboot_bootloader_tag:
         ESP_LOGW(TAG, "command tag %u not yet implemented",
                  (unsigned)cmd->which_cmd);

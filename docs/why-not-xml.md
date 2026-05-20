@@ -83,7 +83,7 @@ s += toggle("mute",  on=False,            on_change="synth.mute")
 s.write("build/screens/synth.pb")          # nanopb-compatible binary
 ```
 
-A CLI wrapper (`touchy-pad screens push synth.py`) compiles the script, uploads each resulting `.pb` via the existing host-api file transport, and tells the device to reload.
+A CLI wrapper (`touchy-pad screen push synth.py`) compiles the script, uploads each resulting `.pb` via the existing host-api file transport, and tells the device to reload.
 
 ## Device-side renderer (`firmware/main/screens.cpp`)
 

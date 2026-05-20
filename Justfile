@@ -49,10 +49,14 @@ touchy_proto     := "proto/touchy.proto"
 touchy_opts      := "proto/touchy.options"
 widgets_proto    := "proto/widgets.proto"
 widgets_opts     := "proto/widgets.options"
+prefs_proto      := "proto/preferences.proto"
+prefs_opts       := "proto/preferences.options"
 py_touchy_out    := py_proto_dst + "/touchy_pb2.py"
 py_widgets_out   := py_proto_dst + "/widgets_pb2.py"
+py_prefs_out     := py_proto_dst + "/preferences_pb2.py"
 c_touchy_out     := c_proto_dst  + "/touchy.pb.c"
 c_widgets_out    := c_proto_dst  + "/widgets.pb.c"
+c_prefs_out      := c_proto_dst  + "/preferences.pb.c"
 
 # Regenerate both Python and C protobuf bindings (if stale).
 build-proto: build-proto-py build-proto-c build-default-screen
@@ -66,11 +70,14 @@ build-proto-py:
     set -euo pipefail
     touchy_stale=0
     widgets_stale=0
+    prefs_stale=0
     [ ! -f "{{py_touchy_out}}"  ] && touchy_stale=1
     [ ! -f "{{py_widgets_out}}" ] && widgets_stale=1
+    [ ! -f "{{py_prefs_out}}"   ] && prefs_stale=1
     [ "{{touchy_proto}}"  -nt "{{py_touchy_out}}"  ] && touchy_stale=1  || true
     [ "{{widgets_proto}}" -nt "{{py_widgets_out}}" ] && widgets_stale=1 || true
-    if [ $touchy_stale -eq 0 ] && [ $widgets_stale -eq 0 ]; then
+    [ "{{prefs_proto}}"   -nt "{{py_prefs_out}}"   ] && prefs_stale=1   || true
+    if [ $touchy_stale -eq 0 ] && [ $widgets_stale -eq 0 ] && [ $prefs_stale -eq 0 ]; then
         echo "build-proto-py: up to date"
         exit 0
     fi
@@ -78,8 +85,8 @@ build-proto-py:
     {{sys_python}} -m grpc_tools.protoc \
         -Iproto \
         --python_out={{py_proto_dst}} \
-        {{touchy_proto}} {{widgets_proto}}
-    echo "wrote {{py_touchy_out}} {{py_widgets_out}}"
+        {{touchy_proto}} {{widgets_proto}} {{prefs_proto}}
+    echo "wrote {{py_touchy_out}} {{py_widgets_out}} {{py_prefs_out}}"
 
 # Regenerate the embedded C bindings via nanopb iff any proto or options
 # file is newer than the generated .pb.c files.
@@ -88,13 +95,17 @@ build-proto-c:
     set -euo pipefail
     touchy_stale=0
     widgets_stale=0
+    prefs_stale=0
     [ ! -f "{{c_touchy_out}}"  ] && touchy_stale=1
     [ ! -f "{{c_widgets_out}}" ] && widgets_stale=1
+    [ ! -f "{{c_prefs_out}}"   ] && prefs_stale=1
     [ "{{touchy_proto}}"  -nt "{{c_touchy_out}}"  ] && touchy_stale=1  || true
     [ "{{touchy_opts}}"   -nt "{{c_touchy_out}}"  ] && touchy_stale=1  || true
     [ "{{widgets_proto}}" -nt "{{c_widgets_out}}" ] && widgets_stale=1 || true
     [ "{{widgets_opts}}"  -nt "{{c_widgets_out}}" ] && widgets_stale=1 || true
-    if [ $touchy_stale -eq 0 ] && [ $widgets_stale -eq 0 ]; then
+    [ "{{prefs_proto}}"   -nt "{{c_prefs_out}}"   ] && prefs_stale=1   || true
+    [ "{{prefs_opts}}"    -nt "{{c_prefs_out}}"   ] && prefs_stale=1   || true
+    if [ $touchy_stale -eq 0 ] && [ $widgets_stale -eq 0 ] && [ $prefs_stale -eq 0 ]; then
         echo "build-proto-c:  up to date"
         exit 0
     fi
@@ -103,8 +114,8 @@ build-proto-c:
     mkdir -p {{c_proto_dst}}
     cd proto && {{sys_python}} -m nanopb.generator.nanopb_generator \
         --output-dir=../{{c_proto_dst}} \
-        touchy.proto widgets.proto
-    echo "wrote {{c_touchy_out}} {{c_widgets_out}}"
+        touchy.proto widgets.proto preferences.proto
+    echo "wrote {{c_touchy_out}} {{c_widgets_out}} {{c_prefs_out}}"
 
 # Compile proto/default_screen.json (the firmware's built-in fallback
 # screen, shown when no host-uploaded screens are present) into a C++

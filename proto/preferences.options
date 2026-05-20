@@ -1,0 +1,6 @@
+# nanopb options for preferences.proto.
+#
+# All fields are scalars — no variable-length arrays or strings — so the
+# default FT_STATIC allocation with no size hints is correct. This file is
+# intentionally empty but kept alongside the other .options files for
+# consistency and to avoid "missing options" warnings from the generator.

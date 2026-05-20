@@ -21,6 +21,11 @@ void board_init(void);
 // boards that do not expose I2C to the touch controller.
 i2c_master_bus_handle_t board_get_i2c_bus(void);
 
+// Set the display backlight on (true) or off (false). The backlight GPIO /
+// IO-expander pin must already be configured by board_init(). Safe to call
+// from any task.
+void board_backlight_set(bool on);
+
 #ifdef __cplusplus
 }
 #endif

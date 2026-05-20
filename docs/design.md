@@ -123,7 +123,7 @@ directly via its C API — no XML, no `lv_xml`, no `lui-xml` port required.
   (`Screen`, `button(...)`, `label(...)`, `slider(...)`, `toggle(...)`,
   `image(...)`, `arc(...)`, `spacer(...)`, layout helpers
   `absolute()` / `row()` / `col()` / `grid(cols, gap)`).
-* CLI: `touchy screens push SCRIPT [--load NAME]` runs the Python file,
+* CLI: `touchy screen push SCRIPT [--load NAME]` runs the Python file,
   collects every `Screen` instance created, uploads them, and optionally
   switches to one.
 * Firmware: [`firmware/main/screens.cpp`](../firmware/main/screens.cpp).
@@ -255,7 +255,29 @@ buttons or sliders.
   occupying the right half, and a `log_line` strip along the bottom
   echoing each recognised gesture.
 
-## Stage 19: 
+## Stage 19: Backlight auto-sleep + host control
+
+Implement display backlight power management:
+
+* **Auto-sleep** — an `esp_timer` one-shot counts down from `screen_timeout_ms`
+  (default 0 = disabled).  When it fires `board_backlight_set(false)` turns the
+  panel off.
+* **Wake on touch** — an LVGL indev `LV_EVENT_PRESSED` callback calls
+  `backlight_touch_activity()`, which turns the backlight back on and resets the
+  timer.
+* **Persistence** — a new `proto/preferences.proto` `PreferencesFile` message is
+  stored in LittleFS at `prefs/prefs.pb` (nanopb encode/decode).  The Prefs
+  singleton loads it at boot and saves whenever `set_screen_timeout_ms()` is
+  called.
+* **Host commands** — `ScreenWakeCmd` → `backlight_wake()`; `ScreenSleepTimeoutCmd`
+  → `backlight_set_timeout(timeout_ms)` (immediately persisted to flash).
+* **New files**: `firmware/main/prefs.{h,cpp}`, `firmware/main/backlight.{h,cpp}`,
+  `proto/preferences.proto`, `proto/preferences.options`,
+  `firmware/main/proto/preferences.pb.{c,h}`,
+  `app/src/touchy_pad/_proto/preferences_pb2.py`.
+* **Board API**: added `board_backlight_set(bool on)` to `board.h`, implemented
+  in both board ports (GPIO for jc4827w543; CH422G IO expander for waveshare).
+* **`touch.h`**: added `touch_get_indev()` to both board touch drivers.
 
 ## Stage 21: Allow host PC to configure the button matrixes/screen layout
 * Use protocol buffers (nanopb?) to communicate between the host/device (over a custom USB characteristic)

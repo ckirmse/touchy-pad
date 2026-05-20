@@ -50,6 +50,13 @@ static void ch422_set_pin(uint8_t pin, bool level)
     ESP_ERROR_CHECK(ch422_write(s_ch422_wrio, s_wr_io_shadow));
 }
 
+// Toggle the backlight via the CH422G IO expander. Must be called from a
+// task context (not an ISR) because ch422_write() blocks on I2C.
+extern "C" void board_backlight_set(bool on)
+{
+    ch422_set_pin(BOARD_CH422G_IO_BACKLIGHT, on);
+}
+
 extern "C" void board_init(void)
 {
     ESP_LOGI(TAG, "Initialising shared I2C bus (SCL=%d SDA=%d)",

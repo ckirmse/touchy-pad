@@ -12,6 +12,8 @@ idf_component_register(
         "usb_hid.cpp"
         "host_api.cpp"
         "fs.cpp"
+        "prefs.cpp"
+        "backlight.cpp"
         "screens.cpp"
         "macros.cpp"
         "trackpad_widget.cpp"
@@ -20,6 +22,7 @@ idf_component_register(
         # proto/widgets.proto into firmware/main/proto/.
         "proto/touchy.pb.c"
         "proto/widgets.pb.c"
+        "proto/preferences.pb.c"
     INCLUDE_DIRS
         "."
         "proto"

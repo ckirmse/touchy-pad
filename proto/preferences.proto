@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Touchy-Pad per-device preferences.
+//
+// Persisted as `PreferencesFile` at `/prefs/prefs.pb` on the device
+// filesystem. The host never exchanges this message type over USB — it
+// configures device behaviour via the normal Command messages
+// (ScreenWakeCmd, ScreenSleepTimeoutCmd, …). The on-device `Prefs`
+// singleton reads/writes this file on boot and whenever a setting changes.
+//
+// nanopb field options live in `preferences.options`.
+
+syntax = "proto3";
+
+package touchy;
+
+// Persisted device preferences.
+message PreferencesFile {
+    // Schema version — increment on backward-incompatible changes.
+    enum Version {
+        option allow_alias = true;
+        UNSPECIFIED = 0;
+        V1 = 1;       // initial format: file_version + screen_timeout_ms
+        CURRENT = 1;  // alias: always equals the latest defined version
+    }
+
+    // Written on every save so forward migrations can detect old files.
+    Version file_version = 1;
+
+    // Auto-sleep backlight timeout in milliseconds. 0 = disabled (backlight
+    // stays on indefinitely). Set via ScreenSleepTimeoutCmd from the host.
+    uint32 screen_timeout_ms = 2;
+}

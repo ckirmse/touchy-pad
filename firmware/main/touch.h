@@ -20,6 +20,11 @@ extern "C" {
 // raw multi-point data (LVGL itself only forwards a single point).
 esp_lcd_touch_handle_t touch_init(lv_display_t *disp);
 
+// Returns the LVGL indev registered by touch_init(). Callers (e.g. main.cpp)
+// can use this to attach event callbacks that fire on any touch activity.
+// Returns NULL if touch_init() has not been called yet or failed.
+lv_indev_t *touch_get_indev(void);
+
 #ifdef __cplusplus
 }
 #endif

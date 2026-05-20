@@ -12,6 +12,10 @@
 
 static const char *TAG = "touch";
 
+static lv_indev_t *s_indev = nullptr;
+
+lv_indev_t *touch_get_indev(void) { return s_indev; }
+
 extern "C" esp_lcd_touch_handle_t touch_init(lv_display_t *disp)
 {
     ESP_LOGI(TAG, "Initialising GT911 (addr 0x%02x, RST=%d INT=%d)",
@@ -46,7 +50,8 @@ extern "C" esp_lcd_touch_handle_t touch_init(lv_display_t *disp)
     lvgl_port_touch_cfg_t lv_cfg = {};
     lv_cfg.disp   = disp;
     lv_cfg.handle = tp;
-    if (lvgl_port_add_touch(&lv_cfg) == nullptr) {
+    s_indev = lvgl_port_add_touch(&lv_cfg);
+    if (s_indev == nullptr) {
         ESP_LOGW(TAG, "lvgl_port_add_touch failed");
     }
     return tp;

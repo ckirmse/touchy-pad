@@ -41,29 +41,6 @@ def version() -> None:
 cli.add_command(version, name="getversion")
 
 
-@cli.command("screen-wake")
-def screen_wake() -> None:
-    """Turn the device backlight on (cancels any pending auto-sleep)."""
-    with _client() as c:
-        c.screen_wake()
-
-
-@cli.command("screen-sleep-timeout")
-@click.argument("timeout_ms", type=int)
-def screen_sleep_timeout(timeout_ms: int) -> None:
-    """Set the backlight auto-sleep timeout in milliseconds (0 disables)."""
-    with _client() as c:
-        c.screen_sleep_timeout(timeout_ms)
-
-
-@cli.command("screen-load")
-@click.argument("name")
-def screen_load(name: str) -> None:
-    """Switch the currently displayed screen."""
-    with _client() as c:
-        c.screen_load(name)
-
-
 @cli.command("file-reset")
 def file_reset() -> None:
     """Delete every file the host has uploaded to the device."""
@@ -126,16 +103,39 @@ def events() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Screens — protobuf-encoded layouts (see touchy_pad.screens)
+# Screen — backlight control, layout management, and screen authoring
 # ---------------------------------------------------------------------------
 
 
 @cli.group()
-def screens() -> None:
-    """Author and upload declarative screen layouts."""
+def screen() -> None:
+    """Manage screens: backlight, layout upload, and screen authoring."""
 
 
-@screens.command("push")
+@screen.command("wake")
+def screen_wake() -> None:
+    """Turn the device backlight on (cancels any pending auto-sleep)."""
+    with _client() as c:
+        c.screen_wake()
+
+
+@screen.command("set-timeout")
+@click.argument("seconds", type=float)
+def screen_set_timeout(seconds: float) -> None:
+    """Auto-sleep the backlight after SECONDS of no input (0 disables)."""
+    with _client() as c:
+        c.screen_sleep_timeout(round(seconds * 1000))
+
+
+@screen.command("load")
+@click.argument("name")
+def screen_load(name: str) -> None:
+    """Switch the currently displayed screen to NAME."""
+    with _client() as c:
+        c.screen_load(name)
+
+
+@screen.command("push")
 @click.argument(
     "script",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -185,7 +185,7 @@ def screens_push(script: Path, load_name: str | None, dry_run: bool) -> None:
             click.echo(f"loaded screen {load_name!r}")
 
 
-@screens.command("demo")
+@screen.command("demo")
 @click.option(
     "--listen",
     is_flag=True,

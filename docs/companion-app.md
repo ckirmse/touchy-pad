@@ -1,8 +1,62 @@
 # Companion App
-A python helper app and host-side API library to configure/manage the touchy-pad.
 
-FIXME
+The `app/` directory contains a Python library and CLI for talking to a connected
+Touchy-Pad over USB.  Install with `pip install -e app/` (or `poetry install`
+inside `app/`), then invoke the `touchy` command.
+
+## CLI reference
+
+```
+touchy [--version] [--help] <command> [args…]
+```
+
+### Top-level commands
+
+| Command | Description |
+|---------|-------------|
+| `touchy version` | Print device protocol & firmware version. |
+| `touchy events` | Stream `ActionHost` events from the device until Ctrl-C. |
+| `touchy file-reset` | Delete every file the host has uploaded to the device. |
+| `touchy file-save PATH FILE` | Upload FILE to the device at virtual path PATH. |
+| `touchy writefiles SRCDIR` | Mirror a local directory tree onto the device. |
+| `touchy reboot-bootloader` | Reboot the device into its USB DFU bootloader. |
+
+### `touchy screen` — backlight, layout, and screen authoring
+
+```
+touchy screen <subcommand> [args…]
+```
+
+| Subcommand | Description |
+|-----------|-------------|
+| `touchy screen wake` | Force the backlight on (cancels any pending auto-sleep). |
+| `touchy screen set-timeout SECONDS` | Auto-sleep backlight after SECONDS of no input; `0` disables. Accepts fractional seconds (e.g. `30`, `0.5`). |
+| `touchy screen load NAME` | Switch the currently displayed screen to NAME. |
+| `touchy screen push SCRIPT [--load NAME] [--dry-run]` | Compile a Python screen-definition script and upload every `Screen` it defines. Optionally activate one of them immediately with `--load`. |
+| `touchy screen demo [--listen] [--json]` | Upload and optionally run the built-in demo screen. |
+
+## Python library
+
+`TouchyClient` in `touchy_pad.client` is the high-level API:
+
+```python
+from touchy_pad.client import TouchyClient
+
+with TouchyClient.open() as c:
+    v = c.sys_version_get()
+    print(v.firmware_version_str)
+
+    c.screen_wake()
+    c.screen_sleep_timeout(30_000)   # 30 s in milliseconds
+    c.screen_load("home")
+
+    for evt in c.stream_events():
+        print(evt.host_code, evt.user_data)
+```
 
 ## Misc notes
 
-* Because events are sent from device to host, host API can be built from binding arbitrary python code to button actions
+* Because events are sent from device to host, host API can be built by binding
+  arbitrary Python code to button actions via `TouchyClient.on_host_event(code, fn)`.
+* The CLI uses `screen set-timeout SECONDS` (human-friendly seconds) which the library
+  converts to milliseconds before sending `ScreenSleepTimeoutCmd`.
