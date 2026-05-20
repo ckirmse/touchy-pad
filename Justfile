@@ -155,6 +155,30 @@ app-run *ARGS: build-proto-py
     cd app && poetry run touchy {{ARGS}}
 
 # ---------------------------------------------------------------------------
+# Versioning
+# ---------------------------------------------------------------------------
+
+# Increment the patch component of the semver in VERSION, bump the build
+# number, commit the change, tag it "vX.Y.Z", and push both the commit and
+# the tag to origin.  Requires a clean git index on the branch to be pushed.
+bump-version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ver=$(sed -n '1p' VERSION)
+    build=$(sed -n '2p' VERSION)
+    IFS='.' read -r major minor patch <<< "$ver"
+    new_ver="$major.$minor.$((patch + 1))"
+    new_build=$((build + 1))
+    printf '%s\n%s\n' "$new_ver" "$new_build" > VERSION
+    echo "Bumped: $ver → $new_ver  (build $new_build)"
+    git add VERSION
+    git commit -m "chore: bump version to v${new_ver}"
+    git tag "v${new_ver}"
+    git push
+    git push origin "v${new_ver}"
+    echo "✓ Tagged and pushed v${new_ver}"
+
+# ---------------------------------------------------------------------------
 # Firmware (firmware/) — ESP-IDF CMake build.
 # ---------------------------------------------------------------------------
 

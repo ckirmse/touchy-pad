@@ -12,7 +12,7 @@
 #include "pb_decode.h"
 #include "pb_encode.h"
 
-#include "esp_app_desc.h"
+#include "version.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -144,15 +144,8 @@ static void fill_sys_version(touchy_Response *resp)
     touchy_SysVersionResponse *v = &resp->payload.sys_version;
     v->protocol_version = TOUCHY_PROTOCOL_VERSION;
 
-    const esp_app_desc_t *app = esp_app_get_description();
-    // firmware_version is a numeric build id; we don't yet bake one into
-    // CMake, so synthesise a small hash of the version string for now.
-    uint32_t hash = 0;
-    for (const char *p = app->version; *p; ++p) {
-        hash = hash * 131u + (uint8_t)*p;
-    }
-    v->firmware_version = hash;
-    strncpy(v->firmware_version_str, app->version,
+    v->firmware_version = FIRMWARE_BUILD_NUMBER;
+    strncpy(v->firmware_version_str, FIRMWARE_VERSION_STR,
             sizeof(v->firmware_version_str) - 1);
     v->firmware_version_str[sizeof(v->firmware_version_str) - 1] = '\0';
 }

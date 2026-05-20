@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - "VERSION"
       - "app/**"
       - "firmware/**"
       - "proto/**"
@@ -11,6 +12,7 @@ on:
       - ".github/workflows/app-ci.yml"
   pull_request:
     paths:
+      - "VERSION"
       - "app/**"
       - "firmware/**"
       - "proto/**"
@@ -29,6 +31,10 @@ jobs:
         working-directory: app
     steps:
       - uses: actions/checkout@v4
+
+      - name: Read firmware version
+        working-directory: ${{ github.workspace }}
+        run: echo "FW_VERSION=$(sed -n '1p' VERSION)" >> "$GITHUB_ENV"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -88,6 +94,19 @@ jobs:
           idf.py -C firmware -DBOARD="${FIRMWARE_BOARD}" reconfigure
           just firmware-build
 
+      - name: Stage firmware binary
+        working-directory: ${{ github.workspace }}
+        run: |
+          cp firmware/build/touchy_pad_v2.bin \
+             "${FIRMWARE_BOARD}-${FW_VERSION}.bin"
+
+      - name: Upload firmware binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ env.FIRMWARE_BOARD }}-${{ env.FW_VERSION }}
+          path: ${{ github.workspace }}/${{ env.FIRMWARE_BOARD }}-${{ env.FW_VERSION }}.bin
+          if-no-files-found: error
+
       - name: Install dependencies
         run: poetry install --no-interaction
 
@@ -101,7 +120,6 @@ jobs:
         run: poetry build
 
       - name: Upload build artifacts
-        if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
         with:
           name: touchy-pad-dist

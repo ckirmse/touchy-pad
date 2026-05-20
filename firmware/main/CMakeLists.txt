@@ -23,6 +23,7 @@ idf_component_register(
     INCLUDE_DIRS
         "."
         "proto"
+        "${CMAKE_BINARY_DIR}"
     REQUIRES
         board
         esp_lcd

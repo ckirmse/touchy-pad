@@ -66,3 +66,57 @@ regenerates them from [`proto/`](../proto/).
 
 Run `cd app && poetry run pre-commit run --all-files` at any time to check
 the whole tree manually.
+
+## Firmware versioning
+
+The single source of truth is the **`VERSION`** file at the repo root:
+
+```
+0.1.0
+1
+```
+
+Line 1 is the semver base string; line 2 is a monotonically-increasing integer
+build number.  Both values are committed to source control.
+
+### How they are embedded in the binary
+
+`firmware/version.cmake` is included by the top-level `firmware/CMakeLists.txt`
+before `project()`.  It reads `VERSION`, queries `git status` and
+`git rev-parse`, then:
+
+* Sets `PROJECT_VER` (consumed by ESP-IDF → `esp_app_get_description()->version`).
+* Writes `firmware/build/version.h` (gitignored) via `configure_file`.
+
+`firmware/main/host_api.cpp` `#include`s that header and serves the constants
+over USB in the `SysVersionGetCmd` response:
+
+| Proto field | Source |
+|---|---|
+| `firmware_version` (uint32) | `FIRMWARE_BUILD_NUMBER` — the build number integer |
+| `firmware_version_str` | `FIRMWARE_VERSION_STR` — the full version string |
+
+### Clean vs. dirty builds
+
+| Tree state | `firmware_version_str` example |
+|---|---|
+| Clean (all changes committed) | `0.1.0` |
+| Dirty (uncommitted edits) | `0.1.0.dev47+a1b2c3d` |
+
+The dirty suffix follows PEP 440 local-version conventions:
+`dev<N>` where N is the total commit count, `+<hash>` is the short git hash.
+
+CMake re-runs configuration automatically when `VERSION` changes (tracked via a
+`configure_file COPYONLY` stamp), so a `just firmware-build` after a version
+bump picks up the new values without a manual `idf.py reconfigure`.
+
+### Releasing a new version
+
+```sh
+just bump-version
+```
+
+This increments the patch component of the semver and the build number, commits
+`VERSION`, creates a `vX.Y.Z` git tag, and pushes both the commit and the tag
+to origin.  The CI workflow uploads the built `.bin` as a
+`firmware-<board>-<version>` artifact on every push (including tagged releases).
