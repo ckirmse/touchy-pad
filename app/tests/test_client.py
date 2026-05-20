@@ -48,7 +48,7 @@ def test_sys_version_get(make_client):
         return _proto.Response(
             code=_proto.RESULT_OK,
             sys_version=_proto.SysVersionResponse(
-                protocol_version=2,
+                protocol_version=_proto.SysVersionResponse.CURRENT,
                 firmware_version=42,
                 firmware_version_str="0.0.42-test",
             ),
@@ -56,7 +56,7 @@ def test_sys_version_get(make_client):
 
     with make_client(server) as c:
         v = c.sys_version_get()
-        assert v.protocol_version == 2
+        assert v.protocol_version == _proto.SysVersionResponse.CURRENT
         assert v.firmware_version == 42
         assert v.firmware_version_str == "0.0.42-test"
 

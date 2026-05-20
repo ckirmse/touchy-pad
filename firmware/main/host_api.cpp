@@ -31,7 +31,7 @@ static const char *TAG = "host_api";
 // v2: stage 16 — Action repeated + ActionHost/ActionMacro variants,
 //     LvEvent.host_code field added; events delivered via host polling
 //     of EventConsumeCmd (no dedicated interrupt-IN mailbox endpoint).
-#define TOUCHY_PROTOCOL_VERSION  2
+#define TOUCHY_PROTOCOL_VERSION  touchy_SysVersionResponse_ProtocolVersion_CURRENT
 
 // Largest serialised Command we accept. The decoded `touchy_Command`
 // no longer reserves the FileSaveCmd payload statically (Stage 17 moved

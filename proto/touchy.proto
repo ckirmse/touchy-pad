@@ -109,7 +109,16 @@ message Command {
 
 // Reply to SysVersionGetCmd.
 message SysVersionResponse {
-    uint32 protocol_version = 1;    // increment on wire-incompatible changes
+    // Wire protocol version. Increment on any wire-incompatible change.
+    enum ProtocolVersion {
+        option allow_alias = true;
+        UNSPECIFIED = 0;
+        V1 = 1;  // stage 13 baseline: SysVersionGet + file/screen ops
+        V2 = 2;  // stage 16: Action repeated + ActionHost/ActionMacro variants,
+                 //           LvEvent.host_code added; events via host polling
+        CURRENT = 2;  // alias: always equals the latest defined version
+    }
+    ProtocolVersion protocol_version = 1;
     uint32 firmware_version = 2;    // monotonically-increasing build number
     string firmware_version_str = 3; // human-readable "1.2.3" or git hash
 }
