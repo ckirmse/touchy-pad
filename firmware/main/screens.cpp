@@ -326,6 +326,24 @@ void apply_rect(lv_obj_t *obj, const touchy_Widget &w, bool absolute_layout)
     lv_obj_set_size(obj, w_, h_);
 }
 
+// Place a widget inside a GRID-layout parent. The grid manager owns size
+// and position, so we only forward the cell spec from the protobuf
+// (defaulting to col 0 / row 0 / span 1x1) and ask LVGL to stretch the
+// widget across its assigned track(s).
+void apply_grid_cell(lv_obj_t *obj, const touchy_Widget &w)
+{
+    int32_t col = 0, row = 0, col_span = 1, row_span = 1;
+    if (w.has_cell) {
+        col      = w.cell.col;
+        row      = w.cell.row;
+        col_span = w.cell.col_span > 0 ? w.cell.col_span : 1;
+        row_span = w.cell.row_span > 0 ? w.cell.row_span : 1;
+    }
+    lv_obj_set_grid_cell(obj,
+                         LV_GRID_ALIGN_STRETCH, col, col_span,
+                         LV_GRID_ALIGN_STRETCH, row, row_span);
+}
+
 void apply_layout(lv_obj_t *scr, const touchy_Layout &layout)
 {
     switch (layout.kind) {
@@ -338,16 +356,35 @@ void apply_layout(lv_obj_t *scr, const touchy_Layout &layout)
         if (layout.gap > 0) lv_obj_set_style_pad_row(scr, layout.gap, 0);
         break;
     case touchy_Layout_Kind_GRID: {
-        // Even-cols grid: every column gets the same fr unit, every row sizes
-        // to content. We pre-size the descriptor for up to 16 columns; that's
-        // plenty for any sensible touch UI.
+        // Track templates. `cols` columns split the parent into equal
+        // fractional units; `rows` does the same vertically when > 0,
+        // otherwise we use a single content-sized row so the original
+        // (pre-stage-18) GRID behaviour is preserved.
+        //
+        // The descriptor arrays must outlive the call to
+        // lv_obj_set_grid_dsc_array — LVGL only stores the pointer.
+        // Since we have one active screen at a time we keep them as
+        // static buffers; the next screen_load just rewrites them.
         static int32_t col_dsc[17];
-        static int32_t row_dsc[2] = { LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST };
+        static int32_t row_dsc[17];
+        static int32_t row_dsc_content[2] = { LV_GRID_CONTENT,
+                                              LV_GRID_TEMPLATE_LAST };
         int cols = layout.cols > 0 ? layout.cols : 1;
         if (cols > 16) cols = 16;
         for (int i = 0; i < cols; i++) col_dsc[i] = LV_GRID_FR(1);
         col_dsc[cols] = LV_GRID_TEMPLATE_LAST;
-        lv_obj_set_grid_dsc_array(scr, col_dsc, row_dsc);
+
+        int32_t *row_ptr;
+        int rows = layout.rows;
+        if (rows > 0) {
+            if (rows > 16) rows = 16;
+            for (int i = 0; i < rows; i++) row_dsc[i] = LV_GRID_FR(1);
+            row_dsc[rows] = LV_GRID_TEMPLATE_LAST;
+            row_ptr = row_dsc;
+        } else {
+            row_ptr = row_dsc_content;
+        }
+        lv_obj_set_grid_dsc_array(scr, col_dsc, row_ptr);
         lv_obj_set_layout(scr, LV_LAYOUT_GRID);
         if (layout.gap > 0) {
             lv_obj_set_style_pad_column(scr, layout.gap, 0);
@@ -468,6 +505,8 @@ bool screens_load(const char *name)
     if (S.has_layout) apply_layout(scr, S.layout);
     const bool absolute_layout =
         !S.has_layout || S.layout.kind == touchy_Layout_Kind_ABSOLUTE;
+    const bool grid_layout =
+        S.has_layout && S.layout.kind == touchy_Layout_Kind_GRID;
 
     for (pb_size_t i = 0; i < S.widgets_count; i++) {
         const touchy_Widget &w = S.widgets[i];
@@ -490,7 +529,12 @@ bool screens_load(const char *name)
         }
         if (!obj) continue;
         apply_style(obj, w);
-        apply_rect(obj, w, absolute_layout);
+        if (grid_layout) {
+            // Grid manager owns size/position; we only place the cell.
+            apply_grid_cell(obj, w);
+        } else {
+            apply_rect(obj, w, absolute_layout);
+        }
     }
 
     lv_screen_load(scr);

@@ -115,8 +115,18 @@ message Action {
 
 // Top-level screen layout policy. `ABSOLUTE` (the default) keeps widgets
 // positioned exactly where their `Rect.x` / `Rect.y` say. `ROW` / `COL`
-// use lv_obj_set_flex_flow; `GRID` uses an even `cols`-wide grid with
-// `gap`-pixel spacing between cells.
+// use lv_obj_set_flex_flow; `GRID` is the LVGL grid layout (see
+// https://lvgl.io/docs/open/examples/layouts/grid).
+//
+// Under GRID:
+//   * The screen is divided into `cols` columns and `rows` rows, each one
+//     LV_GRID_FR(1) wide/tall (i.e. equal share of the parent). If `rows`
+//     is zero the row track sizes to content, matching the original
+//     stage-15 behaviour.
+//   * Every widget should carry a `GridCell` selecting its placement;
+//     widgets without one default to (col=0, row=0).
+//   * Widgets stretch to fill their assigned cell(s); use the
+//     widget's `style.pad` for inner padding.
 message Layout {
     enum Kind {
         ABSOLUTE = 0;
@@ -127,6 +137,17 @@ message Layout {
     Kind  kind = 1;
     int32 cols = 2;       // GRID only
     int32 gap  = 3;       // pixels between children (ROW/COL/GRID)
+    int32 rows = 4;       // GRID only; 0 = CONTENT-sized single row track
+}
+
+// Grid placement for a widget whose parent uses Layout.kind == GRID.
+// `col_span` / `row_span` default to 1 when zero. Widgets without a
+// `GridCell` land in (col=0, row=0) with span 1x1.
+message GridCell {
+    int32 col      = 1;
+    int32 row      = 2;
+    int32 col_span = 3;
+    int32 row_span = 4;
 }
 
 // ----- Widget kinds -----
@@ -211,6 +232,8 @@ message Widget {
     string id    = 1;
     Rect   rect  = 2;
     Style  style = 3;
+    // Only meaningful when the enclosing screen's Layout.kind == GRID.
+    GridCell cell = 4;
     oneof kind {
         Button   button   = 10;
         Label    label    = 11;

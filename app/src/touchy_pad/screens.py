@@ -37,6 +37,7 @@ __all__ = [
     "row",
     "col",
     "grid",
+    "cell",
     "rect",
     "style",
     "action",
@@ -75,11 +76,48 @@ def col(gap: int = 0) -> _proto.Layout:
     return _proto.Layout(kind=_proto.Layout.COL, gap=gap)
 
 
-def grid(cols: int, gap: int = 0) -> _proto.Layout:
-    """Even ``cols``-wide grid with ``gap`` pixels between cells."""
+def grid(cols: int, rows: int = 0, gap: int = 0) -> _proto.Layout:
+    """LVGL grid layout.
+
+    Divides the parent into ``cols`` equal-width columns (LV_GRID_FR(1)
+    each). If ``rows`` is non-zero, also divides the parent into
+    ``rows`` equal-height rows; otherwise a single content-sized row
+    track is used (the original Stage 15 behaviour). Use :func:`cell`
+    to place widgets into specific (col, row) coordinates with
+    optional spans.
+
+    See https://lvgl.io/docs/open/examples/layouts/grid for the
+    underlying LVGL semantics.
+    """
     if cols < 1:
         raise ValueError("grid cols must be >= 1")
-    return _proto.Layout(kind=_proto.Layout.GRID, cols=cols, gap=gap)
+    if rows < 0:
+        raise ValueError("grid rows must be >= 0")
+    return _proto.Layout(kind=_proto.Layout.GRID, cols=cols,
+                         rows=rows, gap=gap)
+
+
+def cell(
+    widget: _proto.Widget,
+    col: int = 0,
+    row: int = 0,
+    col_span: int = 1,
+    row_span: int = 1,
+) -> _proto.Widget:
+    """Place ``widget`` inside a grid-layout parent and return it.
+
+    Only meaningful when the enclosing :class:`Screen` was created
+    with a :func:`grid` layout. Span defaults to 1x1.
+    """
+    if col < 0 or row < 0:
+        raise ValueError("grid cell col/row must be >= 0")
+    if col_span < 1 or row_span < 1:
+        raise ValueError("grid cell spans must be >= 1")
+    widget.cell.col = col
+    widget.cell.row = row
+    widget.cell.col_span = col_span
+    widget.cell.row_span = row_span
+    return widget
 
 
 def rect(x: int = 0, y: int = 0, w: int = 0, h: int = 0) -> _proto.Rect:
@@ -433,74 +471,58 @@ def build_demo_screen(name: str = "demo") -> Screen:
     """Build a sample screen exercising stages 16 and 18.
 
     Used by the ``touchy screens demo`` CLI subcommand as a smoke test
-    for the action pipeline and the on-device trackpad widget. Layout
-    is ABSOLUTE so the left/right split is exact; the firmware's
-    default screen size is 800x480 (Waveshare 7") but the right-half
-    rectangle works fine on smaller displays too — LVGL just clips.
+    for the action pipeline and the on-device trackpad widget.
+
+    Layout is a 2-column / 6-row LVGL :func:`grid`. The grid manager
+    sizes every track to the parent (LV_GRID_FR(1) each), so the
+    layout adapts to the display resolution without any hard-coded
+    pixel coordinates.
 
     Wiring:
 
-    * Left column (buttons / slider / checkbox):
-        - "hello" button — a device-side macro that types ``"hi"`` over
+    * Left column (rows 0-4): title label, two buttons, a slider, and
+      a checkbox.
+        - "hello" button → device-side macro that types ``"hi"`` over
           USB HID (no host round-trip).
-        - "ping" button — host action 0x100; demo CLI prints incoming
-          events.
-        - slider — host action 0x101 (extra carries int32 LE).
-        - checkbox — host action 0x102 (extra is 1 byte).
-
-    * Right half: a :func:`trackpad` for HID mouse output.
-
-    * Bottom strip: a :func:`log_line` that mirrors the device's most
-      recent log message (e.g. each recognised trackpad gesture).
+        - "ping" button → host action 0x100 (demo CLI prints incoming
+          events).
+        - slider        → host action 0x101 (extra carries int32 LE).
+        - checkbox      → host action 0x102 (extra is 1 byte).
+    * Right column (rows 0-4, ``row_span=5``): the :func:`trackpad`
+      surface for USB HID mouse output.
+    * Bottom strip (row 5, ``col_span=2``): a :func:`log_line` that
+      mirrors the device's most recent log message — e.g. each
+      recognised trackpad gesture.
     """
     from . import macros as m
     from . import hid_keys as k
 
-    # Logical screen size used by the layout below. Picked to match the
-    # my small test LCD
-    W, H = 480, 272
-    log_h = 30
-    pad = 8
-    left_w = W // 2 - pad
-    right_x = W // 2 + pad // 2
-
-    s = Screen(name, layout=absolute())
+    s = Screen(name, layout=grid(cols=2, rows=6, gap=8))
 
     # ── left column: stacked control widgets ───────────────────────────
-    s += label(
-        "title",
-        text="Touchy-Pad demo",
-        font_size=24,
-        rect=rect(pad, pad, left_w, 32),
-        style=style(text_color=0xFFFFFF),
-    )
-    s += button(
-        "hello",
-        text="Type 'hi'",
-        on_click=macro_action([
-            m.key_tap(k.KEY_H, k.MOD_LSHIFT),
-            m.key_tap(k.KEY_I),
-        ]),
-        rect=rect(pad, 56, left_w, 48),
-    )
-    s += button("ping", text="Ping host", on_click=host_action(0x100),
-                rect=rect(pad, 116, left_w, 48))
-    s += slider("level", min=0, max=100, value=42,
-                on_change=host_action(0x101),
-                rect=rect(pad, 184, left_w, 20))
-    s += checkbox("enable", text="Enabled", checked=True,
-                  on_change=host_action(0x102),
-                  rect=rect(pad, 224, left_w, 32))
+    s += cell(label("title", text="Touchy-Pad demo", font_size=24,
+                    style=style(text_color=0xFFFFFF)),
+              col=0, row=0)
+    s += cell(button("hello", text="Type 'hi'",
+                     on_click=macro_action([
+                         m.key_tap(k.KEY_H, k.MOD_LSHIFT),
+                         m.key_tap(k.KEY_I),
+                     ])),
+              col=0, row=1)
+    s += cell(button("ping", text="Ping host", on_click=host_action(0x100)),
+              col=0, row=2)
+    s += cell(slider("level", min=0, max=100, value=42,
+                     on_change=host_action(0x101)),
+              col=0, row=3)
+    s += cell(checkbox("enable", text="Enabled", checked=True,
+                       on_change=host_action(0x102)),
+              col=0, row=4)
 
-    # ── right half: multitouch trackpad ────────────────────────────────
-    s += trackpad(
-        "pad",
-        rect=rect(right_x, pad, W // 2 - pad - pad // 2,
-                  H - log_h - pad * 2),
-    )
+    # ── right column: multitouch trackpad spans rows 0..4 ──────────────
+    s += cell(trackpad("pad"), col=1, row=0, row_span=5)
 
-    # ── bottom strip: shared log sink readout ──────────────────────────
-    s += log_line("log", rect=rect(0, H - log_h, W, log_h))
+    # ── bottom strip: log readout spans both columns ───────────────────
+    s += cell(log_line("log"), col=0, row=5, col_span=2)
     return s
 
 
