@@ -170,8 +170,11 @@ bump-version:
     new_ver="$major.$minor.$((patch + 1))"
     new_build=$((build + 1))
     printf '%s\n%s\n' "$new_ver" "$new_build" > VERSION
+    # Keep app/pyproject.toml in sync — the regex matches only the bare
+    # semver on the [tool.poetry] version line, not dependency version specs.
+    sed -i "s/^version = \"[0-9][0-9.]*\"/version = \"${new_ver}\"/" app/pyproject.toml
     echo "Bumped: $ver → $new_ver  (build $new_build)"
-    git add VERSION
+    git add VERSION app/pyproject.toml
     git commit -m "chore: bump version to v${new_ver}"
     git tag "v${new_ver}"
     git push
