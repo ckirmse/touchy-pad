@@ -22,6 +22,5 @@ touchy.FileSaveCmd.data                type:FT_POINTER
 touchy.SysVersionResponse.firmware_version_str  max_size:32
 
 # Event payloads — the host-assigned user_data string is typically a short
-# unique identifier; extra is a per-event scratch buffer.
+# unique identifier; widget_value scalars need no size hint.
 touchy.LvEvent.user_data               max_size:32
-touchy.LvEvent.extra                   max_size:32

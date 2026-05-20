@@ -117,8 +117,8 @@ class TouchyClient:
         """Register a callback for incoming `ActionHost` events with `host_code == code`.
 
         The callback receives the full :class:`_proto.LvEvent` so it can
-        inspect ``user_data`` (the firing widget's id) and ``extra`` (the
-        widget's current value, packed little-endian).
+        inspect ``user_data`` (the firing widget's id) and the ``state``
+        oneof (``value`` for sliders, ``checked`` for switches/checkboxes).
         """
         self._host_handlers[code] = handler
 

@@ -110,10 +110,17 @@ def events() -> None:
     with _client() as c:
         try:
             for evt in c.stream_events():
-                extra = evt.extra.hex() if evt.extra else ""
+                which = evt.WhichOneof("state")
+                if which == "value":
+                    state_str = f"value={evt.value}"
+                elif which == "checked":
+                    state_str = f"checked={evt.checked}"
+                else:
+                    state_str = ""
                 click.echo(
                     f"event code={evt.code} host_code=0x{evt.host_code:x} "
-                    f"widget={evt.user_data!r} extra={extra}"
+                    f"widget={evt.user_data!r}"
+                    + (f" {state_str}" if state_str else "")
                 )
         except KeyboardInterrupt:
             pass
@@ -226,14 +233,10 @@ def screens_demo(listen: bool, as_json: bool) -> None:
                 click.echo(f"[ping]   widget={evt.user_data!r}")
 
             def on_level(evt):
-                # int32 LE
-                import struct
-                value = struct.unpack("<i", evt.extra)[0] if len(evt.extra) >= 4 else None
-                click.echo(f"[slider] widget={evt.user_data!r} value={value}")
+                click.echo(f"[slider] widget={evt.user_data!r} value={evt.value}")
 
             def on_enable(evt):
-                state = bool(evt.extra[0]) if evt.extra else None
-                click.echo(f"[check]  widget={evt.user_data!r} on={state}")
+                click.echo(f"[check]  widget={evt.user_data!r} on={evt.checked}")
 
             c.on_host_event(0x100, on_ping)
             c.on_host_event(0x101, on_level)

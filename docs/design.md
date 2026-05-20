@@ -200,7 +200,7 @@ What stayed `FT_STATIC`:
 
 * All widget text fields (`Button.text`, `Label.text`, …): tiny, accessed
   on every LVGL builder, and a `NULL` deref check would just add noise.
-* `LvEvent.user_data` / `LvEvent.extra`: copied by value through the
+* `LvEvent.user_data` / `LvEvent.state`: copied by value through the
   FreeRTOS event queue.
 * `SysVersionResponse.firmware_version_str`, `FileSaveCmd.path`,
   `ScreenLoadCmd.name`: small bounded strings used in hot paths.

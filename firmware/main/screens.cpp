@@ -104,21 +104,20 @@ struct ActionSlot {
     const touchy_Action *actions;
     pb_size_t            actions_count;
     // Pointer-to-function so the same dispatch path handles every widget
-    // kind; returns the bytes-written into `extra_out` (0 .. 32).
-    size_t (*read_value)(lv_obj_t *obj, uint8_t *extra_out);
+    // kind; populates the widget_value oneof in `evt`.
+    void (*set_value)(lv_obj_t *obj, touchy_LvEvent *evt);
 };
 
-size_t read_value_none(lv_obj_t *, uint8_t *)        { return 0; }
-size_t read_value_slider(lv_obj_t *obj, uint8_t *out)
+void set_value_none(lv_obj_t *, touchy_LvEvent *)  {}
+void set_value_slider(lv_obj_t *obj, touchy_LvEvent *evt)
 {
-    int32_t v = lv_slider_get_value(obj);
-    memcpy(out, &v, sizeof(v));   // little-endian on xtensa / risc-v
-    return sizeof(v);
+    evt->which_state = touchy_LvEvent_value_tag;
+    evt->state.value = lv_slider_get_value(obj);
 }
-size_t read_value_switch(lv_obj_t *obj, uint8_t *out)
+void set_value_switch(lv_obj_t *obj, touchy_LvEvent *evt)
 {
-    out[0] = lv_obj_has_state(obj, LV_STATE_CHECKED) ? 1 : 0;
-    return 1;
+    evt->which_state = touchy_LvEvent_checked_tag;
+    evt->state.checked = lv_obj_has_state(obj, LV_STATE_CHECKED);
 }
 
 void widget_event_cb(lv_event_t *e)
@@ -139,7 +138,7 @@ void widget_event_cb(lv_event_t *e)
             evt.code = (uint32_t)code;
             snprintf(evt.user_data, sizeof(evt.user_data), "%s", slot->widget_id);
             evt.host_code = act.kind.host.code;
-            evt.extra.size = (pb_size_t)slot->read_value(obj, evt.extra.bytes);
+            slot->set_value(obj, &evt);
             host_api_post_event(&evt);
             break;
         }
@@ -163,7 +162,7 @@ void attach_actions(lv_obj_t *obj,
                     const touchy_Action *actions,
                     pb_size_t actions_count,
                     lv_event_code_t code,
-                    size_t (*read_value)(lv_obj_t *, uint8_t *))
+                    void (*set_value)(lv_obj_t *, touchy_LvEvent *))
 {
     if (actions_count == 0) return;
     auto *slot = new (std::nothrow) ActionSlot{};
@@ -174,7 +173,7 @@ void attach_actions(lv_obj_t *obj,
     snprintf(slot->widget_id, sizeof(slot->widget_id), "%s", widget_id);
     slot->actions       = actions;
     slot->actions_count = actions_count;
-    slot->read_value    = read_value;
+    slot->set_value      = set_value;
     lv_obj_add_event_cb(obj, widget_event_cb, code, slot);
     lv_obj_add_event_cb(obj, widget_delete_cb, LV_EVENT_DELETE, slot);
 }
@@ -193,7 +192,7 @@ lv_obj_t *build_button(lv_obj_t *parent, const touchy_Widget &w)
     }
     attach_actions(btn, w.id,
                    w.kind.button.on_click, w.kind.button.on_click_count,
-                   LV_EVENT_CLICKED, read_value_none);
+                   LV_EVENT_CLICKED, set_value_none);
     return btn;
 }
 
@@ -236,7 +235,7 @@ lv_obj_t *build_slider(lv_obj_t *parent, const touchy_Widget &w)
     lv_slider_set_value(s, w.kind.slider.value, LV_ANIM_OFF);
     attach_actions(s, w.id,
                    w.kind.slider.on_change, w.kind.slider.on_change_count,
-                   LV_EVENT_VALUE_CHANGED, read_value_slider);
+                   LV_EVENT_VALUE_CHANGED, set_value_slider);
     return s;
 }
 
@@ -246,7 +245,7 @@ lv_obj_t *build_switch(lv_obj_t *parent, const touchy_Widget &w)
     if (w.kind.toggle.on) lv_obj_add_state(sw, LV_STATE_CHECKED);
     attach_actions(sw, w.id,
                    w.kind.toggle.on_change, w.kind.toggle.on_change_count,
-                   LV_EVENT_VALUE_CHANGED, read_value_switch);
+                   LV_EVENT_VALUE_CHANGED, set_value_switch);
     return sw;
 }
 
@@ -259,7 +258,7 @@ lv_obj_t *build_checkbox(lv_obj_t *parent, const touchy_Widget &w)
     if (w.kind.checkbox.checked) lv_obj_add_state(cb, LV_STATE_CHECKED);
     attach_actions(cb, w.id,
                    w.kind.checkbox.on_change, w.kind.checkbox.on_change_count,
-                   LV_EVENT_VALUE_CHANGED, read_value_switch);
+                   LV_EVENT_VALUE_CHANGED, set_value_switch);
     return cb;
 }
 

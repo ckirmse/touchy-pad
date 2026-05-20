@@ -142,21 +142,23 @@ message Response {
 // are handled entirely device-side and never enter the queue.
 //
 // Fields:
-//   * `code`       — `lv_event_code_t` value
-//                    (https://lvgl.io/docs/open/api/core/lv_event_h).
-//   * `user_data`  — the originating `Widget.id` (so the host knows which
-//                    widget fired without consulting a side table).
-//   * `host_code`  — the `ActionHost.code` from the layout that triggered
-//                    the forward; host libraries dispatch on this to find
-//                    the registered Python handler.
-//   * `extra`      — per-widget current value packed as little-endian:
-//                    sliders: int32 value
-//                    switches/checkboxes: single byte 0/1
-//                    buttons: empty
+//   * `code`          — `lv_event_code_t` value
+//                       (https://lvgl.io/docs/open/api/core/lv_event_h).
+//   * `user_data`     — the originating `Widget.id` (so the host knows which
+//                       widget fired without consulting a side table).
+//   * `host_code`     — the `ActionHost.code` from the layout that triggered
+//                       the forward; host libraries dispatch on this to find
+//                       the registered Python handler.
+//   * `state`         — per-widget current value (unset for simple buttons):
+//                         `value`   — slider: current int32 position.
+//                         `checked` — switch / checkbox: checked state.
 message LvEvent {
     uint32 code      = 1;
     string user_data = 2;
-    bytes  extra     = 3;
+    oneof state {
+        int32 value   = 3;  // slider: current position
+        bool  checked = 5;  // switch / checkbox: checked state
+    }
     uint32 host_code = 4;
 }
 

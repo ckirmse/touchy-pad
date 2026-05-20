@@ -62,7 +62,7 @@ protocol v2; previously wrapped in `Event`).
 
 * `code` — mirrors `lv_event_code_t` (LV_EVENT_CLICKED, LV_EVENT_VALUE_CHANGED, ...).
 * `user_data` — the widget id from the layout.
-* `extra` — per-event payload bytes (e.g. a slider's current value packed little-endian).
+* `state` — per-widget current value oneof (`value` for sliders, `checked` for switches/checkboxes; unset for buttons).
 * `host_code` *(Stage 16)* — for `ActionHost` events, the `uint32` code
   the application assigned. Use `TouchyClient.on_host_event(code, fn)`
   to dispatch on it.
