@@ -80,9 +80,8 @@ jobs:
 
       - name: Configure and build firmware
         working-directory: ${{ github.workspace }}
-        env:
-          SYS_PYTHON: python3
         run: |
+          export SYS_PYTHON="${pythonLocation}/bin/python3"
           just build-proto-c
           source "$HOME/esp/esp-idf/export.sh"
           idf.py -C firmware set-target esp32s3
