@@ -7,12 +7,14 @@
 #include "fs.h"
 #include "screens.h"
 #include "touchy.pb.h"
+#include "usb_hid.h"
 #include "pb_decode.h"
 #include "pb_encode.h"
 
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "tinyusb.h"
@@ -24,7 +26,11 @@ static const char *TAG = "host_api";
 
 // Wire protocol version. Bump when the on-the-wire framing or any oneof
 // numbering changes in a way that breaks existing host clients.
-#define TOUCHY_PROTOCOL_VERSION  1
+// v1: stage 13 baseline (SysVersionGet + file/screen ops).
+// v2: stage 16 — Action repeated + ActionHost/ActionMacro variants,
+//     LvEvent.host_code field added; events delivered via host polling
+//     of EventConsumeCmd (no dedicated interrupt-IN mailbox endpoint).
+#define TOUCHY_PROTOCOL_VERSION  2
 
 // Largest serialised Command we accept. Bounded by the nanopb option sizes
 // in proto/touchy.options (ImageSaveCmd.data is the dominant contributor at
@@ -36,6 +42,35 @@ static SemaphoreHandle_t s_rx_sem;            // signalled by tud_vendor_rx_cb
 static TaskHandle_t      s_task;
 static uint8_t           s_rx_buf[HOST_API_RX_MAX];
 static uint8_t           s_tx_buf[HOST_API_TX_MAX];
+
+// ---------------------------------------------------------------------------
+// Stage 16 — event queue.
+//
+// Widgets with an `ActionHost` event_cb push fully-formed `touchy_LvEvent`
+// values onto this queue; the host drains them by polling repeatedly with
+// `EventConsumeCmd` on the vendor bulk endpoint pair. The ESP32-S3 USB-OTG
+// controller only supports 5 concurrent IN endpoints (EP0 + CDC notif +
+// CDC bulk-IN + HID + vendor bulk-IN), so there is no budget for a
+// dedicated interrupt-IN "event ready" mailbox.
+// ---------------------------------------------------------------------------
+
+#define EVENT_QUEUE_DEPTH  16
+
+static QueueHandle_t s_evt_queue;
+
+extern "C" void host_api_post_event(const struct _touchy_LvEvent *evt)
+{
+    if (!s_evt_queue || !evt) return;
+    touchy_LvEvent copy = *evt;
+    // Drop the oldest event when the queue is full so a busy widget can
+    // never wedge the dispatcher.
+    if (xQueueSend(s_evt_queue, &copy, 0) != pdTRUE) {
+        touchy_LvEvent discard;
+        xQueueReceive(s_evt_queue, &discard, 0);
+        xQueueSend(s_evt_queue, &copy, 0);
+        ESP_LOGW(TAG, "event queue overflow, oldest discarded");
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Vendor endpoint I/O helpers (blocking on the dispatcher task)
@@ -167,9 +202,22 @@ static void dispatch(const touchy_Command *cmd, touchy_Response *resp)
                          : touchy_ResultCode_RESULT_NOT_FOUND;
         break;
 
+    case touchy_Command_event_consume_tag: {
+        touchy_LvEvent evt;
+        if (s_evt_queue && xQueueReceive(s_evt_queue, &evt, 0) == pdTRUE) {
+            resp->code          = touchy_ResultCode_RESULT_OK;
+            resp->which_payload = touchy_Response_event_consume_tag;
+            resp->payload.event_consume.has_event = true;
+            resp->payload.event_consume.event     = evt;
+        } else {
+            // Empty queue — host will stop draining on this code.
+            resp->code = touchy_ResultCode_RESULT_NOT_FOUND;
+        }
+        break;
+    }
+
     case touchy_Command_screen_wake_tag:
     case touchy_Command_screen_sleep_timeout_tag:
-    case touchy_Command_event_consume_tag:
     case touchy_Command_sys_reboot_bootloader_tag:
         ESP_LOGW(TAG, "command tag %u not yet implemented",
                  (unsigned)cmd->which_cmd);
@@ -261,6 +309,7 @@ extern "C" void host_api_start(void)
 {
     if (s_task) return;
     s_rx_sem = xSemaphoreCreateBinary();
+    s_evt_queue = xQueueCreate(EVENT_QUEUE_DEPTH, sizeof(touchy_LvEvent));
     // 8 KB stack: pb_decode of an ImageSaveCmd uses static buffers (the
     // generated struct is heap/.bss), so this is mostly for nanopb's small
     // call stack. Pin to APP CPU to keep TinyUSB on the PRO CPU.

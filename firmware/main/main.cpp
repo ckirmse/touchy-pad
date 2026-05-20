@@ -5,6 +5,7 @@
 #include "board.h"
 #include "display.h"
 #include "fs.h"
+#include "macros.h"
 #include "screens.h"
 #include "touch.h"
 #include "usb_hid.h"
@@ -35,8 +36,12 @@ extern "C" void app_main(void)
     // safe to call before LVGL is up because no LVGL APIs are touched yet.
     screens_init();
 
+    // Spawn the macro replay task (stage 16). Safe to call before TinyUSB
+    // is fully ready — the runner blocks on its queue until macros arrive.
+    macros_init();
+
     // Give enough time for user to open a debug serial port to our board
-    vTaskDelay(pdMS_TO_TICKS(5000));
+    //vTaskDelay(pdMS_TO_TICKS(5000));
 
     board_init();
     lv_display_t *disp = display_init();

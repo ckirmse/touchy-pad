@@ -39,11 +39,13 @@ class DeviceNotFoundError(TransportError):
 class Transport(ABC):
     """Abstract bidirectional message transport.
 
-    Three logical channels exist (mapped onto USB endpoints by the concrete
-    subclass):
+    Two logical channels exist (mapped onto USB bulk endpoints by the
+    concrete subclass):
       * ``send_command(payload)`` — host → device, bulk OUT.
       * ``recv_response(timeout)`` — device → host, bulk IN.
-      * ``recv_event(timeout)`` — device → host, interrupt IN.
+
+    Events are delivered by polling ``EventConsumeCmd`` over the same
+    command/response pair (see ``docs/host-api.md``).
 
     ``payload`` is the already-serialised protobuf message; framing
     (length prefix, endpoint selection) is handled here.
@@ -54,9 +56,6 @@ class Transport(ABC):
 
     @abstractmethod
     def recv_response(self, timeout_ms: int = 2000) -> bytes: ...
-
-    @abstractmethod
-    def recv_event(self, timeout_ms: int = 0) -> bytes | None: ...
 
     @abstractmethod
     def close(self) -> None: ...
@@ -103,6 +102,41 @@ def _unpack(buf: bytes) -> bytes:
 # pyusb's bulk_read/bulk_write paths are concerned.
 _HOST_DEV_USB_ROOT = "/host/dev/bus/usb"
 _LIBUSB_ERROR_NO_DEVICE = 19  # pyusb maps LIBUSB_ERROR_NO_DEVICE → errno 19
+_LIBUSB_ERROR_NOT_FOUND = 2   # pyusb maps LIBUSB_ERROR_NOT_FOUND → errno 2
+
+# Linux usbfs ioctl numbers. Computed at module import time from the
+# kernel ABI in <linux/usbdevice_fs.h>. We use these to detach kernel
+# drivers (cdc_acm, usbhid) and claim interfaces ourselves, because
+# `libusb_claim_interface()` is broken on devices opened via
+# `libusb_wrap_sys_device()` in libusb 1.0.26 (it returns
+# LIBUSB_ERROR_NOT_FOUND on every interface, even valid ones).
+
+# USBDEVFS_DISCONNECT_CLAIM = _IOR('U', 27, struct usbdevfs_disconnect_claim)
+# struct is { unsigned int interface; unsigned int flags; char driver[256]; }
+# → 4 + 4 + 256 = 264 bytes; direction = read; type 'U' = 0x55; nr = 27.
+_USBDEVFS_DISCONNECT_CLAIM = (2 << 30) | (264 << 16) | (ord("U") << 8) | 27
+
+
+def _usbfs_disconnect_claim(fd: int, ifnum: int) -> None:
+    """Disconnect any kernel driver bound to ``ifnum`` and claim it for ``fd``.
+
+    Silently returns on any errno: the device may not have a kernel
+    driver bound to the interface (in which case the ioctl still
+    succeeds), the interface number may be out of range, or the kernel
+    may simply not implement the ioctl on the running version.
+    """
+    import fcntl
+
+    # struct usbdevfs_disconnect_claim — 264 bytes laid out as
+    # uint32 interface; uint32 flags; char driver[256];
+    buf = bytearray(264)
+    buf[0:4] = ifnum.to_bytes(4, "little")
+    buf[4:8] = (0).to_bytes(4, "little")  # flags = 0 → disconnect any driver
+    try:
+        fcntl.ioctl(fd, _USBDEVFS_DISCONNECT_CLAIM, bytes(buf))
+    except OSError:
+        pass
+
 
 
 def _install_host_dev_fallback() -> None:
@@ -163,6 +197,12 @@ def _install_host_dev_fallback() -> None:
 
         self.handle = _lb._libusb_device_handle()
         self.devid = dev.devid
+        # Detach kernel drivers from every plausible interface number on
+        # this device's fd, claiming each one for us. Has to happen on
+        # the fd we hand to libusb (claims are per-fd), and must happen
+        # before libusb starts driving the device.
+        for ifnum in range(8):
+            _usbfs_disconnect_claim(fd, ifnum)
         rv = lib.libusb_wrap_sys_device(None, fd, ctypes.byref(self.handle))
         if rv < 0:
             os.close(fd)
@@ -174,6 +214,38 @@ def _install_host_dev_fallback() -> None:
         self._touchy_host_fd = fd  # type: ignore[attr-defined]
 
     _lb._DeviceHandle.__init__ = _patched_init
+
+    # libusb_claim_interface() is broken on wrapped sys-device handles in
+    # libusb 1.0.26: it always returns LIBUSB_ERROR_NOT_FOUND even for
+    # interfaces that exist and are unclaimed. We've already done the
+    # USBDEVFS_DISCONNECT_CLAIM ourselves above (which is per-fd, so the
+    # claim persists for libusb's I/O). Wrap the backend's
+    # claim/release to swallow ENOENT so pyusb's `managed_claim_interface`
+    # path succeeds.
+    _orig_claim = _lb._LibUSB.claim_interface
+    _orig_release = _lb._LibUSB.release_interface
+
+    def _patched_claim(self_be, dev_handle, intf):  # noqa: ANN001
+        try:
+            _orig_claim(self_be, dev_handle, intf)
+        except _lb.USBError as exc:
+            if getattr(exc, "errno", None) != _LIBUSB_ERROR_NOT_FOUND:
+                raise
+            if not hasattr(dev_handle, "_touchy_host_fd"):
+                raise
+            # Already claimed via usbfs ioctl; nothing to do.
+
+    def _patched_release(self_be, dev_handle, intf):  # noqa: ANN001
+        try:
+            _orig_release(self_be, dev_handle, intf)
+        except _lb.USBError as exc:
+            if getattr(exc, "errno", None) != _LIBUSB_ERROR_NOT_FOUND:
+                raise
+            if not hasattr(dev_handle, "_touchy_host_fd"):
+                raise
+
+    _lb._LibUSB.claim_interface = _patched_claim
+    _lb._LibUSB.release_interface = _patched_release
     _lb._touchy_host_dev_patched = True
 
 
@@ -182,12 +254,14 @@ class UsbTransport(Transport):
     """pyusb-backed transport over the device's vendor-specific interface.
 
     The vendor interface is located by ``bInterfaceClass == 0xFF`` and is
-    expected to expose three endpoints:
+    expected to expose two bulk endpoints:
         * 1× bulk OUT       — commands from host
         * 1× bulk IN        — responses to host
-        * 1× interrupt IN   — asynchronous events
 
-    See ``docs/host-api.md`` for the rationale.
+    Events are delivered by host polling of ``EventConsumeCmd`` on the
+    same endpoint pair (the ESP32-S3 USB controller has no spare IN
+    endpoint for a dedicated interrupt-IN mailbox). See
+    ``docs/host-api.md`` for the rationale.
     """
 
     def __init__(self, vid: int = VID, pid: int = PID) -> None:
@@ -212,11 +286,55 @@ class UsbTransport(Transport):
         self._dev = dev
 
         # Find the vendor-specific interface and its three endpoints.
+        #
+        # On Linux the kernel's `cdc_acm` (and `usbhid`) drivers bind to
+        # our composite device's CDC / HID interfaces as soon as it
+        # enumerates. That makes `libusb_set_configuration()` fail with
+        # EBUSY, so we must detach every kernel driver from this device
+        # before touching the config. Reattachment on close is the
+        # kernel's responsibility (it auto-rebinds on release).
+        def _detach_all_kernel_drivers() -> None:
+            # Iterate every advertised configuration's interfaces — we
+            # can't trust `get_active_configuration()` here because pyusb
+            # may report "Configuration not set" before we've touched the
+            # device even when the kernel has already auto-configured it.
+            for candidate_cfg in dev:
+                for candidate in candidate_cfg:
+                    num = candidate.bInterfaceNumber
+                    try:
+                        if dev.is_kernel_driver_active(num):
+                            dev.detach_kernel_driver(num)
+                    except (usb.core.USBError, NotImplementedError):
+                        # Not all backends implement these; ignore so we
+                        # still get a usable transport on platforms where
+                        # the kernel never claims the device in the first
+                        # place (macOS, Windows with WinUSB).
+                        pass
+
+        _detach_all_kernel_drivers()
+
+        # On Linux the kernel always auto-configures USB devices, so the
+        # first descriptor-listed configuration is the active one — fall
+        # back to it when pyusb's `get_active_configuration()` can't query
+        # the device directly. This happens when the device was opened via
+        # `libusb_wrap_sys_device()` (our `/host/dev/bus/usb` fallback for
+        # the devcontainer), where `libusb_set_configuration()` and
+        # `libusb_get_configuration()` return spurious errors / zero even
+        # though the kernel has already configured the device. We seed
+        # pyusb's internal `_active_cfg_index` so subsequent endpoint
+        # read/write paths skip the broken descriptor query.
         try:
             cfg = dev.get_active_configuration()
         except usb.core.USBError:
-            dev.set_configuration()
-            cfg = dev.get_active_configuration()
+            try:
+                dev.set_configuration()
+                cfg = dev.get_active_configuration()
+            except usb.core.USBError:
+                cfg = dev.configurations()[0]
+                try:
+                    dev._ctx._active_cfg_index = cfg.index
+                except AttributeError:
+                    pass
 
         intf = None
         for candidate in cfg:
@@ -227,29 +345,22 @@ class UsbTransport(Transport):
             raise TransportError("Device has no vendor-specific (0xFF) interface")
         self._intf = intf
 
-        ep_out = ep_in = ep_evt = None
+        ep_out = ep_in = None
         for ep in intf:
-            attrs = ep.bmAttributes & 0x03  # 0x02 = bulk, 0x03 = interrupt
+            attrs = ep.bmAttributes & 0x03  # 0x02 = bulk
             direction = ep.bEndpointAddress & 0x80
             if attrs == 0x02 and direction == 0x00:
                 ep_out = ep
             elif attrs == 0x02 and direction == 0x80:
                 ep_in = ep
-            elif attrs == 0x03 and direction == 0x80:
-                ep_evt = ep
         if ep_out is None or ep_in is None:
             raise TransportError(
                 "Vendor interface is missing bulk OUT or bulk IN endpoint"
             )
-        # The interrupt-IN event endpoint is optional: stage 13 firmware
-        # ships only the bulk command/response pair. recv_event() raises
-        # when no event endpoint was advertised.
         self._ep_out = ep_out
         self._ep_in = ep_in
-        self._ep_evt = ep_evt
 
-        # Serialise concurrent command/response pairs; events use a separate
-        # endpoint and need no locking against commands.
+        # Serialise concurrent command/response pairs.
         self._cmd_lock = threading.Lock()
 
     # -- Transport API ------------------------------------------------------
@@ -287,25 +398,6 @@ class UsbTransport(Transport):
             raise TransportError(f"device announced oversize frame: {length} bytes")
         _read_at_least(_LEN_STRUCT.size + length, buf)
         return bytes(buf[_LEN_STRUCT.size : _LEN_STRUCT.size + length])
-
-    def recv_event(self, timeout_ms: int = 0) -> bytes | None:
-        # timeout_ms=0 means non-blocking via a very short USB timeout.
-        if self._ep_evt is None:
-            raise TransportError(
-                "Device does not expose an event endpoint (firmware predates "
-                "stage 14)"
-            )
-        try:
-            buf = bytes(self._ep_evt.read(self._ep_evt.wMaxPacketSize, timeout=timeout_ms or 1))
-        except self._usb_core.USBError as e:
-            # pyusb raises USBError(110, 'Operation timed out') on libusb
-            # ETIMEDOUT; treat that as "no event pending".
-            if getattr(e, "errno", None) in (110, 60):
-                return None
-            raise
-        if not buf:
-            return None
-        return _unpack(buf)
 
     def close(self) -> None:
         try:

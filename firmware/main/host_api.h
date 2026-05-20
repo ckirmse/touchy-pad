@@ -32,6 +32,16 @@ void host_api_start(void);
 // can forward the callback without pulling in the dispatcher internals.
 void host_api_on_rx(void);
 
+// Enqueue an LvEvent for the host to fetch via EventConsumeCmd. Triggers
+// a one-shot "event ready" mailbox notification on the interrupt-IN
+// endpoint (the host then drains via repeated EventConsumeCmd until
+// RESULT_NOT_FOUND). Drops oldest events when the queue is full.
+//
+// Forward-declared via the nanopb-generated struct so screens.cpp doesn't
+// need to pull in pb_encode.h.
+struct _touchy_LvEvent;
+void host_api_post_event(const struct _touchy_LvEvent *evt);
+
 #ifdef __cplusplus
 }
 #endif

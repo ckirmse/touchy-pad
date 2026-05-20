@@ -13,12 +13,25 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <string.h>
+
 static const char *TAG = "usb_hid";
 
+// Report IDs used on the composite HID interface.
+enum {
+    REPORT_ID_MOUSE    = 1,
+    REPORT_ID_KEYBOARD = 2,
+};
+
 // ----- HID report descriptor -----
-// We only need a single boot-style mouse interface.
+// Composite mouse + keyboard on a single HID interface, distinguished by
+// report ID:
+//   * 1 = boot-protocol mouse (5-byte payload)
+//   * 2 = boot-protocol keyboard (8-byte payload)
+// Single-interface saves an endpoint and is the common TinyUSB pattern.
 static const uint8_t s_hid_report_descriptor[] = {
-    TUD_HID_REPORT_DESC_MOUSE()
+    TUD_HID_REPORT_DESC_MOUSE   (HID_REPORT_ID(REPORT_ID_MOUSE)),
+    TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(REPORT_ID_KEYBOARD)),
 };
 
 // Required by tinyusb for HID descriptor queries.
@@ -104,13 +117,18 @@ static const uint8_t s_config_desc[] = {
     TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 4, EPNUM_CDC_NOTIF, 8,
                        EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 #endif
-    // HID mouse: IN EP, 8-byte max packet, 10 ms poll interval.
+    // HID composite (mouse + keyboard): IN EP, 16-byte max packet, 10 ms poll.
+    // 16 bytes is plenty for the largest report (8-byte keyboard report +
+    // 1-byte report ID prefix).
     TUD_HID_DESCRIPTOR(ITF_NUM_HID, 5, HID_ITF_PROTOCOL_NONE,
                        sizeof(s_hid_report_descriptor),
-                       EPNUM_HID, 8, 10),
-    // Vendor (host_api): bulk OUT (command) + bulk IN (response), 64-byte
-    // packets. wMaxPacketSize=64 is the full-speed maximum and matches the
-    // host transport's framing expectation.
+                       EPNUM_HID, 16, 10),
+    // Vendor (host_api): bulk OUT (command) + bulk IN (response). The bulk
+    // pair carries length-prefixed Command and Response frames; events are
+    // polled by the host via EventConsumeCmd on the same bulk pair (the
+    // ESP32-S3 USB-OTG controller only has 5 IN endpoints, leaving no
+    // budget for a dedicated interrupt-IN event mailbox). See
+    // docs/host-api.md.
     TUD_VENDOR_DESCRIPTOR(ITF_NUM_VENDOR, 6, EPNUM_VENDOR_OUT, EPNUM_VENDOR_IN, 64),
 };
 
@@ -174,21 +192,45 @@ static uint8_t s_button_state = 0;
 extern "C" void usb_hid_mouse_move(int8_t dx, int8_t dy)
 {
     if (!wait_ready()) return;
-    tud_hid_mouse_report(0, s_button_state, dx, dy, 0, 0);
+    tud_hid_mouse_report(REPORT_ID_MOUSE, s_button_state, dx, dy, 0, 0);
 }
 
 extern "C" void usb_hid_mouse_scroll(int8_t vertical, int8_t horizontal)
 {
     if (!wait_ready()) return;
-    tud_hid_mouse_report(0, s_button_state, 0, 0, vertical, horizontal);
+    tud_hid_mouse_report(REPORT_ID_MOUSE, s_button_state, 0, 0, vertical, horizontal);
 }
 
 extern "C" void usb_hid_mouse_click(uint8_t button)
 {
     if (!wait_ready()) return;
     s_button_state = button;
-    tud_hid_mouse_report(0, s_button_state, 0, 0, 0, 0);
+    tud_hid_mouse_report(REPORT_ID_MOUSE, s_button_state, 0, 0, 0, 0);
     vTaskDelay(pdMS_TO_TICKS(20));
     s_button_state = 0;
-    tud_hid_mouse_report(0, s_button_state, 0, 0, 0, 0);
+    tud_hid_mouse_report(REPORT_ID_MOUSE, s_button_state, 0, 0, 0, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Stage 16 — raw mouse + keyboard helpers used by macros.cpp.
+//
+// These differ from the click/move helpers above in that the caller owns
+// the button-state / key-state bookkeeping: a macro typically does
+//   button_down(LEFT); move(...); button_up(LEFT);
+// and we don't want hidden side-state to interfere with the macro runner.
+// ---------------------------------------------------------------------------
+
+extern "C" void usb_hid_mouse_buttons(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel)
+{
+    if (!wait_ready()) return;
+    s_button_state = buttons;
+    tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, dx, dy, wheel, 0);
+}
+
+extern "C" void usb_hid_keyboard_report(uint8_t modifiers, const uint8_t keycodes[6])
+{
+    if (!wait_ready()) return;
+    uint8_t kc[6] = {0};
+    if (keycodes) memcpy(kc, keycodes, 6);
+    tud_hid_keyboard_report(REPORT_ID_KEYBOARD, modifiers, kc);
 }

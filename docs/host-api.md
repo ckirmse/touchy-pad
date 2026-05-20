@@ -7,13 +7,17 @@ Unrelated to the 'fancy' custom API, the device will also expose HID keyboard an
 
 ## Touchy Host API
 
-We will provide a custom API on custom USB interface composed of three endpoints. 
+We will provide a custom API on custom USB interface composed of two bulk endpoints.
 
 * Command Endpoint (OUT from PC to device). A message pipe.   The host sends commands (as protocol buffers?).
 * Response Endpoint (IN to the PC) reads back a response (one response per command)
-* Event endpoint (IN to PC). An interrupt stream pipe.   Used to send async events from the device (user pressed button X, moved slider Y to Z etc...)
 
-Note: the event endpoint max packet size is quite small so possibly we'll just have an event for "AsyncEventReady" and then the host will issue a "ConsumeEvent"
+Events (button presses, slider movements, etc.) are delivered by
+host-side polling: the application repeatedly issues `Event_Consume`
+until it returns `RESULT_NOT_FOUND`. The ESP32-S3 USB-OTG controller
+only supports five concurrent IN endpoints (EP0 + CDC notif + CDC bulk
+IN + HID + vendor bulk IN), so there is no budget for a dedicated
+interrupt-IN event mailbox.
 
 ### Command messages
 
@@ -45,19 +49,49 @@ Commands:
 * Response(code) - 0 = okay, anything is some TBD error
 * Sys_Version_Response(protocol_vernum, firmware_ver_num, firmware_ver_str)
 
-### Event endpoint messages
+### Event delivery
 
-* `Event_LV` — A lightly-wrapped LVGL event. The firmware populates
-  `LvEvent.user_data` with the host-assigned widget id (and, where
-  relevant, the `Action.event` string from the layout), so the host can
-  route incoming events back to its application-level callbacks without
-  the device needing to know about them. `LvEvent.code` mirrors
-  `lv_event_code_t`; `extra` carries any per-event payload (e.g. a slider
-  value).
+The firmware accumulates `LvEvent` records in an internal queue as
+widgets fire. The host drains the queue by issuing `Event_Consume`
+commands until it gets `RESULT_NOT_FOUND`. `TouchyClient.stream_events`
+polls in a loop with a configurable interval (default 50 ms). Each
+successful `EventConsumeResponse` carries an `LvEvent` directly (since
+protocol v2; previously wrapped in `Event`).
+
+`LvEvent` fields:
+
+* `code` — mirrors `lv_event_code_t` (LV_EVENT_CLICKED, LV_EVENT_VALUE_CHANGED, ...).
+* `user_data` — the widget id from the layout.
+* `extra` — per-event payload bytes (e.g. a slider's current value packed little-endian).
+* `host_code` *(Stage 16)* — for `ActionHost` events, the `uint32` code
+  the application assigned. Use `TouchyClient.on_host_event(code, fn)`
+  to dispatch on it.
+
+### Actions (Stage 16)
+
+Widgets that can fire (`Button.on_click`, `Slider.on_change`,
+`Switch.on_change`, `Checkbox.on_change`) carry a `repeated Action`.
+Each action is one of:
+
+* **`ActionHost { uint32 code }`** — enqueue an `LvEvent` with that
+  `host_code` for the host to fetch via `Event_Consume`.
+* **`ActionMacro { repeated MacroStep steps }`** — replayed entirely on
+  the device. A `MacroStep` is one of: `key_down` / `key_up` /
+  `key_tap` (HID keyboard, with optional modifier mask), mouse-button
+  bitmasks (`mouse_button_down` / `mouse_button_up` / `mouse_click`),
+  `mouse_move {dx, dy, wheel}`, `set_delay_ms` (sticky inter-step
+  delay, default 10 ms), or a one-shot `delay_ms`.
+
+USB HID is a composite single-interface design with report IDs
+1 = mouse, 2 = keyboard, so macros and the existing touchpad share one
+endpoint pair.
 
 The Stage-15 host-side DSL in [`touchy_pad.screens`](../app/src/touchy_pad/screens.py)
 is the supported way to author layouts; see
 [`docs/why-not-xml.md`](why-not-xml.md) for why we don't use XML.
+Use `host_action(code)`, `macro_action(steps)`, and `action()` from
+`touchy_pad.screens` together with the step factories in
+`touchy_pad.macros` and the key constants in `touchy_pad.hid_keys`.
 
 See https://lvgl.io/docs/open/common-widget-features/events#fields-of-lv_event_t
 and https://lvgl.io/docs/open/api/core/lv_event_h for more info.
@@ -86,19 +120,18 @@ firmware evolves — locate interfaces by class, not number):
 3. **Touchy custom protocol** — `bInterfaceClass = 0xFF` (vendor-specific),
    `bInterfaceSubClass = 0x54` ("T"), `bInterfaceProtocol = 0x01`.
 
-The vendor interface has up to three endpoints:
+The vendor interface exposes two bulk endpoints:
 
 | Endpoint        | Direction | Type      | `wMaxPacketSize` | Purpose                        |
 |-----------------|-----------|-----------|------------------|--------------------------------|
 | Command (OUT)   | host → device | Bulk      | 64 bytes (FS) / 512 bytes (HS) | length-prefixed `Command` |
 | Response (IN)   | device → host | Bulk      | 64 / 512 bytes   | length-prefixed `Response`     |
-| Event (IN)      | device → host | Interrupt | 16 bytes, `bInterval = 8 ms` | length-prefixed `Event` (optional, post-stage-13)|
 
-The stage-13 firmware ships only the bulk command/response pair. The
-interrupt-IN event endpoint is reserved by the protocol but not yet
-advertised in the configuration descriptor; the host library treats it
-as optional and `recv_event()` raises a `TransportError` against firmware
-that lacks it.
+Events are delivered by host polling on the same endpoint pair via the
+`Event_Consume` command — see *Event delivery* above. An earlier design
+allocated a dedicated interrupt-IN "event mailbox" endpoint, but the
+ESP32-S3 USB-OTG controller's 5-IN-endpoint budget is already fully
+claimed by EP0 + CDC notif + CDC bulk-IN + HID + vendor bulk-IN.
 
 The host library locates this interface by scanning the active
 configuration for `bInterfaceClass == 0xFF`. See

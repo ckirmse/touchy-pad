@@ -40,10 +40,13 @@ __all__ = [
     "rect",
     "style",
     "action",
+    "host_action",
+    "macro_action",
     "button",
     "label",
     "slider",
     "toggle",
+    "checkbox",
     "image",
     "arc",
     "spacer",
@@ -108,9 +111,81 @@ def style(
     return s
 
 
-def action(event: str) -> _proto.Action:
-    """Forward this widget's events to the host as ``LvEvent(user_data=event)``."""
-    return _proto.Action(event=event)
+def action(*args, **kwargs) -> _proto.Action:
+    """Build an :class:`_proto.Action`.
+
+    Two forms are supported:
+
+    * ``action(host=<int>)`` — forward the event to the host as an
+      ``LvEvent`` carrying ``host_code = <int>``.
+    * ``action(macro=[step, ...])`` — a device-side macro built from
+      :mod:`touchy_pad.macros` helpers.
+
+    A bare positional integer is treated as the host code (legacy
+    convenience matching the pre-stage-16 string form).
+    """
+    if args and not kwargs:
+        if len(args) != 1:
+            raise TypeError("action() takes at most one positional argument")
+        (value,) = args
+        if isinstance(value, int):
+            return host_action(value)
+        if isinstance(value, list):
+            return macro_action(value)
+        raise TypeError(f"unsupported positional action value: {value!r}")
+    if "host" in kwargs and "macro" not in kwargs:
+        return host_action(kwargs["host"])
+    if "macro" in kwargs and "host" not in kwargs:
+        return macro_action(kwargs["macro"])
+    raise TypeError("action() requires exactly one of host= or macro=")
+
+
+def host_action(code: int) -> _proto.Action:
+    """Forward the widget event to the host with the given ``host_code``.
+
+    The host-side :class:`touchy_pad.TouchyClient` dispatches incoming
+    ``LvEvent``\\s on ``host_code``: register a callback with
+    ``client.on_host_event(code, callback)`` to receive them.
+    """
+    if code < 0 or code > 0xFFFF_FFFF:
+        raise ValueError("host action code must fit in a uint32")
+    return _proto.Action(host=_proto.ActionHost(code=code))
+
+
+def macro_action(steps) -> _proto.Action:
+    """Bundle a list of :mod:`touchy_pad.macros` steps as an Action.
+
+    Accepts any iterable of :class:`_proto.MacroStep` instances.
+    """
+    macro = _proto.ActionMacro()
+    macro.steps.extend(list(steps))
+    if len(macro.steps) == 0:
+        raise ValueError("macro_action requires at least one step")
+    return _proto.Action(macro=macro)
+
+
+def _normalise_actions(actions) -> list[_proto.Action]:
+    """Coerce DSL action input into a list of :class:`_proto.Action`.
+
+    Accepts ``None`` (→ empty list), a single ``int`` / ``Action``, or
+    any iterable of ``int`` / ``Action`` entries. Plain ints become
+    :func:`host_action` codes.
+    """
+    if actions is None:
+        return []
+    if isinstance(actions, _proto.Action):
+        return [actions]
+    if isinstance(actions, int):
+        return [host_action(actions)]
+    out: list[_proto.Action] = []
+    for a in actions:
+        if isinstance(a, _proto.Action):
+            out.append(a)
+        elif isinstance(a, int):
+            out.append(host_action(a))
+        else:
+            raise TypeError(f"unsupported action entry: {a!r}")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -134,17 +209,19 @@ def _widget(
 def button(
     id: str,
     text: str = "",
-    on_click: str | _proto.Action | None = None,
+    on_click=None,
     rect: _proto.Rect | None = None,
     style: _proto.Style | None = None,
 ) -> _proto.Widget:
-    """A clickable button with an optional text label."""
+    """A clickable button with an optional text label.
+
+    ``on_click`` accepts a single :class:`_proto.Action`, an ``int`` host
+    code, or a list mixing both. Pass ``None`` (the default) for buttons
+    that do nothing on click.
+    """
     w = _widget(id, rect=rect, style=style)
     w.button.text = text
-    if on_click is not None:
-        w.button.on_click.CopyFrom(
-            on_click if isinstance(on_click, _proto.Action) else action(on_click)
-        )
+    w.button.on_click.extend(_normalise_actions(on_click))
     return w
 
 
@@ -167,7 +244,7 @@ def slider(
     min: int = 0,
     max: int = 100,
     value: int = 0,
-    on_change: str | _proto.Action | None = None,
+    on_change=None,
     rect: _proto.Rect | None = None,
     style: _proto.Style | None = None,
 ) -> _proto.Widget:
@@ -176,27 +253,37 @@ def slider(
     w.slider.min = min
     w.slider.max = max
     w.slider.value = value
-    if on_change is not None:
-        w.slider.on_change.CopyFrom(
-            on_change if isinstance(on_change, _proto.Action) else action(on_change)
-        )
+    w.slider.on_change.extend(_normalise_actions(on_change))
     return w
 
 
 def toggle(
     id: str,
     on: bool = False,
-    on_change: str | _proto.Action | None = None,
+    on_change=None,
     rect: _proto.Rect | None = None,
     style: _proto.Style | None = None,
 ) -> _proto.Widget:
     """An on/off switch."""
     w = _widget(id, rect=rect, style=style)
     w.toggle.on = on
-    if on_change is not None:
-        w.toggle.on_change.CopyFrom(
-            on_change if isinstance(on_change, _proto.Action) else action(on_change)
-        )
+    w.toggle.on_change.extend(_normalise_actions(on_change))
+    return w
+
+
+def checkbox(
+    id: str,
+    text: str = "",
+    checked: bool = False,
+    on_change=None,
+    rect: _proto.Rect | None = None,
+    style: _proto.Style | None = None,
+) -> _proto.Widget:
+    """A labelled tickbox."""
+    w = _widget(id, rect=rect, style=style)
+    w.checkbox.text = text
+    w.checkbox.checked = checked
+    w.checkbox.on_change.extend(_normalise_actions(on_change))
     return w
 
 
@@ -307,12 +394,24 @@ class Screen:
 
 
 def build_demo_screen(name: str = "demo") -> Screen:
-    """Build a sample screen with four different widget kinds.
+    """Build a sample screen exercising stage-16 actions.
 
     Used by the ``touchy screens demo`` CLI subcommand as a smoke test
-    for the stage-15 layout pipeline. Layout is a single-column flex so
-    each widget gets a clear, full-width row regardless of display size.
+    for the action pipeline. Layout is a single-column flex so each
+    widget gets a clear, full-width row regardless of display size.
+
+    Wiring:
+
+    * "hello" button — a device-side macro that types ``"hi"`` over
+      the USB HID keyboard interface (no host round-trip).
+    * "ping" button — a host action with code 0x100; the demo CLI
+      registers a Python handler that prints the incoming event.
+    * slider — a host action with code 0x101 (extra carries int32 LE).
+    * checkbox — a host action with code 0x102 (extra is 1 byte).
     """
+    from . import macros as m
+    from . import hid_keys as k
+
     s = Screen(name, layout=col(gap=12))
     s += label(
         "title",
@@ -320,9 +419,18 @@ def build_demo_screen(name: str = "demo") -> Screen:
         font_size=24,
         style=style(text_color=0xFFFFFF),
     )
-    s += button("hello", text="Hello", on_click="demo_hello")
-    s += slider("level", min=0, max=100, value=42, on_change="demo_level")
-    s += toggle("enable", on=True, on_change="demo_enable")
+    s += button(
+        "hello",
+        text="Type 'hi'",
+        on_click=macro_action([
+            m.key_tap(k.KEY_H, k.MOD_LSHIFT),
+            m.key_tap(k.KEY_I),
+        ]),
+    )
+    s += button("ping", text="Ping host", on_click=host_action(0x100))
+    s += slider("level", min=0, max=100, value=42, on_change=host_action(0x101))
+    s += checkbox("enable", text="Enabled", checked=True,
+                  on_change=host_action(0x102))
     return s
 
 

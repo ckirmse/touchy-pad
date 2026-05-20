@@ -107,8 +107,55 @@ app-run *ARGS: build-proto-py
     cd app && poetry run touchy {{ARGS}}
 
 # ---------------------------------------------------------------------------
+# Firmware (firmware/) — ESP-IDF CMake build.
+# ---------------------------------------------------------------------------
+
+# Build the firmware. Regenerates C proto bindings first so the firmware
+# always compiles against the latest schema.
+firmware-build: build-proto-c
+    cmake --build firmware/build
+
+flash: firmware-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Pick the first readable+writable ttyACM* under /host/dev/
+    port=""
+    for candidate in $(ls /host/dev/ttyACM* 2>/dev/null | sort); do
+        if [ -r "$candidate" ] && [ -w "$candidate" ]; then
+            port="$candidate"
+            break
+        fi
+    done
+    if [ -z "$port" ]; then
+        echo "error: no accessible ttyACM* device found under /host/dev/" >&2
+        exit 1
+    fi
+    echo "flashing to $port"
+    # Use esptool directly from the ESP-IDF venv — avoids sourcing export.sh,
+    # which breaks inside an already-activated Python environment.
+    # cd into build so the relative binary paths in flash_args resolve.
+    py="/root/.espressif/tools/python/v6.0.1/venv/bin/python"
+    esptool_py="/root/.espressif/v6.0.1/esp-idf/components/esptool_py/esptool/esptool.py"
+    cd firmware/build
+    mapfile -t flash_args < flash_args
+    # flash_args has two lines: flags line, then addr:file pairs per line.
+    # Flatten them into a single array of words.
+    args=()
+    for line in "${flash_args[@]}"; do
+        read -ra words <<< "$line"
+        args+=("${words[@]}")
+    done
+    "$py" "$esptool_py" -p "$port" -b 460800 \
+        --before default-reset --after hard-reset \
+        --chip esp32s3 write-flash "${args[@]}"
+
+
+# ---------------------------------------------------------------------------
 # Aggregate convenience targets
 # ---------------------------------------------------------------------------
+
+# Build firmware + Python wheel (proto bindings regenerated as needed).
+build-all: firmware-build app-build
 
 # Lint + test everything (currently just the host app).
 test: app-lint app-test

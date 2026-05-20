@@ -128,17 +128,59 @@ directly via its C API — no XML, no `lv_xml`, no `lui-xml` port required.
   switches to one.
 * Firmware: [`firmware/main/screens.cpp`](../firmware/main/screens.cpp).
 
-## Stage 16: Button behaviors
+## Stage 16: Button behaviors — DONE
 
-Let screen elements have optional Actions which can be attached to things like button-press or control-changed (for checkbox or slider).  For any widget that supports Actions (on-press, on-changed) keep an array of Actions.
+Screen widgets gained *Actions* that fire when the user interacts with
+them. Each clickable / changeable widget (Button, Slider, Switch,
+Checkbox) carries a `repeated Action` slot (`on_click` / `on_change`),
+and each `Action` is one of:
 
-Variants of actions:
+* **`ActionMacro`** — a list of `MacroStep`s replayed entirely
+  device-side. Steps are: `key_down`/`key_up`/`key_tap` (HID keyboard),
+  `mouse_button_down`/`mouse_button_up`/`mouse_click` (HID mouse button
+  bitmask), `mouse_move {dx, dy, wheel}`, `set_delay_ms` (sticky
+  inter-step delay, default 10ms), and a one-shot `delay_ms`. The macro
+  runner is a dedicated FreeRTOS task (`firmware/main/macros.cpp`)
+  pinned to APP CPU, fed by a queue of heap-copied
+  `touchy_ActionMacro` payloads.
+* **`ActionHost`** — a `uint32 code` forwarded to the host inside an
+  `LvEvent.host_code`. The Python client routes events by `host_code`
+  to callbacks registered via `TouchyClient.on_host_event(code, fn)`.
 
-* ActionMacro: (handled entirely device side) An array of USB HID event codes are in the protobuf, send them one after the other with a small (10ms?) delay.  Used to simulate arbitrary key press sequences when a button press occurs.
-* ActionHost: Contains a uint32 code that is sent to the python side for handling (along with any other relevant extras (control-value?)).  Host side python library assigns those codes so that it can find and run the corresponding correct host-side python handler function (which will be provided by the API client)
-(other action types might be added in the future)
+Other notable changes:
 
-## Stage 17: Touchpad widget cleanup
+* **New widget: `Checkbox`** via LVGL's `lv_checkbox_create`.
+* **Composite USB HID interface** with report IDs (1 = mouse,
+  2 = keyboard) — single interface, single endpoint, two descriptors,
+  matching what `arduino-libraries/Mouse` style stacks expect on the
+  host.
+* **Event mailbox endpoint:** the vendor interface adds an interrupt-IN
+  endpoint at 0x85 (8 ms / 16-byte MPS) used only as a *mailbox* — the
+  firmware writes a fixed encoded `Event{event_ready=true}` payload
+  when the queue transitions from empty to non-empty. The host drains
+  via `EventConsumeCmd` until `RESULT_NOT_FOUND`. This keeps the
+  bulk pipe free for command/response traffic.
+* **Protocol version bumped to 2.** `EventConsumeResponse.event` is now
+  an `LvEvent` directly (no longer wrapped in `Event`), and `LvEvent`
+  gained a `uint32 host_code` field.
+* **nanopb static caps (deviation from the original spec):** The
+  generated `touchy_Screen` struct must stay ≤ 64 KB so nanopb can
+  use 16-bit field offsets. With static allocation the budget forces
+  trade-offs; the current caps (in `proto/touchy.options`) are:
+  `Button/Slider/Switch/Checkbox.on_* = 4`,
+  `ActionMacro.steps = 16`, `Screen.widgets = 32`. Raising these
+  meaningfully requires the dynamic-allocation work tracked in
+  Stage 18.
+* CLI: `touchy screens demo` now uploads a screen with one macro
+  button (types `"hi"` over USB HID) plus three host-action widgets
+  (`button`, `slider`, `checkbox`); `--listen` registers handlers and
+  prints incoming events live.
+
+## Stage 17: nanopb cleanup
+
+Make a new protobuf.cpp/h which provides a C++ class wrapper for the generated nanopb c code.  Use the more advanced nanopb API options for dynamic memory allocation (using new/delete or malloc/free) so that screens/widgets/lists of actions can be **much** smaller normally.  Much better than all the arbitrary ints in touchy.options.  Use your judgement - for simple fields it is (very rarely) okay to just use a fixed length array.
+
+## Stage 18: Touchpad widget cleanup
 
 * Move our existing touchpad widget proof of concept device code into a python accessible/protobuf configured Touchpad widget.  Any user touches inside that widget will be used to send mouse/touchpad HID events to the host.
 

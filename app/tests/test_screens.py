@@ -1,4 +1,4 @@
-"""Tests for the protobuf-backed screen DSL (stage 15)."""
+"""Tests for the protobuf-backed screen DSL (stage 15) and stage-16 actions."""
 
 from __future__ import annotations
 
@@ -7,16 +7,20 @@ from pathlib import Path
 import pytest
 
 from touchy_pad import _proto
+from touchy_pad import hid_keys, macros
 from touchy_pad.screens import (
     Screen,
     _collect_from_script,
     action,
     arc,
     button,
+    checkbox,
     col,
     grid,
+    host_action,
     image,
     label,
+    macro_action,
     rect,
     row,
     slider,
@@ -35,7 +39,7 @@ def _clear_registry():
 
 def test_button_round_trip():
     s = Screen("home", layout=col(gap=4))
-    s += button("play", text="Play", on_click="play_pressed")
+    s += button("play", text="Play", on_click=host_action(0x42))
     s += label("title", text="Hello", font_size=24)
 
     decoded = _proto.Screen.FromString(s.to_bytes())
@@ -48,7 +52,9 @@ def test_button_round_trip():
     assert w0.id == "play"
     assert w0.WhichOneof("kind") == "button"
     assert w0.button.text == "Play"
-    assert w0.button.on_click.event == "play_pressed"
+    assert len(w0.button.on_click) == 1
+    assert w0.button.on_click[0].WhichOneof("kind") == "host"
+    assert w0.button.on_click[0].host.code == 0x42
 
     w1 = decoded.widgets[1]
     assert w1.WhichOneof("kind") == "label"
@@ -60,16 +66,17 @@ def test_all_widget_kinds_serialise():
     s = Screen("k", layout=grid(cols=3, gap=2))
     s += button("b", text="B")
     s += label("l", text="L")
-    s += slider("s", min=0, max=10, value=5, on_change=action("vol"))
-    s += toggle("t", on=True, on_change="mute")
+    s += slider("s", min=0, max=10, value=5, on_change=host_action(1))
+    s += toggle("t", on=True, on_change=host_action(2))
+    s += checkbox("c", text="go", checked=True, on_change=host_action(3))
     s += image("i", asset="img/a.png")
     s += arc("a", min=0, max=270, value=90)
     s += spacer("sp", rect=rect(w=20, h=20))
 
     decoded = _proto.Screen.FromString(s.to_bytes())
     kinds = [w.WhichOneof("kind") for w in decoded.widgets]
-    assert kinds == ["button", "label", "slider", "toggle", "image",
-                     "arc", "spacer"]
+    assert kinds == ["button", "label", "slider", "toggle", "checkbox",
+                     "image", "arc", "spacer"]
     assert decoded.layout.kind == _proto.Layout.GRID
     assert decoded.layout.cols == 3
 
@@ -89,6 +96,70 @@ def test_style_and_rect_applied():
     assert w.style.bg_color == 0xff8800
     assert w.style.radius == 8
     assert w.style.text_color == 0xffffff
+
+
+# -- Stage 16 ---------------------------------------------------------------
+
+
+def test_macro_action_round_trip():
+    """A macro of typed steps decodes to the same step list."""
+    s = Screen("m")
+    s += button("hi", on_click=macro_action([
+        macros.key_tap(hid_keys.KEY_H, hid_keys.MOD_LSHIFT),
+        macros.key_tap(hid_keys.KEY_I),
+        macros.delay(50),
+        macros.set_delay(20),
+        macros.mouse_click(),
+    ]))
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    actions = decoded.widgets[0].button.on_click
+    assert len(actions) == 1
+    assert actions[0].WhichOneof("kind") == "macro"
+    steps = actions[0].macro.steps
+    assert [st.WhichOneof("step") for st in steps] == [
+        "key_tap", "key_tap", "delay_ms", "set_delay_ms", "mouse_click",
+    ]
+    assert steps[0].key_tap.keycode == hid_keys.KEY_H
+    assert steps[0].key_tap.modifiers == hid_keys.MOD_LSHIFT
+    assert steps[2].delay_ms == 50
+    assert steps[3].set_delay_ms == 20
+
+
+def test_int_on_click_becomes_host_action():
+    s = Screen("i")
+    s += button("go", on_click=0x99)
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    actions = decoded.widgets[0].button.on_click
+    assert len(actions) == 1
+    assert actions[0].host.code == 0x99
+
+
+def test_action_list_mixes_host_and_macro():
+    s = Screen("mix")
+    s += button("x", on_click=[
+        host_action(7),
+        macro_action([macros.key_tap(hid_keys.KEY_A)]),
+    ])
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    actions = decoded.widgets[0].button.on_click
+    assert len(actions) == 2
+    assert actions[0].host.code == 7
+    assert actions[1].WhichOneof("kind") == "macro"
+
+
+def test_macro_action_requires_steps():
+    with pytest.raises(ValueError):
+        macro_action([])
+
+
+def test_type_text_round_trip():
+    steps = macros.type_text("Hi!")
+    assert [s.WhichOneof("step") for s in steps] == ["key_tap"] * 3
+    assert steps[0].key_tap.keycode == hid_keys.KEY_H
+    assert steps[0].key_tap.modifiers == hid_keys.MOD_LSHIFT
+    # '!' is shift+1 on US layout.
+    assert steps[2].key_tap.keycode == hid_keys.KEY_1
+    assert steps[2].key_tap.modifiers == hid_keys.MOD_LSHIFT
 
 
 def test_default_layout_is_absolute():

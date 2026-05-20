@@ -103,17 +103,18 @@ def writefiles(srcdir: Path) -> None:
 
 @cli.command()
 def events() -> None:
-    """Stream events from the device until interrupted."""
+    """Stream events from the device until interrupted.
+
+    Every queued `ActionHost` event is printed; the exit is on Ctrl-C.
+    """
     with _client() as c:
         try:
             for evt in c.stream_events():
-                which = evt.WhichOneof("evt")
-                if which == "lv":
-                    click.echo(
-                        f"event code={evt.lv.code} user_data={evt.lv.user_data!r}"
-                    )
-                else:
-                    click.echo(f"event {which}")
+                extra = evt.extra.hex() if evt.extra else ""
+                click.echo(
+                    f"event code={evt.code} host_code=0x{evt.host_code:x} "
+                    f"widget={evt.user_data!r} extra={extra}"
+                )
         except KeyboardInterrupt:
             pass
 
@@ -189,13 +190,23 @@ def screens_push(script: Path, load_name: str | None, dry_run: bool) -> None:
     is_flag=True,
     help="Upload the screen but do not switch to it.",
 )
-def screens_demo(name: str, no_load: bool) -> None:
-    """Upload a 4-widget sample screen and switch to it.
+@click.option(
+    "--listen",
+    is_flag=True,
+    help="After uploading, stream host events from the demo screen until "
+         "Ctrl-C. Registers handlers for the demo's host action codes.",
+)
+def screens_demo(name: str, no_load: bool, listen: bool) -> None:
+    """Upload a sample screen exercising stage-16 actions.
 
-    Smoke test for the stage-15 layout pipeline: builds a screen with a
-    label, button, slider, and switch via the Python DSL, sends it as
-    ``screens/<name>.pb``, and (unless ``--no-load``) calls
-    ``screen-load`` to activate it.
+    The screen contains:
+      * a "hi" button wired to a device-side macro that types the text
+        over USB HID (no host involvement);
+      * a "ping" button, slider and checkbox wired to host actions
+        (codes 0x100 / 0x101 / 0x102).
+
+    With ``--listen`` the CLI registers Python handlers for the host
+    action codes and prints the incoming events.
     """
     from .screens import build_demo_screen
 
@@ -208,6 +219,30 @@ def screens_demo(name: str, no_load: bool) -> None:
         if not no_load:
             c.screen_load(s.name)
             click.echo(f"loaded screen {s.name!r}")
+
+        if listen:
+            def on_ping(evt):
+                click.echo(f"[ping]   widget={evt.user_data!r}")
+
+            def on_level(evt):
+                # int32 LE
+                import struct
+                value = struct.unpack("<i", evt.extra)[0] if len(evt.extra) >= 4 else None
+                click.echo(f"[slider] widget={evt.user_data!r} value={value}")
+
+            def on_enable(evt):
+                state = bool(evt.extra[0]) if evt.extra else None
+                click.echo(f"[check]  widget={evt.user_data!r} on={state}")
+
+            c.on_host_event(0x100, on_ping)
+            c.on_host_event(0x101, on_level)
+            c.on_host_event(0x102, on_enable)
+            click.echo("listening for host events (Ctrl-C to stop)...")
+            try:
+                for _ in c.stream_events():
+                    pass
+            except KeyboardInterrupt:
+                pass
 
 
 @cli.command("reboot-bootloader")

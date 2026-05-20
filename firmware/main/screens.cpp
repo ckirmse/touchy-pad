@@ -12,6 +12,8 @@
 #include "screens.h"
 
 #include "fs.h"
+#include "host_api.h"
+#include "macros.h"
 #include "touchy.pb.h"
 
 #include "esp_log.h"
@@ -70,40 +72,95 @@ lv_color_t color_from_u32(uint32_t rgb)
 // ---------------------------------------------------------------------------
 // Event hookup
 //
-// `user_data` stored on each LVGL object is a heap-copied string of the form
-// "<widget_id>|<event_name>" — both come from the host-side DSL. The host
-// transmit path for events is wired in a later stage; for now we just log.
+// Each widget event slot in the protobuf holds a `repeated Action` list
+// (capped per touchy.options). When the trigger fires we walk the list:
+//   * `ActionMacro` → enqueue on the macros runner task (HID replay).
+//   * `ActionHost`  → build an `LvEvent` carrying the widget id, host_code,
+//                     and the widget's current value packed little-endian
+//                     into `extra`, then push it to the host_api queue.
+//
+// `user_data` on the LVGL object is a heap-copied ActionSlot struct that
+// owns the action list pointer + widget id; freed on LV_EVENT_DELETE.
 // ---------------------------------------------------------------------------
+
+struct ActionSlot {
+    char widget_id[32];
+    const touchy_Action *actions;
+    pb_size_t            actions_count;
+    // Pointer-to-function so the same dispatch path handles every widget
+    // kind; returns the bytes-written into `extra_out` (0 .. 32).
+    size_t (*read_value)(lv_obj_t *obj, uint8_t *extra_out);
+};
+
+size_t read_value_none(lv_obj_t *, uint8_t *)        { return 0; }
+size_t read_value_slider(lv_obj_t *obj, uint8_t *out)
+{
+    int32_t v = lv_slider_get_value(obj);
+    memcpy(out, &v, sizeof(v));   // little-endian on xtensa / risc-v
+    return sizeof(v);
+}
+size_t read_value_switch(lv_obj_t *obj, uint8_t *out)
+{
+    out[0] = lv_obj_has_state(obj, LV_STATE_CHECKED) ? 1 : 0;
+    return 1;
+}
 
 void widget_event_cb(lv_event_t *e)
 {
-    auto *ud = static_cast<const char *>(lv_event_get_user_data(e));
-    if (!ud) return;
-    ESP_LOGI(TAG, "widget event code=%d user_data=%s",
-             (int)lv_event_get_code(e), ud);
+    auto *slot = static_cast<ActionSlot *>(lv_event_get_user_data(e));
+    if (!slot || slot->actions_count == 0) return;
+    lv_event_code_t code = lv_event_get_code(e);
+    auto *obj = static_cast<lv_obj_t *>(lv_event_get_target(e));
+
+    for (pb_size_t i = 0; i < slot->actions_count; i++) {
+        const touchy_Action &act = slot->actions[i];
+        switch (act.which_kind) {
+        case touchy_Action_macro_tag:
+            macros_run(&act.kind.macro);
+            break;
+        case touchy_Action_host_tag: {
+            touchy_LvEvent evt = touchy_LvEvent_init_zero;
+            evt.code = (uint32_t)code;
+            snprintf(evt.user_data, sizeof(evt.user_data), "%s", slot->widget_id);
+            evt.host_code = act.kind.host.code;
+            evt.extra.size = (pb_size_t)slot->read_value(obj, evt.extra.bytes);
+            host_api_post_event(&evt);
+            break;
+        }
+        default:
+            ESP_LOGD(TAG, "widget '%s' has unknown action kind %u",
+                     slot->widget_id, (unsigned)act.which_kind);
+            break;
+        }
+    }
 }
 
 void widget_delete_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) != LV_EVENT_DELETE) return;
-    auto *ud = static_cast<char *>(lv_event_get_user_data(e));
-    free(ud);
+    auto *slot = static_cast<ActionSlot *>(lv_event_get_user_data(e));
+    delete slot;
 }
 
-void attach_action(lv_obj_t *obj,
-                   const char *widget_id,
-                   const touchy_Action &act,
-                   lv_event_code_t code)
+void attach_actions(lv_obj_t *obj,
+                    const char *widget_id,
+                    const touchy_Action *actions,
+                    pb_size_t actions_count,
+                    lv_event_code_t code,
+                    size_t (*read_value)(lv_obj_t *, uint8_t *))
 {
-    if (act.event[0] == '\0') return;
-    // "<id>|<event>" — keeps both halves on a single allocation so we can
-    // free it from a single LV_EVENT_DELETE callback.
-    size_t need = strlen(widget_id) + 1 + strlen(act.event) + 1;
-    auto *ud = static_cast<char *>(malloc(need));
-    if (!ud) return;
-    snprintf(ud, need, "%s|%s", widget_id, act.event);
-    lv_obj_add_event_cb(obj, widget_event_cb, code, ud);
-    lv_obj_add_event_cb(obj, widget_delete_cb, LV_EVENT_DELETE, ud);
+    if (actions_count == 0) return;
+    auto *slot = new (std::nothrow) ActionSlot{};
+    if (!slot) return;
+    // Always NUL-terminate; widget_id is at most 31 chars + NUL by virtue
+    // of the proto cap, but we copy via snprintf to keep gcc's
+    // stringop-truncation checker quiet.
+    snprintf(slot->widget_id, sizeof(slot->widget_id), "%s", widget_id);
+    slot->actions       = actions;
+    slot->actions_count = actions_count;
+    slot->read_value    = read_value;
+    lv_obj_add_event_cb(obj, widget_event_cb, code, slot);
+    lv_obj_add_event_cb(obj, widget_delete_cb, LV_EVENT_DELETE, slot);
 }
 
 // ---------------------------------------------------------------------------
@@ -118,9 +175,9 @@ lv_obj_t *build_button(lv_obj_t *parent, const touchy_Widget &w)
         lv_label_set_text(lbl, w.kind.button.text);
         lv_obj_center(lbl);
     }
-    if (w.kind.button.has_on_click) {
-        attach_action(btn, w.id, w.kind.button.on_click, LV_EVENT_CLICKED);
-    }
+    attach_actions(btn, w.id,
+                   w.kind.button.on_click, w.kind.button.on_click_count,
+                   LV_EVENT_CLICKED, read_value_none);
     return btn;
 }
 
@@ -145,9 +202,9 @@ lv_obj_t *build_slider(lv_obj_t *parent, const touchy_Widget &w)
     if (mn == mx) { mn = 0; mx = 100; }
     lv_slider_set_range(s, mn, mx);
     lv_slider_set_value(s, w.kind.slider.value, LV_ANIM_OFF);
-    if (w.kind.slider.has_on_change) {
-        attach_action(s, w.id, w.kind.slider.on_change, LV_EVENT_VALUE_CHANGED);
-    }
+    attach_actions(s, w.id,
+                   w.kind.slider.on_change, w.kind.slider.on_change_count,
+                   LV_EVENT_VALUE_CHANGED, read_value_slider);
     return s;
 }
 
@@ -155,10 +212,23 @@ lv_obj_t *build_switch(lv_obj_t *parent, const touchy_Widget &w)
 {
     lv_obj_t *sw = lv_switch_create(parent);
     if (w.kind.toggle.on) lv_obj_add_state(sw, LV_STATE_CHECKED);
-    if (w.kind.toggle.has_on_change) {
-        attach_action(sw, w.id, w.kind.toggle.on_change, LV_EVENT_VALUE_CHANGED);
-    }
+    attach_actions(sw, w.id,
+                   w.kind.toggle.on_change, w.kind.toggle.on_change_count,
+                   LV_EVENT_VALUE_CHANGED, read_value_switch);
     return sw;
+}
+
+lv_obj_t *build_checkbox(lv_obj_t *parent, const touchy_Widget &w)
+{
+    lv_obj_t *cb = lv_checkbox_create(parent);
+    if (w.kind.checkbox.text[0] != '\0') {
+        lv_checkbox_set_text(cb, w.kind.checkbox.text);
+    }
+    if (w.kind.checkbox.checked) lv_obj_add_state(cb, LV_STATE_CHECKED);
+    attach_actions(cb, w.id,
+                   w.kind.checkbox.on_change, w.kind.checkbox.on_change_count,
+                   LV_EVENT_VALUE_CHANGED, read_value_switch);
+    return cb;
 }
 
 lv_obj_t *build_image(lv_obj_t *parent, const touchy_Widget &w)
@@ -282,7 +352,13 @@ struct ScreenHolder {
     touchy_Screen *msg;
     ScreenHolder()  { msg = new (std::nothrow) touchy_Screen(); }
     ~ScreenHolder() { delete msg; }
+    touchy_Screen *release() { auto *p = msg; msg = nullptr; return p; }
 };
+
+// Ownership of the currently-displayed decoded Screen. ActionSlots inside
+// `widget_event_cb` hold pointers into this struct, so we keep it alive
+// until the next ScreenLoad replaces it.
+touchy_Screen *g_active_screen = nullptr;
 
 }  // namespace
 
@@ -371,13 +447,14 @@ bool screens_load(const char *name)
         const touchy_Widget &w = S.widgets[i];
         lv_obj_t *obj = nullptr;
         switch (w.which_kind) {
-        case touchy_Widget_button_tag: obj = build_button(scr, w); break;
-        case touchy_Widget_label_tag:  obj = build_label(scr, w);  break;
-        case touchy_Widget_slider_tag: obj = build_slider(scr, w); break;
-        case touchy_Widget_toggle_tag: obj = build_switch(scr, w); break;
-        case touchy_Widget_image_tag:  obj = build_image(scr, w);  break;
-        case touchy_Widget_arc_tag:    obj = build_arc(scr, w);    break;
-        case touchy_Widget_spacer_tag: obj = build_spacer(scr, w); break;
+        case touchy_Widget_button_tag:   obj = build_button(scr, w);   break;
+        case touchy_Widget_label_tag:    obj = build_label(scr, w);    break;
+        case touchy_Widget_slider_tag:   obj = build_slider(scr, w);   break;
+        case touchy_Widget_toggle_tag:   obj = build_switch(scr, w);   break;
+        case touchy_Widget_image_tag:    obj = build_image(scr, w);    break;
+        case touchy_Widget_arc_tag:      obj = build_arc(scr, w);      break;
+        case touchy_Widget_spacer_tag:   obj = build_spacer(scr, w);   break;
+        case touchy_Widget_checkbox_tag: obj = build_checkbox(scr, w); break;
         default:
             ESP_LOGW(TAG, "widget %s has unknown kind %d, skipping",
                      w.id, (int)w.which_kind);
@@ -389,6 +466,12 @@ bool screens_load(const char *name)
     }
 
     lv_screen_load(scr);
+    // Replace the previously-active decoded Screen *after* loading the
+    // new LVGL screen, so its widgets' delete-callbacks (which still
+    // dereference the old action arrays) fire before the old struct is
+    // freed.
+    delete g_active_screen;
+    g_active_screen = holder.release();
     lvgl_port_unlock();
 
     ESP_LOGI(TAG, "loaded screen '%s' (%u widgets)",

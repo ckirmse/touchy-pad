@@ -119,7 +119,7 @@ message SysVersionResponse {
 // queue is empty, the outer Response sets `code = RESULT_NOT_FOUND` and
 // leaves `event` unset.
 message EventConsumeResponse {
-    Event event = 1;
+    LvEvent event = 1;
 }
 
 // Top-level response envelope. Every command is followed by exactly one
@@ -137,33 +137,42 @@ message Response {
 // Events (device -> host, on the event interrupt IN endpoint)
 // ---------------------------------------------------------------------------
 
-// A lightly-wrapped lvgl event. Mirrors the subset of `lv_event_t` that the
-// host can act on: which trigger fired, the originating widget's
-// host-assigned `user_data` (see docs/host-api.md for the
-// `host_handled_event_cb` pattern), and any per-event payload bytes.
+// A lightly-wrapped lvgl event delivered to the host as the payload of an
+// EventConsumeResponse. The firmware only emits these for widget triggers
+// that carry an `ActionHost` in their layout; pure `ActionMacro` triggers
+// are handled entirely device-side and never enter the queue.
 //
-// `code` values follow lvgl's `lv_event_code_t`; see
-// https://lvgl.io/docs/open/api/core/lv_event_h .
+// Fields:
+//   * `code`       — `lv_event_code_t` value
+//                    (https://lvgl.io/docs/open/api/core/lv_event_h).
+//   * `user_data`  — the originating `Widget.id` (so the host knows which
+//                    widget fired without consulting a side table).
+//   * `host_code`  — the `ActionHost.code` from the layout that triggered
+//                    the forward; host libraries dispatch on this to find
+//                    the registered Python handler.
+//   * `extra`      — per-widget current value packed as little-endian:
+//                    sliders: int32 value
+//                    switches/checkboxes: single byte 0/1
+//                    buttons: empty
 message LvEvent {
-    uint32 code      = 1;     // lv_event_code_t value
-    string user_data = 2;     // value of event_cb user_data attribute
-    bytes  extra     = 3;     // optional per-event payload (e.g. encoder dx)
+    uint32 code      = 1;
+    string user_data = 2;
+    bytes  extra     = 3;
+    uint32 host_code = 4;
 }
 
-// Top-level event envelope sent on the event IN endpoint.
+// Mailbox notification sent on the event interrupt-IN endpoint.
 //
-// The event endpoint's max packet size is small; if a real event payload
-// does not fit, the device instead sends an `EventReady` placeholder and
-// the host fetches the full event via EventConsumeCmd on the command pipe.
+// The endpoint's max packet size is small (16 B) and on-device flow control
+// for variable-size payloads adds complexity, so the device always sends
+// just the `event_ready` flag. On receipt the host drains the device queue
+// by issuing `EventConsumeCmd` repeatedly until the device responds with
+// `RESULT_NOT_FOUND`.
 message Event {
     oneof evt {
-        // "There is at least one event waiting; please send EventConsumeCmd."
-        // Used when the actual event payload doesn't fit in one interrupt
-        // packet. Carries no further data.
-        bool     event_ready = 1;
-
-        // A full event, delivered inline when it fits.
-        LvEvent  lv          = 2;
+        // "There is at least one event waiting; please send EventConsumeCmd
+        // until you get RESULT_NOT_FOUND."
+        bool event_ready = 1;
     }
 }
 
@@ -201,12 +210,70 @@ message Style {
     uint32 text_color = 5;
 }
 
-// Names a host-side action to fire when a widget event happens. The device
-// forwards the event over the existing event endpoint as an `LvEvent` with
-// `user_data == event` and a per-widget `extra` payload (e.g. slider value
-// as a little-endian int32). An empty `event` disables forwarding.
+// Single device-side keystroke step inside an `ActionMacro`.
+//
+// `keycode` is a raw USB HID usage code from page 0x07 (Keyboard / Keypad);
+// see https://usb.org/sites/default/files/hut1_22.pdf for the full table.
+// `modifiers` is the standard 8-bit modifier mask sent in byte 0 of the
+// boot-keyboard report:
+//     bit 0: LCTRL  bit 1: LSHIFT  bit 2: LALT   bit 3: LGUI
+//     bit 4: RCTRL  bit 5: RSHIFT  bit 6: RALT   bit 7: RGUI
+message KeyEvent {
+    uint32 keycode   = 1;
+    uint32 modifiers = 2;
+}
+
+// Relative mouse motion step inside an `ActionMacro`. All three components
+// are signed; `wheel` is the standard HID vertical wheel.
+message MouseMove {
+    int32 dx    = 1;
+    int32 dy    = 2;
+    int32 wheel = 3;
+}
+
+// A single step inside an `ActionMacro`. Steps run in order on a dedicated
+// macro task; between any two steps the runner waits for the currently-
+// configured per-step delay (default 10 ms; see `set_delay_ms`).
+message MacroStep {
+    oneof step {
+        KeyEvent  key_down          = 1;   // press only — chord setup
+        KeyEvent  key_up            = 2;   // release only — chord teardown
+        KeyEvent  key_tap           = 3;   // down then up
+        uint32    mouse_button_down = 4;   // bitmask: L=1,R=2,M=4
+        uint32    mouse_button_up   = 5;
+        uint32    mouse_click       = 6;   // down then up
+        MouseMove mouse_move        = 7;
+        // Update the sticky inter-step delay (ms). Applies to every step
+        // *after* this one until the next `set_delay_ms`.
+        uint32    set_delay_ms      = 8;
+        // One-shot extra pause (ms). Does not affect the sticky delay.
+        uint32    delay_ms          = 9;
+    }
+}
+
+// A device-side macro: a list of HID keyboard / mouse events with delays.
+// Replays entirely on the device — no host round-trips.
+message ActionMacro {
+    repeated MacroStep steps = 1;   // see touchy.options for caps
+}
+
+// A host-handled action: the device forwards an `LvEvent` with the
+// originating widget's id in `user_data`, `code` in `host_code`, and any
+// relevant per-widget value (slider position, switch state, ...) packed
+// into `extra`. The host library dispatches on `host_code` to a registered
+// Python callback.
+message ActionHost {
+    uint32 code = 1;
+}
+
+// Behaviour attached to a widget event trigger (click / value changed /
+// ...). Each widget event slot holds a list of Actions; the device runs
+// them in order. Mixing host- and macro-actions in one list is fine.
 message Action {
-    string event = 1;
+    oneof kind {
+        ActionHost  host  = 1;
+        ActionMacro macro = 2;
+    }
 }
 
 // Top-level screen layout policy. `ABSOLUTE` (the default) keeps widgets
@@ -232,8 +299,8 @@ message Layout {
 // placement on `Widget.rect`.
 
 message Button {
-    string text     = 1;
-    Action on_click = 2;
+    string text             = 1;
+    repeated Action on_click = 2;   // see touchy.options for max count
 }
 
 message Label {
@@ -245,15 +312,21 @@ message Label {
 }
 
 message Slider {
-    int32  min       = 1;
-    int32  max       = 2;
-    int32  value     = 3;
-    Action on_change = 4;
+    int32  min                = 1;
+    int32  max                = 2;
+    int32  value              = 3;
+    repeated Action on_change = 4;
 }
 
 message Switch {
-    bool   on        = 1;
-    Action on_change = 2;
+    bool   on                 = 1;
+    repeated Action on_change = 2;
+}
+
+message Checkbox {
+    string text               = 1;
+    bool   checked            = 2;
+    repeated Action on_change = 3;
 }
 
 message Image {
@@ -281,13 +354,14 @@ message Widget {
     Rect   rect  = 2;
     Style  style = 3;
     oneof kind {
-        Button button = 10;
-        Label  label  = 11;
-        Slider slider = 12;
-        Switch toggle = 13;
-        Image  image  = 14;
-        Arc    arc    = 15;
-        Spacer spacer = 16;
+        Button   button   = 10;
+        Label    label    = 11;
+        Slider   slider   = 12;
+        Switch   toggle   = 13;
+        Image    image    = 14;
+        Arc      arc      = 15;
+        Spacer   spacer   = 16;
+        Checkbox checkbox = 17;
     }
 }
 
