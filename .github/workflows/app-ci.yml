@@ -61,6 +61,7 @@ jobs:
       - name: Install ESP-IDF toolchain
         run: |
           mkdir -p "$HOME/esp"
+          # If cache restore produced an incomplete checkout, discard and reclone.
           if [ -d "$HOME/esp/esp-idf" ] && [ ! -f "$HOME/esp/esp-idf/export.sh" ]; then
             rm -rf "$HOME/esp/esp-idf"
           fi
@@ -69,7 +70,7 @@ jobs:
           fi
           cd "$HOME/esp/esp-idf"
           ./install.sh esp32s3
-          test -f "$HOME/esp/esp-idf/export.sh"
+          [ -f "$HOME/esp/esp-idf/export.sh" ] || { echo "error: ESP-IDF installation incomplete - export.sh not found" >&2; exit 1; }
 
       - name: Generate proto bindings
         working-directory: ${{ github.workspace }}
