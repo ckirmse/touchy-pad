@@ -43,7 +43,7 @@ c_touchy_out     := c_proto_dst  + "/touchy.pb.c"
 c_widgets_out    := c_proto_dst  + "/widgets.pb.c"
 
 # Regenerate both Python and C protobuf bindings (if stale).
-build-proto: build-proto-py build-proto-c
+build-proto: build-proto-py build-proto-c build-default-screen
 
 # Regenerate Python bindings into the host package iff either .proto is
 # newer than its generated module (or the module doesn't exist yet).
@@ -93,6 +93,26 @@ build-proto-c:
         touchy.proto widgets.proto
     echo "wrote {{c_touchy_out}} {{c_widgets_out}}"
 
+# Compile proto/default_screen.json (the firmware's built-in fallback
+# screen, shown when no host-uploaded screens are present) into a C++
+# header carrying its serialised protobuf bytes. Depends on
+# build-proto-py because the embed script needs touchy_pb2.
+default_screen_json := "proto/default_screen.json"
+default_screen_out  := "firmware/main/default_screen_pb.h"
+build-default-screen: build-proto-py
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f "{{default_screen_out}}" ] \
+        && [ "{{default_screen_out}}" -nt "{{default_screen_json}}" ] \
+        && [ "{{default_screen_out}}" -nt "proto/embed_screen_json.py" ] \
+        && [ "{{default_screen_out}}" -nt "{{py_touchy_out}}" ] \
+        && [ "{{default_screen_out}}" -nt "{{py_widgets_out}}" ]; then
+        echo "build-default-screen: up to date"
+        exit 0
+    fi
+    {{sys_python}} proto/embed_screen_json.py \
+        {{default_screen_json}} {{default_screen_out}} default_screen_pb
+
 # ---------------------------------------------------------------------------
 # Host app (app/) — Poetry-driven, but the proto module is a build-time
 # dependency so every recipe depends on build-proto-py to keep the package
@@ -127,7 +147,7 @@ app-run *ARGS: build-proto-py
 
 # Build the firmware. Regenerates C proto bindings first so the firmware
 # always compiles against the latest schema.
-firmware-build: build-proto-c
+firmware-build: build-proto-c build-default-screen
     cmake --build firmware/build
 
 flash: firmware-build

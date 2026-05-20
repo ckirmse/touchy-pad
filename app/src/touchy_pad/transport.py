@@ -287,31 +287,32 @@ class UsbTransport(Transport):
 
         # Find the vendor-specific interface and its three endpoints.
         #
-        # On Linux the kernel's `cdc_acm` (and `usbhid`) drivers bind to
-        # our composite device's CDC / HID interfaces as soon as it
-        # enumerates. That makes `libusb_set_configuration()` fail with
-        # EBUSY, so we must detach every kernel driver from this device
-        # before touching the config. Reattachment on close is the
-        # kernel's responsibility (it auto-rebinds on release).
-        def _detach_all_kernel_drivers() -> None:
-            # Iterate every advertised configuration's interfaces — we
-            # can't trust `get_active_configuration()` here because pyusb
-            # may report "Configuration not set" before we've touched the
-            # device even when the kernel has already auto-configured it.
-            for candidate_cfg in dev:
-                for candidate in candidate_cfg:
-                    num = candidate.bInterfaceNumber
-                    try:
-                        if dev.is_kernel_driver_active(num):
-                            dev.detach_kernel_driver(num)
-                    except (usb.core.USBError, NotImplementedError):
-                        # Not all backends implement these; ignore so we
-                        # still get a usable transport on platforms where
-                        # the kernel never claims the device in the first
-                        # place (macOS, Windows with WinUSB).
-                        pass
-
-        _detach_all_kernel_drivers()
+        # We *only* detach the kernel driver from the vendor interface
+        # we're about to claim. Earlier versions detached every kernel
+        # driver on the device, which broke USB HID mouse / keyboard
+        # reports from the trackpad widget: the kernel's `usbhid` driver
+        # stays detached for the lifetime of this transport, so report
+        # IN packets the firmware emits are silently dropped by the host
+        # USB stack. Leaving `usbhid` and `cdc_acm` attached lets those
+        # interfaces keep working while we drive the vendor interface
+        # from userspace.
+        #
+        # On Linux the kernel auto-configures composite USB devices on
+        # plug-in, so we don't need `libusb_set_configuration()` either —
+        # which used to be the original justification for the
+        # detach-everything dance.
+        def _detach_vendor_kernel_driver(interface_number: int) -> None:
+            try:
+                if dev.is_kernel_driver_active(interface_number):
+                    dev.detach_kernel_driver(interface_number)
+            except (usb.core.USBError, NotImplementedError):
+                # Not all backends implement these; ignore so we still
+                # get a usable transport on platforms where the kernel
+                # never claims the device in the first place (macOS,
+                # Windows with WinUSB). For the vendor interface this is
+                # always best-effort — there's no in-kernel driver for
+                # vendor-class 0xFF interfaces anyway.
+                pass
 
         # On Linux the kernel always auto-configures USB devices, so the
         # first descriptor-listed configuration is the active one — fall
@@ -344,6 +345,12 @@ class UsbTransport(Transport):
         if intf is None:
             raise TransportError("Device has no vendor-specific (0xFF) interface")
         self._intf = intf
+
+        # Now that we know which interface we're going to claim, detach
+        # only its kernel driver (if any). Leaves usbhid / cdc_acm on the
+        # HID / CDC interfaces intact so the host keeps receiving mouse
+        # and keyboard reports while the Python CLI is connected.
+        _detach_vendor_kernel_driver(intf.bInterfaceNumber)
 
         ep_out = ep_in = None
         for ep in intf:

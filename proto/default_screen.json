@@ -1,0 +1,20 @@
+{
+  "name": "default",
+  "layout": {
+    "kind": "GRID",
+    "cols": 1,
+    "rows": 1,
+    "gap": 8
+  },
+  "widgets": [
+    {
+      "id": "msg",
+      "cell": {"col": 0, "row": 0},
+      "style": {"textColor": 16777215},
+      "label": {
+        "text": "No screens configured.\nPlease configure with the Touchy-Pad app.",
+        "fontSize": 20
+      }
+    }
+  ]
+}

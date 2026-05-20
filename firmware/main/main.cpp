@@ -51,6 +51,13 @@ extern "C" void app_main(void)
     // snapshots (LVGL's indev only carries a single point).
     screens_set_touch(tp);
 
+    // Show something on the display from the very first frame: either
+    // the first host-uploaded screen discovered during screens_init(),
+    // or a built-in "No screens configured" fallback when the device
+    // hasn't been provisioned yet. Hosts can override at any time via
+    // ScreenLoadCmd.
+    screens_load(nullptr);
+
     ESP_LOGI(TAG, "Ready");
     // Nothing else to do here — host_api dispatches screen loads driven
     // by the host CLI, Trackpad widgets inside loaded screens react to

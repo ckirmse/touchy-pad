@@ -23,7 +23,10 @@
 extern "C" {
 #endif
 
-// One-time setup. Safe to call more than once.
+// One-time setup. Safe to call more than once. Scans
+// /from_host/screens/ for any host-uploaded .pb files and registers
+// them; the first one found becomes the default screen (see
+// `screens_load`).
 void screens_init(void);
 
 // Provide the touch controller handle so Trackpad widgets inside loaded
@@ -42,8 +45,11 @@ void screens_set_touch(esp_lcd_touch_handle_t handle);
 bool screens_register_from_file(const char *path);
 
 // Switch the active LVGL screen to a previously-registered screen.
-// Returns false if no screen by that name has been registered, or if
-// rendering failed.
+// Passing NULL or "" loads the default screen — the first .pb file
+// found under /from_host/screens/ at boot (or the first registered
+// since), or a built-in "No screens configured" fallback when nothing
+// has been uploaded. Returns false if rendering failed or the named
+// screen isn't registered.
 bool screens_load(const char *name);
 
 // Discard every cached screen. Called by host_api when handling

@@ -11,6 +11,7 @@
 
 #include "screens.h"
 
+#include "default_screen_pb.h"
 #include "fs.h"
 #include "host_api.h"
 #include "log_line.h"
@@ -426,71 +427,18 @@ std::unique_ptr<ScreenMsg> decode_screen(const std::vector<uint8_t> &bytes)
 // action / step array along the way.
 std::unique_ptr<ScreenMsg> g_active_screen;
 
-}  // namespace
+// Name of the registered screen the firmware autoloads on boot and when
+// host code calls screens_load(NULL). Set by screens_init() to the first
+// .pb file it discovers under /from_host/screens/, and updated by
+// screens_register_from_file() when that's still the first arrival.
+std::string g_default_screen_name;
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-void screens_init(void)
+// Render a freshly-decoded screen. Takes ownership of `holder` on
+// success (moves it into `g_active_screen`); on failure the holder is
+// destroyed by the caller's unique_ptr going out of scope.
+bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
 {
-    static bool inited = false;
-    if (inited) return;
-    inited = true;
-    ESP_LOGI(TAG, "screens registry initialised");
-}
-
-bool screens_register_from_file(const char *path)
-{
-    if (!path || !*path) return false;
-
-    // Only "screens/*.pb" files are layout descriptors; everything else
-    // (images, fonts, ...) is on disk for LVGL's loaders to pick up via
-    // "F:" paths and needs no per-file registration step.
-    if (!ends_with(path, ".pb")) {
-        ESP_LOGD(TAG, "ignoring non-screen upload: %s", path);
-        return true;
-    }
-    if (strncmp(path, "screens/", 8) != 0) {
-        ESP_LOGD(TAG, "ignoring .pb outside screens/: %s", path);
-        return true;
-    }
-
-    size_t len = 0;
-    // Files arrive via host_api under /littlefs/from_host/<path>; the path
-    // we're handed is FS-virtual (no "from_host/" prefix), so prepend it
-    // when reading back through Fs.
-    std::string fs_path = std::string("from_host/") + path;
-    uint8_t *raw = Fs::instance().readBinary(fs_path, &len);
-    if (!raw) {
-        ESP_LOGE(TAG, "register_from_file: cannot read %s", fs_path.c_str());
-        return false;
-    }
-
-    std::string stem = stem_from_path(path);
-    registry()[stem].assign(raw, raw + len);
-    delete[] raw;
-
-    ESP_LOGI(TAG, "registered screen '%s' (%u bytes)",
-             stem.c_str(), (unsigned)len);
-    return true;
-}
-
-bool screens_load(const char *name)
-{
-    if (!name || !*name) return false;
-
-    auto it = registry().find(name);
-    if (it == registry().end()) {
-        ESP_LOGE(TAG, "screen '%s' not registered", name);
-        return false;
-    }
-
-    auto holder = decode_screen(it->second);
-    if (!holder) {
-        ESP_LOGE(TAG, "out of memory decoding screen '%s'", name);
-        return false;
-    }
+    if (!holder) return false;
     const touchy_Screen &S = **holder;
 
     lvgl_port_lock(0);
@@ -543,15 +491,130 @@ bool screens_load(const char *name)
     // dereference the old action arrays) fire before the old struct is
     // freed by the unique_ptr reset.
     g_active_screen = std::move(holder);
+    pb_size_t n_widgets = S.widgets_count;
     lvgl_port_unlock();
 
     ESP_LOGI(TAG, "loaded screen '%s' (%u widgets)",
-             name, (unsigned)S.widgets_count);
+             log_name, (unsigned)n_widgets);
     return true;
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+void screens_init(void)
+{
+    static bool inited = false;
+    if (inited) return;
+    inited = true;
+
+    // Auto-discovery: scan /from_host/screens/ for any .pb files the host
+    // has previously uploaded and register them. The first one we find
+    // becomes the boot default (screens_load(NULL) target). Order is
+    // whatever the filesystem returns from list() — for LittleFS this is
+    // the on-disk order, so it's stable across reboots but not
+    // alphabetical.
+    Fs::instance().list("from_host/screens",
+        [](const std::string &name, bool is_dir) {
+            if (is_dir) return true;
+            if (!ends_with(name.c_str(), ".pb")) return true;
+            std::string virt = std::string("screens/") + name;
+            screens_register_from_file(virt.c_str());
+            return true;
+        });
+
+    if (g_default_screen_name.empty()) {
+        ESP_LOGI(TAG, "screens registry initialised (no host screens; "
+                      "built-in fallback will be used)");
+    } else {
+        ESP_LOGI(TAG, "screens registry initialised (default='%s')",
+                 g_default_screen_name.c_str());
+    }
+}
+
+bool screens_register_from_file(const char *path)
+{
+    if (!path || !*path) return false;
+
+    // Only "screens/*.pb" files are layout descriptors; everything else
+    // (images, fonts, ...) is on disk for LVGL's loaders to pick up via
+    // "F:" paths and needs no per-file registration step.
+    if (!ends_with(path, ".pb")) {
+        ESP_LOGD(TAG, "ignoring non-screen upload: %s", path);
+        return true;
+    }
+    if (strncmp(path, "screens/", 8) != 0) {
+        ESP_LOGD(TAG, "ignoring .pb outside screens/: %s", path);
+        return true;
+    }
+
+    size_t len = 0;
+    // Files arrive via host_api under /littlefs/from_host/<path>; the path
+    // we're handed is FS-virtual (no "from_host/" prefix), so prepend it
+    // when reading back through Fs.
+    std::string fs_path = std::string("from_host/") + path;
+    uint8_t *raw = Fs::instance().readBinary(fs_path, &len);
+    if (!raw) {
+        ESP_LOGE(TAG, "register_from_file: cannot read %s", fs_path.c_str());
+        return false;
+    }
+
+    std::string stem = stem_from_path(path);
+    registry()[stem].assign(raw, raw + len);
+    delete[] raw;
+
+    // First screen to land becomes the boot default. Subsequent uploads
+    // don't reshuffle the default (host can always pick by name).
+    if (g_default_screen_name.empty()) {
+        g_default_screen_name = stem;
+    }
+
+    ESP_LOGI(TAG, "registered screen '%s' (%u bytes)",
+             stem.c_str(), (unsigned)len);
+    return true;
+}
+
+bool screens_load(const char *name)
+{
+    // NULL or empty name means "show the default screen". The default is
+    // the first registered screen, or — if nothing is registered — a
+    // built-in fallback compiled in from proto/default_screen.json.
+    if (!name || !*name) {
+        if (!g_default_screen_name.empty()) {
+            return screens_load(g_default_screen_name.c_str());
+        }
+        ESP_LOGI(TAG, "loading built-in default screen");
+        std::vector<uint8_t> bytes(
+            default_screen_pb_data,
+            default_screen_pb_data + default_screen_pb_len);
+        auto holder = decode_screen(bytes);
+        if (!holder) {
+            ESP_LOGE(TAG, "failed to decode built-in default screen");
+            return false;
+        }
+        return load_decoded(std::move(holder), "<built-in>");
+    }
+
+    auto it = registry().find(name);
+    if (it == registry().end()) {
+        ESP_LOGE(TAG, "screen '%s' not registered", name);
+        return false;
+    }
+
+    auto holder = decode_screen(it->second);
+    if (!holder) {
+        ESP_LOGE(TAG, "out of memory decoding screen '%s'", name);
+        return false;
+    }
+    return load_decoded(std::move(holder), name);
 }
 
 void screens_clear(void)
 {
     registry().clear();
+    g_default_screen_name.clear();
     ESP_LOGI(TAG, "screen registry cleared");
 }
