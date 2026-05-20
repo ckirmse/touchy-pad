@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IDF_VERSION: "v6.0.1"
+      # Match firmware/CMakeLists.txt default BOARD for deterministic CI builds.
       FIRMWARE_BOARD: "jc4827w543"
     defaults:
       run:
@@ -60,11 +61,15 @@ jobs:
       - name: Install ESP-IDF toolchain
         run: |
           mkdir -p "$HOME/esp"
+          if [ -d "$HOME/esp/esp-idf" ] && [ ! -f "$HOME/esp/esp-idf/export.sh" ]; then
+            rm -rf "$HOME/esp/esp-idf"
+          fi
           if [ ! -d "$HOME/esp/esp-idf/.git" ]; then
             git clone --branch "${IDF_VERSION}" --single-branch https://github.com/espressif/esp-idf.git "$HOME/esp/esp-idf"
           fi
           cd "$HOME/esp/esp-idf"
           ./install.sh esp32s3
+          test -f "$HOME/esp/esp-idf/export.sh"
 
       - name: Generate proto bindings
         working-directory: ${{ github.workspace }}
