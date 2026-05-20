@@ -17,12 +17,21 @@
 
 #pragma once
 
+#include "esp_lcd_touch.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // One-time setup. Safe to call more than once.
 void screens_init(void);
+
+// Provide the touch controller handle so Trackpad widgets inside loaded
+// screens can read multi-finger data. Must be called once at boot after
+// `touch_init()` returns; safe to call before `screens_init()`. Passing
+// nullptr disables the multi-finger fallback (taps degrade to single
+// finger via LVGL's indev).
+void screens_set_touch(esp_lcd_touch_handle_t handle);
 
 // Inspect a freshly-written file at `path` (relative to /from_host/, i.e.
 // no leading slash and no "F:" drive letter — e.g. "screens/home.pb").

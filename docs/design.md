@@ -218,9 +218,42 @@ Consumer-side changes:
   via nanopb encode + decode into a fresh `PbMessage<touchy_ActionMacro>`,
   because shallow struct copies no longer carry their `steps[]` array.
 
-## Stage 18: Touchpad widget cleanup
+## Stage 18: Touchpad widget cleanup — DONE
 
-* Move our existing touchpad widget proof of concept device code into a python accessible/protobuf configured Touchpad widget.  Any user touches inside that widget will be used to send mouse/touchpad HID events to the host.
+The trackpad proof of concept that previously lived as a hard-coded
+construction inside `app_main()` is now a first-class, host-configurable
+widget that can be placed on any screen via the Python DSL, just like
+buttons or sliders.
+
+* New protobuf widgets in `proto/widgets.proto`:
+    * `Trackpad` — multitouch surface; on-device touches inside the
+      widget's rect become USB HID mouse events (1-finger drag → move,
+      1/2/3-finger tap → left/right/middle click).
+    * `LogLine` — one-line readout of the most recent device log
+      message. Subscribes to a shared sink so any subsystem (currently
+      the trackpad's gesture recogniser) can publish status without
+      knowing where the readout is on screen.
+* `firmware/main/trackpad_widget.{h,cpp}` was rewritten as a self-owning
+  LVGL widget: it builds its own container, hooks LVGL's PRESSED /
+  PRESSING / RELEASED events on that container (so the touch surface
+  only reacts to fingers landing inside its rect), and deletes itself
+  on `LV_EVENT_DELETE`. Multi-finger snapshots still come from
+  `esp_lcd_touch_get_data()` since LVGL's indev abstraction only
+  carries a single point.
+* `firmware/main/log_line.{h,cpp}` is the new shared sink. Producers
+  call `log_line_post(fmt, ...)`, which also `ESP_LOGI`s the line; an
+  internal registry pushes the latest line to every live `LogLine`
+  widget so multiple readouts on different screens stay in sync.
+* `screens.cpp` registers builders for the two new widget tags and
+  exposes `screens_set_touch(handle)` so `main.cpp` can hand it the
+  GT911 handle once at boot. `main.cpp` no longer creates a trackpad
+  itself — the surface only appears once a host-uploaded screen
+  containing a `Trackpad` widget is loaded.
+* `app/src/touchy_pad/screens.py` exposes matching `trackpad(...)` and
+  `log_line(...)` builders, and `build_demo_screen()` was reworked to
+  use absolute layout: controls on the left half, the trackpad
+  occupying the right half, and a `log_line` strip along the bottom
+  echoing each recognised gesture.
 
 ## Stage 20: Beginning of sim-keyboard supprt.  Appears on host as a USB HID keyboard device.  
 

@@ -13,9 +13,11 @@
 
 #include "fs.h"
 #include "host_api.h"
+#include "log_line.h"
 #include "macros.h"
 #include "protobuf.h"
 #include "touchy.pb.h"
+#include "trackpad_widget.h"
 #include "widgets.pb.h"
 
 #include "esp_log.h"
@@ -34,6 +36,16 @@
 #include <vector>
 
 static const char *TAG = "screens";
+
+// Touch controller handle, set once at boot by main.cpp via
+// screens_set_touch(). Trackpad widgets need it to recover multi-finger
+// snapshots that LVGL's single-point indev doesn't carry.
+static esp_lcd_touch_handle_t s_touch_handle = nullptr;
+
+extern "C" void screens_set_touch(esp_lcd_touch_handle_t handle)
+{
+    s_touch_handle = handle;
+}
 
 // ---------------------------------------------------------------------------
 // Cache: filename stem (e.g. "home") -> encoded touchy.Screen bytes
@@ -268,6 +280,21 @@ lv_obj_t *build_spacer(lv_obj_t *parent, const touchy_Widget &)
     return o;
 }
 
+lv_obj_t *build_trackpad(lv_obj_t *parent, const touchy_Widget &)
+{
+    // Lifetime: the heap-allocated TrackpadWidget deletes itself on its
+    // container's LV_EVENT_DELETE (registered in the constructor), so we
+    // can fire-and-forget here.
+    auto *tp = new (std::nothrow) TrackpadWidget(s_touch_handle, parent);
+    return tp ? tp->obj() : nullptr;
+}
+
+lv_obj_t *build_log(lv_obj_t *parent, const touchy_Widget &)
+{
+    auto *lw = new (std::nothrow) LogLine(parent);
+    return lw ? lw->obj() : nullptr;
+}
+
 // ---------------------------------------------------------------------------
 // Style / placement application
 // ---------------------------------------------------------------------------
@@ -454,6 +481,8 @@ bool screens_load(const char *name)
         case touchy_Widget_arc_tag:      obj = build_arc(scr, w);      break;
         case touchy_Widget_spacer_tag:   obj = build_spacer(scr, w);   break;
         case touchy_Widget_checkbox_tag: obj = build_checkbox(scr, w); break;
+        case touchy_Widget_trackpad_tag: obj = build_trackpad(scr, w); break;
+        case touchy_Widget_log_tag:      obj = build_log(scr, w);      break;
         default:
             ESP_LOGW(TAG, "widget %s has unknown kind %d, skipping",
                      w.id, (int)w.which_kind);

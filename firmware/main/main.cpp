@@ -9,7 +9,6 @@
 #include "screens.h"
 #include "touch.h"
 #include "usb_hid.h"
-#include "trackpad_widget.h"
 
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
@@ -47,14 +46,15 @@ extern "C" void app_main(void)
     lv_display_t *disp = display_init();
     esp_lcd_touch_handle_t tp = touch_init(disp);
 
-    // Build the LVGL UI under the port lock. The widget hooks itself into
-    // LVGL's input events; no further driving needed from this task.
-    lvgl_port_lock(0);
-    new TrackpadWidget(tp, lv_screen_active());
-    lvgl_port_unlock();
+    // Hand the touch controller to the screen subsystem so Trackpad
+    // widgets inside host-uploaded screens can recover multi-finger
+    // snapshots (LVGL's indev only carries a single point).
+    screens_set_touch(tp);
 
     ESP_LOGI(TAG, "Ready");
-    // Nothing else to do here — TrackpadWidget reacts to LVGL touch events
-    // on the LVGL task, and TinyUSB runs in its own task.
+    // Nothing else to do here — host_api dispatches screen loads driven
+    // by the host CLI, Trackpad widgets inside loaded screens react to
+    // LVGL touch events on the LVGL task, and TinyUSB runs in its own
+    // task.
     vTaskDelete(NULL);
 }

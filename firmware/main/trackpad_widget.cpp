@@ -2,13 +2,12 @@
 
 #include "trackpad_widget.h"
 
+#include "log_line.h"
 #include "usb_hid.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
 
-#include <cstdarg>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -22,26 +21,10 @@ static uint32_t millis()
 TrackpadWidget::TrackpadWidget(esp_lcd_touch_handle_t touch, lv_obj_t *parent)
     : _touch(touch)
 {
-    lv_coord_t screen_w = lv_obj_get_width(parent);
-    lv_coord_t screen_h = lv_obj_get_height(parent);
-    const lv_coord_t debug_h = 30;
-
-    // ── Debug label strip across the top ──────────────────────────────
-    _debug_label = lv_label_create(parent);
-    lv_obj_set_size(_debug_label, screen_w, debug_h);
-    lv_obj_set_pos(_debug_label, 0, 0);
-    lv_obj_set_style_bg_color(_debug_label, lv_color_hex(0x111111), 0);
-    lv_obj_set_style_bg_opa(_debug_label, LV_OPA_COVER, 0);
-    lv_obj_set_style_text_color(_debug_label, lv_color_hex(0x00FF88), 0);
-    lv_obj_set_style_text_font(_debug_label, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_pad_left(_debug_label, 8, 0);
-    lv_obj_set_style_pad_top(_debug_label, 6, 0);
-    lv_label_set_text(_debug_label, "Touchpad ready");
-
-    // ── Touchpad area filling the rest ────────────────────────────────
+    // The widget *is* the LVGL container; caller sizes/styles it via the
+    // host DSL's Rect / Style. Defaults are kept lean (no padding,
+    // dark background) so the trackpad surface is visually unambiguous.
     _container = lv_obj_create(parent);
-    lv_obj_set_size(_container, screen_w, screen_h - debug_h);
-    lv_obj_set_pos(_container, 0, debug_h);
     lv_obj_set_style_bg_color(_container, lv_color_hex(0x1a1a2e), 0);
     lv_obj_set_style_border_width(_container, 0, 0);
     lv_obj_set_style_pad_all(_container, 0, 0);
@@ -53,23 +36,29 @@ TrackpadWidget::TrackpadWidget(esp_lcd_touch_handle_t touch, lv_obj_t *parent)
     lv_obj_set_style_text_font(hint, &lv_font_montserrat_30, 0);
     lv_obj_center(hint);
 
-    // ── LVGL event-driven touch handling ──────────────────────────────
     // We hook into the input events LVGL already generates for this object
-    // instead of running a busy poll loop. LVGL's indev driver (installed by
-    // lvgl_port_add_touch) reads the GT911 every refresh tick and dispatches
-    // PRESSED / PRESSING / RELEASED to the object under the finger. From
-    // inside those callbacks we re-query the GT911 via esp_lcd_touch_get_data
-    // to recover the *multi-finger* snapshot (LVGL itself only tracks one
-    // point). All event callbacks run on the LVGL task with the port lock
-    // already held, so _setDebug() can update labels without extra locking.
-    lv_obj_add_event_cb(_container, _eventCb, LV_EVENT_PRESSED,  this);
-    lv_obj_add_event_cb(_container, _eventCb, LV_EVENT_PRESSING, this);
-    lv_obj_add_event_cb(_container, _eventCb, LV_EVENT_RELEASED, this);
+    // instead of running a busy poll loop. LVGL's indev driver (installed
+    // by lvgl_port_add_touch) reads the GT911 every refresh tick and
+    // dispatches PRESSED / PRESSING / RELEASED to the object under the
+    // finger. From inside those callbacks we re-query the GT911 via
+    // esp_lcd_touch_get_data to recover the *multi-finger* snapshot (LVGL
+    // itself only tracks one point). All event callbacks run on the LVGL
+    // task with the port lock already held, so log_line_post() can update
+    // sibling LogLine widgets without extra locking.
+    lv_obj_add_event_cb(_container, _eventCb,  LV_EVENT_PRESSED,  this);
+    lv_obj_add_event_cb(_container, _eventCb,  LV_EVENT_PRESSING, this);
+    lv_obj_add_event_cb(_container, _eventCb,  LV_EVENT_RELEASED, this);
+    lv_obj_add_event_cb(_container, _deleteCb, LV_EVENT_DELETE,   this);
 }
 
 void TrackpadWidget::_eventCb(lv_event_t *e)
 {
     static_cast<TrackpadWidget *>(lv_event_get_user_data(e))->_process();
+}
+
+void TrackpadWidget::_deleteCb(lv_event_t *e)
+{
+    delete static_cast<TrackpadWidget *>(lv_event_get_user_data(e));
 }
 
 void TrackpadWidget::_process()
@@ -79,7 +68,9 @@ void TrackpadWidget::_process()
     // without a redundant I2C round-trip.
     esp_lcd_touch_point_data_t pts[MAX_FINGERS] = {};
     uint8_t count = 0;
-    bool pressed = (esp_lcd_touch_get_data(_touch, pts, &count, MAX_FINGERS) == ESP_OK) && count > 0;
+    bool pressed = _touch
+        && (esp_lcd_touch_get_data(_touch, pts, &count, MAX_FINGERS) == ESP_OK)
+        && count > 0;
     if (!pressed) count = 0;
     if (count > MAX_FINGERS) count = MAX_FINGERS;
 
@@ -116,7 +107,7 @@ void TrackpadWidget::_process()
             int8_t mx = clamp(dx * MOVE_SCALE);
             int8_t my = clamp(dy * MOVE_SCALE);
             usb_hid_mouse_move(mx, my);
-            _setDebug("drag %+d,%+d", mx, my);
+            log_line_post("drag %+d,%+d", mx, my);
         }
 
         _fingers[0].last_x = static_cast<int16_t>(pts[0].x);
@@ -154,20 +145,7 @@ void TrackpadWidget::_clickButton(int finger_count)
         default: btn = HID_MOUSE_BTN_MIDDLE; name = "MIDDLE click"; break;
     }
     usb_hid_mouse_click(btn);
-    _setDebug("%s (%d finger%s)", name, finger_count, finger_count > 1 ? "s" : "");
-}
-
-void TrackpadWidget::_setDebug(const char *fmt, ...)
-{
-    char buf[80];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-
-    ESP_LOGI(TAG, "%s", buf);
-
-    // Always called from an LVGL event callback, which already holds the
-    // LVGL port lock — so we can touch widgets directly.
-    lv_label_set_text(_debug_label, buf);
+    log_line_post("%s (%d finger%s)", name, finger_count,
+                  finger_count > 1 ? "s" : "");
+    ESP_LOGI(TAG, "%s", name);
 }

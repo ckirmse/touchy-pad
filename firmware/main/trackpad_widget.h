@@ -1,8 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Ported from v1/firmware/src/trackpad_widget.{h,cpp}. Same gesture rules,
-// but rewritten against ESP-IDF: esp_lcd_touch handle for multi-finger data,
-// esp_timer for millis(), TinyUSB HID for mouse output.
+// Stage 18 — multitouch trackpad as a Screen-instantiable widget.
+//
+// The widget owns a single LVGL container (returned by `obj()`); the
+// gesture state machine reacts to LVGL PRESSED / PRESSING / RELEASED
+// events on that container and emits USB HID mouse reports. Lifetime
+// is tied to the LVGL object: a LV_EVENT_DELETE callback deletes the
+// C++ instance when the parent screen is replaced.
+//
+// Status messages (recognised gestures) are pushed to the shared log
+// sink via `log_line_post(...)`; place a `LogLine` widget on the same
+// screen to surface them to the user.
+//
+// Tuning constants come from the v1 proof-of-concept; the gesture rules
+// are intentionally unchanged (1/2/3-finger tap = L/R/M click,
+// single-finger drag = mouse move). Multi-finger drag / scroll is still
+// deferred to a later stage.
 
 #pragma once
 
@@ -17,12 +30,21 @@ public:
     static constexpr int16_t  TAP_MAX_MOVE  = 12;
     static constexpr uint8_t  MAX_FINGERS   = 3;
 
+    // Construct the widget as a child of `parent`. The caller is
+    // expected to size/style it via the usual `apply_rect` /
+    // `apply_style` pass after construction.
+    //
+    // `touch` may be nullptr: the widget still draws and reacts to LVGL
+    // press events, but multi-finger taps degrade to single-finger taps
+    // because the LVGL indev only carries one point.
     TrackpadWidget(esp_lcd_touch_handle_t touch, lv_obj_t *parent);
+
+    // The LVGL container — pass back to `apply_rect` / `apply_style`.
+    lv_obj_t *obj() const { return _container; }
 
 private:
     esp_lcd_touch_handle_t _touch;
-    lv_obj_t *_container    = nullptr;
-    lv_obj_t *_debug_label  = nullptr;
+    lv_obj_t *_container = nullptr;
 
     struct FingerState {
         bool     active   = false;
@@ -37,11 +59,12 @@ private:
     uint8_t     _prev_count          = 0;
     uint8_t     _session_max_fingers = 0;
 
-    // LVGL event entry points. _process() is the shared state machine,
-    // dispatched from PRESSED / PRESSING / RELEASED on the touchpad container.
+    // LVGL event entry points. `_process()` is the shared state machine,
+    // dispatched from PRESSED / PRESSING / RELEASED. `_deleteCb` frees
+    // `this` on LV_EVENT_DELETE.
     static void _eventCb(lv_event_t *e);
+    static void _deleteCb(lv_event_t *e);
     void _process();
 
     void _clickButton(int finger_count);
-    void _setDebug(const char *fmt, ...);
 };

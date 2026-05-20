@@ -149,8 +149,7 @@ flash: firmware-build
     # Use esptool directly from the ESP-IDF venv — avoids sourcing export.sh,
     # which breaks inside an already-activated Python environment.
     # cd into build so the relative binary paths in flash_args resolve.
-    py="/root/.espressif/tools/python/v6.0.1/venv/bin/python"
-    esptool_py="/root/.espressif/v6.0.1/esp-idf/components/esptool_py/esptool/esptool.py"
+    esptool_py="esptool"
     cd firmware/build
     mapfile -t flash_args < flash_args
     # flash_args has two lines: flags line, then addr:file pairs per line.
@@ -160,7 +159,7 @@ flash: firmware-build
         read -ra words <<< "$line"
         args+=("${words[@]}")
     done
-    "$py" "$esptool_py" -p "$port" -b 460800 \
+    "$esptool_py" -p "$port" -b 460800 \
         --before default-reset --after hard-reset \
         --chip esp32s3 write-flash "${args[@]}"
 

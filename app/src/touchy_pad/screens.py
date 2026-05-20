@@ -50,6 +50,8 @@ __all__ = [
     "image",
     "arc",
     "spacer",
+    "trackpad",
+    "log_line",
     "build_demo_screen",
 ]
 
@@ -326,6 +328,40 @@ def spacer(
     return w
 
 
+def trackpad(
+    id: str,
+    rect: _proto.Rect | None = None,
+    style: _proto.Style | None = None,
+) -> _proto.Widget:
+    """Multitouch trackpad surface (device-side HID mouse).
+
+    Touches inside the widget become USB HID mouse events on the device:
+    one-finger drag → move, 1/2/3-finger tap → left / right / middle
+    click. Recognised gestures are echoed to the shared device log sink,
+    so placing a :func:`log_line` on the same screen surfaces them to
+    the user.
+    """
+    w = _widget(id, rect=rect, style=style)
+    w.trackpad.SetInParent()
+    return w
+
+
+def log_line(
+    id: str = "log",
+    rect: _proto.Rect | None = None,
+    style: _proto.Style | None = None,
+) -> _proto.Widget:
+    """One-line readout of the most recent device log message.
+
+    Subscribes to the firmware's shared log sink (see
+    ``firmware/main/log_line.{h,cpp}``); the :func:`trackpad` widget
+    and other subsystems push status lines through that sink.
+    """
+    w = _widget(id, rect=rect, style=style)
+    w.log.SetInParent()
+    return w
+
+
 # ---------------------------------------------------------------------------
 # Screen — the top-level container
 # ---------------------------------------------------------------------------
@@ -394,29 +430,48 @@ class Screen:
 
 
 def build_demo_screen(name: str = "demo") -> Screen:
-    """Build a sample screen exercising stage-16 actions.
+    """Build a sample screen exercising stages 16 and 18.
 
     Used by the ``touchy screens demo`` CLI subcommand as a smoke test
-    for the action pipeline. Layout is a single-column flex so each
-    widget gets a clear, full-width row regardless of display size.
+    for the action pipeline and the on-device trackpad widget. Layout
+    is ABSOLUTE so the left/right split is exact; the firmware's
+    default screen size is 800x480 (Waveshare 7") but the right-half
+    rectangle works fine on smaller displays too — LVGL just clips.
 
     Wiring:
 
-    * "hello" button — a device-side macro that types ``"hi"`` over
-      the USB HID keyboard interface (no host round-trip).
-    * "ping" button — a host action with code 0x100; the demo CLI
-      registers a Python handler that prints the incoming event.
-    * slider — a host action with code 0x101 (extra carries int32 LE).
-    * checkbox — a host action with code 0x102 (extra is 1 byte).
+    * Left column (buttons / slider / checkbox):
+        - "hello" button — a device-side macro that types ``"hi"`` over
+          USB HID (no host round-trip).
+        - "ping" button — host action 0x100; demo CLI prints incoming
+          events.
+        - slider — host action 0x101 (extra carries int32 LE).
+        - checkbox — host action 0x102 (extra is 1 byte).
+
+    * Right half: a :func:`trackpad` for HID mouse output.
+
+    * Bottom strip: a :func:`log_line` that mirrors the device's most
+      recent log message (e.g. each recognised trackpad gesture).
     """
     from . import macros as m
     from . import hid_keys as k
 
-    s = Screen(name, layout=col(gap=12))
+    # Logical screen size used by the layout below. Picked to match the
+    # my small test LCD
+    W, H = 480, 272
+    log_h = 30
+    pad = 8
+    left_w = W // 2 - pad
+    right_x = W // 2 + pad // 2
+
+    s = Screen(name, layout=absolute())
+
+    # ── left column: stacked control widgets ───────────────────────────
     s += label(
         "title",
         text="Touchy-Pad demo",
         font_size=24,
+        rect=rect(pad, pad, left_w, 32),
         style=style(text_color=0xFFFFFF),
     )
     s += button(
@@ -426,11 +481,26 @@ def build_demo_screen(name: str = "demo") -> Screen:
             m.key_tap(k.KEY_H, k.MOD_LSHIFT),
             m.key_tap(k.KEY_I),
         ]),
+        rect=rect(pad, 56, left_w, 48),
     )
-    s += button("ping", text="Ping host", on_click=host_action(0x100))
-    s += slider("level", min=0, max=100, value=42, on_change=host_action(0x101))
+    s += button("ping", text="Ping host", on_click=host_action(0x100),
+                rect=rect(pad, 116, left_w, 48))
+    s += slider("level", min=0, max=100, value=42,
+                on_change=host_action(0x101),
+                rect=rect(pad, 184, left_w, 20))
     s += checkbox("enable", text="Enabled", checked=True,
-                  on_change=host_action(0x102))
+                  on_change=host_action(0x102),
+                  rect=rect(pad, 224, left_w, 32))
+
+    # ── right half: multitouch trackpad ────────────────────────────────
+    s += trackpad(
+        "pad",
+        rect=rect(right_x, pad, W // 2 - pad - pad // 2,
+                  H - log_h - pad * 2),
+    )
+
+    # ── bottom strip: shared log sink readout ──────────────────────────
+    s += log_line("log", rect=rect(0, H - log_h, W, log_h))
     return s
 
 

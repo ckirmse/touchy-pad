@@ -182,6 +182,27 @@ message Arc {
 message Spacer {
 }
 
+// Multitouch trackpad surface. Touches inside the widget are converted to
+// USB HID mouse events on-device (one-finger drag -> move,
+// 1/2/3-finger tap -> left/right/middle click). No host round-trip,
+// no Actions: the widget runs entirely device-side.
+//
+// To see live gesture feedback, place a `LogLine` somewhere on the
+// same screen; the trackpad pushes a short status line on every
+// recognised gesture to the shared device log sink.
+message Trackpad {
+}
+
+// Single-line text widget that mirrors the most recent line written to
+// the device's log sink (see firmware/main/log_line.{h,cpp}). The
+// trackpad, screen registry, and any other subsystem that wants to
+// surface activity to the user calls `log_line_post(...)`; every
+// LogLine on the active screen updates synchronously.
+//
+// Purely a viewer — no Actions, no host round-trip.
+message LogLine {
+}
+
 // A single widget inside a `Screen`. `id` is an opaque host-chosen string
 // that follows the widget into events; the device stores it via
 // `lv_obj_set_user_data` and copies it into the `user_data` field of
@@ -199,6 +220,8 @@ message Widget {
         Arc      arc      = 15;
         Spacer   spacer   = 16;
         Checkbox checkbox = 17;
+        Trackpad trackpad = 18;
+        LogLine  log      = 19;
     }
 }
 
