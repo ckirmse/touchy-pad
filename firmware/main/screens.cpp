@@ -15,6 +15,7 @@
 #include "host_api.h"
 #include "macros.h"
 #include "touchy.pb.h"
+#include "widgets.pb.h"
 
 #include "esp_log.h"
 #include "esp_lvgl_port.h"

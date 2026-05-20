@@ -1,0 +1,211 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Widget / screen layout types for the Touchy-Pad declarative UI system.
+//
+// These messages describe LVGL screens authored on the host and uploaded to
+// the device via `FileSaveCmd` (see `touchy.proto`). The device decodes them
+// from `screens/<name>.pb` files using nanopb; the host DSL in
+// `app/src/touchy_pad/screens.py` serialises them using protobuf-python.
+//
+// See docs/why-not-xml.md for the rationale behind protobuf over XML.
+
+syntax = "proto3";
+
+package touchy;
+
+// ---------------------------------------------------------------------------
+// Stage 15 — declarative screen layouts (host-uploaded, on-device rendered)
+// ---------------------------------------------------------------------------
+//
+// A `Screen` describes a single LVGL screen as a flat list of `Widget`s
+// plus an optional `Layout`. The host serialises one `Screen` per file
+// and uploads it via `FileSaveCmd` to `screens/<name>.pb`; the device
+// caches the encoded bytes and instantiates LVGL objects when
+// `ScreenLoadCmd("<name>")` arrives.
+//
+// See docs/why-not-xml.md for the rationale behind protobuf over XML.
+
+// Pixel-space placement. When the parent screen has Layout.kind == ABSOLUTE
+// (the default) all four fields are honoured; under ROW/COL/GRID, only `w`
+// and `h` are used (a zero value means "size to content").
+message Rect {
+    int32 x = 1;
+    int32 y = 2;
+    int32 w = 3;
+    int32 h = 4;
+}
+
+// Cosmetic overrides applied via lv_obj_set_style_* on the main part of the
+// widget. Zero / unset fields fall back to LVGL's default theme value.
+//
+// Colours are packed 0xRRGGBB; the top byte is ignored.
+message Style {
+    uint32 bg_color   = 1;
+    int32  radius     = 2;
+    int32  border_w   = 3;
+    int32  pad        = 4;
+    uint32 text_color = 5;
+}
+
+// Single device-side keystroke step inside an `ActionMacro`.
+//
+// `keycode` is a raw USB HID usage code from page 0x07 (Keyboard / Keypad);
+// see https://usb.org/sites/default/files/hut1_22.pdf for the full table.
+// `modifiers` is the standard 8-bit modifier mask sent in byte 0 of the
+// boot-keyboard report:
+//     bit 0: LCTRL  bit 1: LSHIFT  bit 2: LALT   bit 3: LGUI
+//     bit 4: RCTRL  bit 5: RSHIFT  bit 6: RALT   bit 7: RGUI
+message KeyEvent {
+    uint32 keycode   = 1;
+    uint32 modifiers = 2;
+}
+
+// Relative mouse motion step inside an `ActionMacro`. All three components
+// are signed; `wheel` is the standard HID vertical wheel.
+message MouseMove {
+    int32 dx    = 1;
+    int32 dy    = 2;
+    int32 wheel = 3;
+}
+
+// A single step inside an `ActionMacro`. Steps run in order on a dedicated
+// macro task; between any two steps the runner waits for the currently-
+// configured per-step delay (default 10 ms; see `set_delay_ms`).
+message MacroStep {
+    oneof step {
+        KeyEvent  key_down          = 1;   // press only — chord setup
+        KeyEvent  key_up            = 2;   // release only — chord teardown
+        KeyEvent  key_tap           = 3;   // down then up
+        uint32    mouse_button_down = 4;   // bitmask: L=1,R=2,M=4
+        uint32    mouse_button_up   = 5;
+        uint32    mouse_click       = 6;   // down then up
+        MouseMove mouse_move        = 7;
+        // Update the sticky inter-step delay (ms). Applies to every step
+        // *after* this one until the next `set_delay_ms`.
+        uint32    set_delay_ms      = 8;
+        // One-shot extra pause (ms). Does not affect the sticky delay.
+        uint32    delay_ms          = 9;
+    }
+}
+
+// A device-side macro: a list of HID keyboard / mouse events with delays.
+// Replays entirely on the device — no host round-trips.
+message ActionMacro {
+    repeated MacroStep steps = 1;   // see widgets.options for caps
+}
+
+// A host-handled action: the device forwards an `LvEvent` with the
+// originating widget's id in `user_data`, `code` in `host_code`, and any
+// relevant per-widget value (slider position, switch state, ...) packed
+// into `extra`. The host library dispatches on `host_code` to a registered
+// Python callback.
+message ActionHost {
+    uint32 code = 1;
+}
+
+// Behaviour attached to a widget event trigger (click / value changed /
+// ...). Each widget event slot holds a list of Actions; the device runs
+// them in order. Mixing host- and macro-actions in one list is fine.
+message Action {
+    oneof kind {
+        ActionHost  host  = 1;
+        ActionMacro macro = 2;
+    }
+}
+
+// Top-level screen layout policy. `ABSOLUTE` (the default) keeps widgets
+// positioned exactly where their `Rect.x` / `Rect.y` say. `ROW` / `COL`
+// use lv_obj_set_flex_flow; `GRID` uses an even `cols`-wide grid with
+// `gap`-pixel spacing between cells.
+message Layout {
+    enum Kind {
+        ABSOLUTE = 0;
+        ROW      = 1;
+        COL      = 2;
+        GRID     = 3;
+    }
+    Kind  kind = 1;
+    int32 cols = 2;       // GRID only
+    int32 gap  = 3;       // pixels between children (ROW/COL/GRID)
+}
+
+// ----- Widget kinds -----
+//
+// Each kind carries only the attributes that need to round-trip from the
+// authoring DSL. Visual styling lives on the enclosing `Widget.style`;
+// placement on `Widget.rect`.
+
+message Button {
+    string text             = 1;
+    repeated Action on_click = 2;   // see widgets.options for max count
+}
+
+message Label {
+    string text      = 1;
+    // 0 = theme default. Otherwise: closest available Montserrat size
+    // compiled into the firmware (see CONFIG_LV_FONT_MONTSERRAT_* in
+    // firmware/sdkconfig.defaults).
+    int32  font_size = 2;
+}
+
+message Slider {
+    int32  min                = 1;
+    int32  max                = 2;
+    int32  value              = 3;
+    repeated Action on_change = 4;
+}
+
+message Switch {
+    bool   on                 = 1;
+    repeated Action on_change = 2;
+}
+
+message Checkbox {
+    string text               = 1;
+    bool   checked            = 2;
+    repeated Action on_change = 3;
+}
+
+message Image {
+    // Path to a previously-uploaded image, relative to /from_host/
+    // (e.g. "img/avatar.png"). LVGL's PNG/JPG decoders must be enabled
+    // in sdkconfig for the format used.
+    string asset = 1;
+}
+
+message Arc {
+    int32 min   = 1;
+    int32 max   = 2;
+    int32 value = 3;
+}
+
+message Spacer {
+}
+
+// A single widget inside a `Screen`. `id` is an opaque host-chosen string
+// that follows the widget into events; the device stores it via
+// `lv_obj_set_user_data` and copies it into the `user_data` field of
+// every event the widget emits.
+message Widget {
+    string id    = 1;
+    Rect   rect  = 2;
+    Style  style = 3;
+    oneof kind {
+        Button   button   = 10;
+        Label    label    = 11;
+        Slider   slider   = 12;
+        Switch   toggle   = 13;
+        Image    image    = 14;
+        Arc      arc      = 15;
+        Spacer   spacer   = 16;
+        Checkbox checkbox = 17;
+    }
+}
+
+// One on-device LVGL screen. The encoded `Screen` is what lives in
+// /from_host/screens/<name>.pb.
+message Screen {
+    string name             = 1;   // must match the filename stem
+    Layout layout           = 2;
+    repeated Widget widgets = 3;
+}

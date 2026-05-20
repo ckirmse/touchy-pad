@@ -1,48 +1,50 @@
-"""Re-exports from the generated protobuf module.
+"""Re-exports from the generated protobuf modules.
 
-The actual ``touchy_pb2`` module is generated from ``proto/touchy.proto`` by
-``just build-proto`` (or ``just build-proto-py``) and committed under
-``touchy_pad/_proto/touchy_pb2.py`` so the package is installable from
-PyPI without protoc.
+The actual ``touchy_pb2`` and ``widgets_pb2`` modules are generated from
+``proto/touchy.proto`` and ``proto/widgets.proto`` by ``just build-proto``
+(or ``just build-proto-py``) and committed under ``touchy_pad/_proto/`` so
+the package is installable from PyPI without protoc.
 """
 
 from __future__ import annotations
 
 from .touchy_pb2 import (  # noqa: F401  (re-exported)
-    Action,
-    ActionHost,
-    ActionMacro,
-    Arc,
-    Button,
-    Checkbox,
     Command,
     Event,
     EventConsumeCmd,
     EventConsumeResponse,
     FileResetCmd,
     FileSaveCmd,
+    LvEvent,
+    Response,
+    ResultCode,
+    ScreenLoadCmd,
+    ScreenSleepTimeoutCmd,
+    ScreenWakeCmd,
+    StreamEventsCmd,
+    SysRebootBootloaderCmd,
+    SysVersionGetCmd,
+    SysVersionResponse,
+)
+from .widgets_pb2 import (  # noqa: F401  (re-exported)
+    Action,
+    ActionHost,
+    ActionMacro,
+    Arc,
+    Button,
+    Checkbox,
     Image,
     KeyEvent,
     Label,
     Layout,
-    LvEvent,
     MacroStep,
     MouseMove,
     Rect,
-    Response,
-    ResultCode,
     Screen,
-    ScreenLoadCmd,
-    ScreenSleepTimeoutCmd,
-    ScreenWakeCmd,
     Slider,
     Spacer,
-    StreamEventsCmd,
     Style,
     Switch,
-    SysRebootBootloaderCmd,
-    SysVersionGetCmd,
-    SysVersionResponse,
     Widget,
 )
 

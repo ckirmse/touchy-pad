@@ -33,50 +33,65 @@ sys_python := env("SYS_PYTHON", "/usr/bin/python3")
 # emulate it with `[ src -nt dst ]`.
 # ---------------------------------------------------------------------------
 
-proto_src    := "proto/touchy.proto"
-proto_opts   := "proto/touchy.options"
-py_proto_out := py_proto_dst + "/touchy_pb2.py"
-c_proto_out  := c_proto_dst  + "/touchy.pb.c"
+touchy_proto     := "proto/touchy.proto"
+touchy_opts      := "proto/touchy.options"
+widgets_proto    := "proto/widgets.proto"
+widgets_opts     := "proto/widgets.options"
+py_touchy_out    := py_proto_dst + "/touchy_pb2.py"
+py_widgets_out   := py_proto_dst + "/widgets_pb2.py"
+c_touchy_out     := c_proto_dst  + "/touchy.pb.c"
+c_widgets_out    := c_proto_dst  + "/widgets.pb.c"
 
 # Regenerate both Python and C protobuf bindings (if stale).
 build-proto: build-proto-py build-proto-c
 
-# Regenerate Python bindings into the host package iff touchy.proto is
-# newer than the generated module (or the module doesn't exist yet).
+# Regenerate Python bindings into the host package iff either .proto is
+# newer than its generated module (or the module doesn't exist yet).
 # `poetry build` then bundles them into the wheel/sdist so PyPI users don't
 # need protoc.
 build-proto-py:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -f "{{py_proto_out}}" ] \
-       && [ ! "{{proto_src}}" -nt "{{py_proto_out}}" ]; then
-        echo "build-proto-py: {{py_proto_out}} is up to date"
+    touchy_stale=0
+    widgets_stale=0
+    [ ! -f "{{py_touchy_out}}"  ] && touchy_stale=1
+    [ ! -f "{{py_widgets_out}}" ] && widgets_stale=1
+    [ "{{touchy_proto}}"  -nt "{{py_touchy_out}}"  ] && touchy_stale=1  || true
+    [ "{{widgets_proto}}" -nt "{{py_widgets_out}}" ] && widgets_stale=1 || true
+    if [ $touchy_stale -eq 0 ] && [ $widgets_stale -eq 0 ]; then
+        echo "build-proto-py: up to date"
         exit 0
     fi
     mkdir -p {{py_proto_dst}}
     {{sys_python}} -m grpc_tools.protoc \
         -Iproto \
         --python_out={{py_proto_dst}} \
-        {{proto_src}}
-    echo "wrote {{py_proto_out}}"
+        {{touchy_proto}} {{widgets_proto}}
+    echo "wrote {{py_touchy_out}} {{py_widgets_out}}"
 
-# Regenerate the embedded C bindings via nanopb iff the proto or its
-# nanopb options file is newer than the generated .pb.c.
+# Regenerate the embedded C bindings via nanopb iff any proto or options
+# file is newer than the generated .pb.c files.
 build-proto-c:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -f "{{c_proto_out}}" ] \
-       && [ ! "{{proto_src}}"  -nt "{{c_proto_out}}" ] \
-       && [ ! "{{proto_opts}}" -nt "{{c_proto_out}}" ]; then
-        echo "build-proto-c:  {{c_proto_out}} is up to date"
+    touchy_stale=0
+    widgets_stale=0
+    [ ! -f "{{c_touchy_out}}"  ] && touchy_stale=1
+    [ ! -f "{{c_widgets_out}}" ] && widgets_stale=1
+    [ "{{touchy_proto}}"  -nt "{{c_touchy_out}}"  ] && touchy_stale=1  || true
+    [ "{{touchy_opts}}"   -nt "{{c_touchy_out}}"  ] && touchy_stale=1  || true
+    [ "{{widgets_proto}}" -nt "{{c_widgets_out}}" ] && widgets_stale=1 || true
+    [ "{{widgets_opts}}"  -nt "{{c_widgets_out}}" ] && widgets_stale=1 || true
+    if [ $touchy_stale -eq 0 ] && [ $widgets_stale -eq 0 ]; then
+        echo "build-proto-c:  up to date"
         exit 0
     fi
     # nanopb's generator wants to run from a directory that contains the
     # .proto file so its --proto_path defaults line up.
     cd {{c_proto_dst}} && {{sys_python}} -m nanopb.generator.nanopb_generator \
         --output-dir=. \
-        touchy.proto
-    echo "wrote {{c_proto_out}}"
+        touchy.proto widgets.proto
+    echo "wrote {{c_touchy_out}} {{c_widgets_out}}"
 
 # ---------------------------------------------------------------------------
 # Host app (app/) — Poetry-driven, but the proto module is a build-time
@@ -156,6 +171,9 @@ flash: firmware-build
 
 # Build firmware + Python wheel (proto bindings regenerated as needed).
 build-all: firmware-build app-build
+
+test-interactive: 
+    cd app && poetry run touchy screens demo --listen
 
 # Lint + test everything (currently just the host app).
 test: app-lint app-test

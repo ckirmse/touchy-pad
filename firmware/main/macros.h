@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include "touchy.pb.h"
+#include "widgets.pb.h"
 
 #ifdef __cplusplus
 extern "C" {
