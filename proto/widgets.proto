@@ -113,48 +113,59 @@ message Action {
     }
 }
 
-// Top-level screen layout policy. `ABSOLUTE` (the default) keeps widgets
-// positioned exactly where their `Rect.x` / `Rect.y` say. `ROW` / `COL`
-// use lv_obj_set_flex_flow; `GRID` is the LVGL grid layout (see
-// https://lvgl.io/docs/open/examples/layouts/grid).
-//
-// Under GRID:
-//   * The screen is divided into `cols` columns and `rows` rows, each one
-//     LV_GRID_FR(1) wide/tall (i.e. equal share of the parent). If `rows`
-//     is zero the row track sizes to content, matching the original
-//     stage-15 behaviour.
-//   * Every widget should carry a `GridCell` selecting its placement;
-//     widgets without one default to (col=0, row=0).
-//   * Widgets stretch to fill their assigned cell(s); use the
-//     widget's `style.pad` for inner padding.
-message Layout {
-    enum Kind {
-        ABSOLUTE = 0;
-        ROW      = 1;
-        COL      = 2;
-        GRID     = 3;
+// Absolute (default) screen layout: every widget is positioned exactly
+// where its `Widget.layout.rect` says. Widgets without a `rect` default
+// to (0, 0) with "size-to-content" dimensions.
+message LayoutAbsolute {
+}
+
+// Flex screen layout (lv_obj_set_flex_flow). `flow` selects the LVGL flex
+// flow mode; `gap` sets the pixel gap between children.
+message LayoutFlex {
+    // Maps 1-to-1 onto lv_flex_flow_t.
+    enum Flow {
+        ROW                 = 0;
+        COLUMN              = 1;
+        ROW_WRAP            = 2;
+        ROW_REVERSE         = 3;
+        ROW_WRAP_REVERSE    = 4;
+        COLUMN_WRAP         = 5;
+        COLUMN_REVERSE      = 6;
+        COLUMN_WRAP_REVERSE = 7;
     }
-    Kind  kind = 1;
-    int32 cols = 2;       // GRID only
-    int32 gap  = 3;       // pixels between children (ROW/COL/GRID)
-    int32 rows = 4;       // GRID only; 0 = CONTENT-sized single row track
+    Flow   flow = 1;
+    uint32 gap  = 2;    // pixels between children
+}
+
+// Grid screen layout (lv_obj_set_layout(…, LV_LAYOUT_GRID)).
+//
+//   * `cols` columns, each LV_GRID_FR(1) wide. 0 → treated as 1.
+//   * `rows` rows, each LV_GRID_FR(1) tall. 0 → single content-sized row.
+//   * `gap` pixels between all tracks.
+//
+// Every widget should carry `Widget.layout.cell`; widgets without one
+// land in (col=0, row=0) with span 1×1.
+message LayoutGrid {
+    uint32 cols = 1;
+    uint32 rows = 2;    // 0 = CONTENT-sized single row track
+    uint32 gap  = 3;    // pixels between tracks
 }
 
 // Grid placement for a widget whose parent uses Layout.kind == GRID.
 // `col_span` / `row_span` default to 1 when zero. Widgets without a
 // `GridCell` land in (col=0, row=0) with span 1x1.
 message GridCell {
-    int32 col      = 1;
-    int32 row      = 2;
-    int32 col_span = 3;
-    int32 row_span = 4;
+    uint32 col      = 1;
+    uint32 row      = 2;
+    uint32 col_span = 3;
+    uint32 row_span = 4;
 }
 
 // ----- Widget kinds -----
 //
 // Each kind carries only the attributes that need to round-trip from the
 // authoring DSL. Visual styling lives on the enclosing `Widget.style`;
-// placement on `Widget.rect`.
+// placement on `Widget.layout` (rect or cell).
 
 message Button {
     string text             = 1;
@@ -239,13 +250,13 @@ message LogLine {
 // every event the widget emits.
 message Widget {
     string id    = 1;
-    Rect   rect  = 2;
     Style  style = 3;
-    // Only meaningful when the enclosing screen's Layout.kind == GRID.
-    GridCell cell = 4;
-    // If true, lv_obj_center() is called on the LVGL object after placement.
-    // Useful for centering a label inside its grid cell.
     bool centered = 5;
+    // Placement: set `rect` for absolute/flex layouts, `cell` for GRID.
+    oneof layout {
+        Rect     rect = 2;   // absolute position / size
+        GridCell cell = 4;   // GRID column / row placement
+    }
     oneof kind {
         Button   button   = 10;
         Label    label    = 11;
@@ -260,10 +271,30 @@ message Widget {
     }
 }
 
+// Wire-format version of the `Screen` message. The device rejects (and
+// deletes) any saved `.pb` file whose `version` field is not `CURRENT`.
+// Increment `CURRENT` whenever a wire-incompatible change is made to
+// `Screen`, `Widget`, or any message they reference.
+//
+// Values lower than `CURRENT` are treated as stale; the file is removed
+// from the device filesystem so the host re-uploads a fresh copy.
+enum ScreenVersion {
+    VERSION_UNKNOWN = 0;   // proto3 default — any file without a version field
+    CURRENT         = 2;   // current wire format
+}
+
 // One on-device LVGL screen. The encoded `Screen` is what lives in
 // /from_host/screens/<name>.pb.
 message Screen {
-    string name             = 1;   // must match the filename stem
-    Layout layout           = 2;
-    repeated Widget widgets = 3;
+    // Must equal `CURRENT`; the firmware deletes and ignores files that
+    // carry a different value (including the proto3 default of 0, which
+    // is produced by old host code that did not set this field).
+    ScreenVersion version = 6;
+    string name = 1;   // must match the filename stem
+    oneof layout {
+        LayoutAbsolute absolute = 2;
+        LayoutFlex     flex     = 3;
+        LayoutGrid     grid     = 4;
+    }
+    repeated Widget widgets = 5;
 }

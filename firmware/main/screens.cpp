@@ -336,8 +336,8 @@ void apply_style(lv_obj_t *obj, const touchy_Widget &w)
 
 void apply_rect(lv_obj_t *obj, const touchy_Widget &w, bool absolute_layout)
 {
-    if (!w.has_rect) return;
-    const auto &r = w.rect;
+    if (w.which_layout != touchy_Widget_rect_tag) return;
+    const auto &r = w.layout.rect;
     if (absolute_layout) {
         lv_obj_set_pos(obj, r.x, r.y);
     }
@@ -359,11 +359,11 @@ void apply_rect(lv_obj_t *obj, const touchy_Widget &w, bool absolute_layout)
 void apply_grid_cell(lv_obj_t *obj, const touchy_Widget &w)
 {
     int32_t col = 0, row = 0, col_span = 1, row_span = 1;
-    if (w.has_cell) {
-        col      = w.cell.col      > 0 ? w.cell.col      : 0;
-        row      = w.cell.row      > 0 ? w.cell.row      : 0;
-        col_span = w.cell.col_span > 0 ? w.cell.col_span : 1;
-        row_span = w.cell.row_span > 0 ? w.cell.row_span : 1;
+    if (w.which_layout == touchy_Widget_cell_tag) {
+        col      = w.layout.cell.col      > 0 ? w.layout.cell.col      : 0;
+        row      = w.layout.cell.row      > 0 ? w.layout.cell.row      : 0;
+        col_span = w.layout.cell.col_span > 0 ? w.layout.cell.col_span : 1;
+        row_span = w.layout.cell.row_span > 0 ? w.layout.cell.row_span : 1;
     }
     ESP_LOGI(TAG, "apply_grid_cell id='%s' col=%ld row=%ld col_span=%ld row_span=%ld",
              w.id, (long)col, (long)row, (long)col_span, (long)row_span);
@@ -372,22 +372,39 @@ void apply_grid_cell(lv_obj_t *obj, const touchy_Widget &w)
                          LV_GRID_ALIGN_STRETCH, row, row_span);
 }
 
-void apply_layout(lv_obj_t *scr, const touchy_Layout &layout)
+// Maps LayoutFlex.Flow enum values to lv_flex_flow_t.
+static lv_flex_flow_t flex_flow_from_proto(touchy_LayoutFlex_Flow f)
 {
-    switch (layout.kind) {
-    case touchy_Layout_Kind_ROW:
-        lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_ROW);
-        if (layout.gap > 0) lv_obj_set_style_pad_column(scr, layout.gap, 0);
+    switch (f) {
+    case touchy_LayoutFlex_Flow_ROW:                 return LV_FLEX_FLOW_ROW;
+    case touchy_LayoutFlex_Flow_COLUMN:              return LV_FLEX_FLOW_COLUMN;
+    case touchy_LayoutFlex_Flow_ROW_WRAP:            return LV_FLEX_FLOW_ROW_WRAP;
+    case touchy_LayoutFlex_Flow_ROW_REVERSE:         return LV_FLEX_FLOW_ROW_REVERSE;
+    case touchy_LayoutFlex_Flow_ROW_WRAP_REVERSE:    return LV_FLEX_FLOW_ROW_WRAP_REVERSE;
+    case touchy_LayoutFlex_Flow_COLUMN_WRAP:         return LV_FLEX_FLOW_COLUMN_WRAP;
+    case touchy_LayoutFlex_Flow_COLUMN_REVERSE:      return LV_FLEX_FLOW_COLUMN_REVERSE;
+    case touchy_LayoutFlex_Flow_COLUMN_WRAP_REVERSE: return LV_FLEX_FLOW_COLUMN_WRAP_REVERSE;
+    default:                                         return LV_FLEX_FLOW_ROW;
+    }
+}
+
+void apply_layout(lv_obj_t *scr, const touchy_Screen &S)
+{
+    switch (S.which_layout) {
+    case touchy_Screen_flex_tag: {
+        const touchy_LayoutFlex &fl = S.layout.flex;
+        lv_obj_set_flex_flow(scr, flex_flow_from_proto(fl.flow));
+        if (fl.gap > 0) {
+            lv_obj_set_style_pad_column(scr, fl.gap, 0);
+            lv_obj_set_style_pad_row(scr, fl.gap, 0);
+        }
         break;
-    case touchy_Layout_Kind_COL:
-        lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
-        if (layout.gap > 0) lv_obj_set_style_pad_row(scr, layout.gap, 0);
-        break;
-    case touchy_Layout_Kind_GRID: {
+    }
+    case touchy_Screen_grid_tag: {
+        const touchy_LayoutGrid &g = S.layout.grid;
         // Track templates. `cols` columns split the parent into equal
         // fractional units; `rows` does the same vertically when > 0,
-        // otherwise we use a single content-sized row so the original
-        // (pre-stage-18) GRID behaviour is preserved.
+        // otherwise we use a single content-sized row.
         //
         // Proto3 zero-default: `cols=0` is treated as "use 1 column".
         // `rows=0` deliberately means "content-sized single row" per the
@@ -401,13 +418,13 @@ void apply_layout(lv_obj_t *scr, const touchy_Layout &layout)
         static int32_t row_dsc[17];
         static int32_t row_dsc_content[2] = { LV_GRID_CONTENT,
                                               LV_GRID_TEMPLATE_LAST };
-        int cols = layout.cols > 0 ? layout.cols : 1;
+        int cols = g.cols > 0 ? (int)g.cols : 1;
         if (cols > 16) cols = 16;
         for (int i = 0; i < cols; i++) col_dsc[i] = LV_GRID_FR(1);
         col_dsc[cols] = LV_GRID_TEMPLATE_LAST;
 
         int32_t *row_ptr;
-        int rows = layout.rows;
+        int rows = (int)g.rows;
         if (rows > 0) {
             if (rows > 16) rows = 16;
             for (int i = 0; i < rows; i++) row_dsc[i] = LV_GRID_FR(1);
@@ -418,13 +435,13 @@ void apply_layout(lv_obj_t *scr, const touchy_Layout &layout)
         }
         lv_obj_set_grid_dsc_array(scr, col_dsc, row_ptr);
         lv_obj_set_layout(scr, LV_LAYOUT_GRID);
-        if (layout.gap > 0) {
-            lv_obj_set_style_pad_column(scr, layout.gap, 0);
-            lv_obj_set_style_pad_row(scr, layout.gap, 0);
+        if (g.gap > 0) {
+            lv_obj_set_style_pad_column(scr, g.gap, 0);
+            lv_obj_set_style_pad_row(scr, g.gap, 0);
         }
         break;
     }
-    case touchy_Layout_Kind_ABSOLUTE:
+    case touchy_Screen_absolute_tag:
     default:
         // No layout manager — widgets place themselves via lv_obj_set_pos.
         break;
@@ -486,11 +503,12 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-    if (S.has_layout) apply_layout(scr, S.layout);
+    apply_layout(scr, S);
     const bool absolute_layout =
-        !S.has_layout || S.layout.kind == touchy_Layout_Kind_ABSOLUTE;
+        S.which_layout == touchy_Screen_absolute_tag ||
+        S.which_layout == 0;   // unset → absolute
     const bool grid_layout =
-        S.has_layout && S.layout.kind == touchy_Layout_Kind_GRID;
+        S.which_layout == touchy_Screen_grid_tag;
 
     for (pb_size_t i = 0; i < S.widgets_count; i++) {
         const touchy_Widget &w = S.widgets[i];
@@ -600,6 +618,21 @@ bool screens_register_from_file(const char *path)
     }
 
     std::string stem = stem_from_path(path);
+
+    // Decode just enough to check the version field before caching.
+    {
+        auto check = decode_screen(std::vector<uint8_t>(raw, raw + len));
+        if (!check ||
+            (*check)->version != touchy_ScreenVersion_CURRENT) {
+            ESP_LOGW(TAG, "screen '%s' has wrong version (%d) — deleting",
+                     stem.c_str(),
+                     check ? (int)(*check)->version : -1);
+            delete[] raw;
+            Fs::instance().remove(fs_path);
+            return false;
+        }
+    }
+
     registry()[stem].assign(raw, raw + len);
     delete[] raw;
 

@@ -14,6 +14,7 @@ from touchy_pad.screens import (
     button,
     checkbox,
     col,
+    flex,
     grid,
     host_action,
     image,
@@ -42,8 +43,9 @@ def test_button_round_trip():
 
     decoded = _proto.Screen.FromString(s.to_bytes())
     assert decoded.name == "home"
-    assert decoded.layout.kind == _proto.Layout.COL
-    assert decoded.layout.gap == 4
+    assert decoded.WhichOneof("layout") == "flex"
+    assert decoded.flex.flow == _proto.LayoutFlex.COLUMN
+    assert decoded.flex.gap == 4
     assert len(decoded.widgets) == 2
 
     w0 = decoded.widgets[0]
@@ -75,8 +77,8 @@ def test_all_widget_kinds_serialise():
     kinds = [w.WhichOneof("kind") for w in decoded.widgets]
     assert kinds == ["button", "label", "slider", "toggle", "checkbox",
                      "image", "arc", "spacer"]
-    assert decoded.layout.kind == _proto.Layout.GRID
-    assert decoded.layout.cols == 3
+    assert decoded.WhichOneof("layout") == "grid"
+    assert decoded.grid.cols == 3
 
 
 def test_style_and_rect_applied():

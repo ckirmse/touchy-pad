@@ -34,6 +34,7 @@ from . import _proto
 __all__ = [
     "Screen",
     "absolute",
+    "flex",
     "row",
     "col",
     "grid",
@@ -61,22 +62,35 @@ __all__ = [
 # Layout / style / action helpers
 # ---------------------------------------------------------------------------
 
-def absolute() -> _proto.Layout:
+def absolute() -> _proto.LayoutAbsolute:
     """Default layout: widgets are positioned by their ``Rect``."""
-    return _proto.Layout(kind=_proto.Layout.ABSOLUTE)
+    return _proto.LayoutAbsolute()
 
 
-def row(gap: int = 0) -> _proto.Layout:
-    """Horizontal flex layout."""
-    return _proto.Layout(kind=_proto.Layout.ROW, gap=gap)
+def flex(
+    flow: "_proto.LayoutFlex.Flow" = _proto.LayoutFlex.ROW,
+    gap: int = 0,
+) -> _proto.LayoutFlex:
+    """LVGL flex layout.
+
+    ``flow`` is a :class:`_proto.LayoutFlex.Flow` constant
+    (e.g. ``LayoutFlex.ROW``, ``LayoutFlex.COLUMN``). The convenience
+    aliases :func:`row` and :func:`col` cover the most common cases.
+    """
+    return _proto.LayoutFlex(flow=flow, gap=gap)
 
 
-def col(gap: int = 0) -> _proto.Layout:
-    """Vertical flex layout."""
-    return _proto.Layout(kind=_proto.Layout.COL, gap=gap)
+def row(gap: int = 0) -> _proto.LayoutFlex:
+    """Horizontal flex layout (LV_FLEX_FLOW_ROW)."""
+    return _proto.LayoutFlex(flow=_proto.LayoutFlex.ROW, gap=gap)
 
 
-def grid(cols: int, rows: int = 0, gap: int = 0) -> _proto.Layout:
+def col(gap: int = 0) -> _proto.LayoutFlex:
+    """Vertical flex layout (LV_FLEX_FLOW_COLUMN)."""
+    return _proto.LayoutFlex(flow=_proto.LayoutFlex.COLUMN, gap=gap)
+
+
+def grid(cols: int, rows: int = 0, gap: int = 0) -> _proto.LayoutGrid:
     """LVGL grid layout.
 
     Divides the parent into ``cols`` equal-width columns (LV_GRID_FR(1)
@@ -93,8 +107,7 @@ def grid(cols: int, rows: int = 0, gap: int = 0) -> _proto.Layout:
         raise ValueError("grid cols must be >= 1")
     if rows < 0:
         raise ValueError("grid rows must be >= 0")
-    return _proto.Layout(kind=_proto.Layout.GRID, cols=cols,
-                         rows=rows, gap=gap)
+    return _proto.LayoutGrid(cols=cols, rows=rows, gap=gap)
 
 
 def cell(
@@ -420,13 +433,15 @@ class Screen:
     def __init__(
         self,
         name: str,
-        layout: _proto.Layout | None = None,
+        layout: _proto.LayoutAbsolute | _proto.LayoutFlex | _proto.LayoutGrid | None = None,
         widgets: Iterable[_proto.Widget] = (),
     ) -> None:
         if not name:
             raise ValueError("Screen name must be non-empty")
         self.name = name
-        self.layout = layout if layout is not None else absolute()
+        self.layout: _proto.LayoutAbsolute | _proto.LayoutFlex | _proto.LayoutGrid = (
+            layout if layout is not None else absolute()
+        )
         self.widgets: list[_proto.Widget] = list(widgets)
         Screen._registry.append(self)
 
@@ -448,8 +463,14 @@ class Screen:
     # -- serialisation ------------------------------------------------------
 
     def to_proto(self) -> _proto.Screen:
-        msg = _proto.Screen(name=self.name)
-        msg.layout.CopyFrom(self.layout)
+        msg = _proto.Screen(name=self.name,
+                            version=_proto.ScreenVersion.CURRENT)
+        if isinstance(self.layout, _proto.LayoutFlex):
+            msg.flex.CopyFrom(self.layout)
+        elif isinstance(self.layout, _proto.LayoutGrid):
+            msg.grid.CopyFrom(self.layout)
+        else:
+            msg.absolute.SetInParent()
         msg.widgets.extend(self.widgets)
         return msg
 
