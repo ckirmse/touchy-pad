@@ -44,8 +44,8 @@ CONFIG_TINYUSB_VENDOR_COUNT=1
 # malloc/memcpy/memset/sprintf (replaces v8's LV_MEM_CUSTOM=y).
 
 # per https://lvgl.io/docs/open/integration/chip_vendors/espressif/tips_and_tricks LVGL speedups
-#CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
-#CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
 CONFIG_LV_USE_CLIB_MALLOC=y
 CONFIG_LV_USE_CLIB_STRING=y
