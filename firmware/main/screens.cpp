@@ -132,6 +132,36 @@ std::string g_default_screen_name;
 // anchor for ActionSwitchScreen NEXT/PREVIOUS traversals.
 std::string g_current_name;
 
+// Build (or rebuild) one LVGL layer from a decoded `touchy_Layer`:
+// applies the layer-level layout manager and then instantiates every
+// widget into `parent`. `parent` is the active screen object for the
+// "active" layer, or one of LVGL's persistent layer objects
+// (`lv_layer_top()` / `lv_layer_sys()` / `lv_layer_bottom()`) for the
+// other three. Caller must already hold the LVGL lock.
+void build_layer(lv_obj_t *parent, const touchy_Layer &L)
+{
+    apply_layout(parent, L);
+    const bool absolute_layout =
+        L.which_layout == touchy_Layer_absolute_tag ||
+        L.which_layout == 0;   // unset → absolute
+    const bool grid_layout =
+        L.which_layout == touchy_Layer_grid_tag;
+
+    for (pb_size_t i = 0; i < L.widgets_count; i++) {
+        const touchy_Widget &w = L.widgets[i];
+        lv_obj_t *obj = widget_build(parent, w);
+        if (!obj) continue;
+        apply_styles(obj, w);
+        if (grid_layout) {
+            // Grid manager owns size/position; we only place the cell.
+            apply_grid_cell(obj, w);
+        } else {
+            apply_rect(obj, w, absolute_layout);
+        }
+        if (w.centered) lv_obj_center(obj);
+    }
+}
+
 // Render a freshly-decoded screen. Takes ownership of `holder` on
 // success (moves it into `g_active_screen`); on failure the holder is
 // destroyed by the caller's unique_ptr going out of scope.
@@ -154,26 +184,26 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-    apply_layout(scr, S);
-    const bool absolute_layout =
-        S.which_layout == touchy_Screen_absolute_tag ||
-        S.which_layout == 0;   // unset → absolute
-    const bool grid_layout =
-        S.which_layout == touchy_Screen_grid_tag;
-
-    for (pb_size_t i = 0; i < S.widgets_count; i++) {
-        const touchy_Widget &w = S.widgets[i];
-        lv_obj_t *obj = widget_build(scr, w);
-        if (!obj) continue;
-        apply_styles(obj, w);
-        if (grid_layout) {
-            // Grid manager owns size/position; we only place the cell.
-            apply_grid_cell(obj, w);
-        } else {
-            apply_rect(obj, w, absolute_layout);
-        }
-        if (w.centered) lv_obj_center(obj);
+    // Active layer always present — populates the new lv_screen.
+    if (S.has_active) {
+        build_layer(scr, S.active);
     }
+
+    // Persistent LVGL layers (top / sys / bottom) are only touched when
+    // the incoming Screen carries them. LVGL does not clean these layers
+    // on `lv_screen_load`, so an unset layer in the new screen means
+    // "leave whatever's there alone". A *populated* layer means
+    // "replace its contents wholesale" — we clean and rebuild.
+    auto rebuild_persistent = [](lv_obj_t *layer, const touchy_Layer &L,
+                                 const char *log_tag) {
+        lv_obj_clean(layer);
+        build_layer(layer, L);
+        ESP_LOGI(TAG, "rebuilt %s layer (%u widgets)", log_tag,
+                 (unsigned)L.widgets_count);
+    };
+    if (S.has_bottom) rebuild_persistent(lv_layer_bottom(), S.bottom, "bottom");
+    if (S.has_top)    rebuild_persistent(lv_layer_top(),    S.top,    "top");
+    if (S.has_sys)    rebuild_persistent(lv_layer_sys(),    S.sys,    "sys");
 
     lv_screen_load(scr);
     // Replace the previously-active decoded Screen *after* loading the
@@ -182,7 +212,7 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
     // freed by the unique_ptr reset.
     g_active_screen = std::move(holder);
     g_current_name = log_name ? log_name : "";
-    pb_size_t n_widgets = S.widgets_count;
+    pb_size_t n_widgets = S.has_active ? S.active.widgets_count : 0;
     lvgl_port_unlock();
 
     // Persist last-loaded so a reboot restores it. The built-in fallback

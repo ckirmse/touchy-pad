@@ -510,6 +510,59 @@ My attaching an ActionSwitchScreen to a button (with text labels like "Next" and
   * Second screen is various test widgets - you can move them from the current demo.  Also put next/prev screen buttons on this page - with a matching layout to the first page.  Also move the debug logging line from the old demo to the bottom of this page.
 * have the device preferences store the current screen name, whenever rebooting try to restore the old previous current screen
 
+## Stage 24.1: add layers (DONE)
+
+* Add the concepts of Layers to the protobuf and code.  per https://lvgl.io/docs/open/main-modules/display/screen_layers (AI, you should read this page to learn)
+* In particular: 
+  * Move layout and widgets from Screen into this new message Layer
+  * The Screen protobuf should now contain four separate Layers: Active, Top, System, Bottom.  The default layer for code usage is "Active".  Change existing code that is populating widgets/setting layouts to use that layer
+
+Implementation summary:
+* `widgets.proto`: new `Layer` message holding the `layout` oneof + `repeated Widget widgets`.  `Screen` now carries `Layer active = 7` (always present) plus `optional Layer top = 8`, `optional Layer sys = 9`, `optional Layer bottom = 10`.  Persistent layers are `optional` so unpopulated layers can be left untouched between screens.  Wire-format `Version.CURRENT` bumped 10 → 11.
+* Firmware: `screen_layout.cpp` now takes a `touchy_Layer` argument; `screens.cpp` factors widget construction into `build_layer(parent, L)` and applies it to the screen object for `active`, and (only when the corresponding `has_*` flag is set) to `lv_layer_top()` / `lv_layer_sys()` / `lv_layer_bottom()` after `lv_obj_clean()`.  Unset persistent layers are explicitly *not* touched, preserving whatever the previous screen left there.  An explicit empty `Layer()` is the wire-level "clear this layer" signal.
+* Python DSL (`touchy_pad.screens`): new `Layer` class; `Screen(name, layout=, widgets=, *, top=, sys=, bottom=)`; `add_top()` / `add_sys()` / `add_bottom()` helpers.  `Screen.layout` and `Screen.widgets` remain as back-compat properties that delegate to `Screen.active`.  Demo header (prev/next buttons) moved to the top layer.
+
+Update docs as needed
+
+## Stage 24.2: layout cleanup
+
+I made a mistake on the current Layout abstraction.  They really should be treated like widgets.  Change the protobufs as follows (and then make corresponding code changes)
+
+* The basic Layout widget contains a repeated Widget "children".
+* All three of the existing layout variants should contain that Layout message
+* Layer should no longer contain a Layout field, instead the three layout types should be added to the variant of acceptable Widgets in Layout.  Also remove the widgets array from Layer, instead it should just have a single "root" Widget.  (that widget will usually be one of the layout widgets)
+
+## Stage 24.3 python api cleanup
+
+* Remove the cli "screen push" option, it was a mistake - the 'user facing api' should not be based on that
+
+### new api
+
+Instead construct a python submodule we will expose as the public api.  Use best practices but here's my initial thoughts:
+
+* name this package touchy_pad.ai?
+* add inline comments so that a popular/standard python documentation extractor can eventually make nice low-level per method html docs.
+* improve poetry config file to run that documentation generator.  
+* add a just "build-docs" recipe to use that tool
+* for now have that doc build tool write to a new docs/python-api subdirectory (so I can put them on github)
+* be 'pythonic in style' 
+* The main initial entry point for the user will be something like touchy-get-pad-ids(), which will return a possibly empty list of the serial numbers for all connected touchy-pads
+* Then the user will call something like touchy-open(serialnum). it will return an object (with lifecycle management support so the user can close() it when done)
+* reexpose the generated python protobuf widgets_pb2 glue so that it is visible to users as touchy_pad.ai.protobuf (is this possible in python?)
+
+At construction time touchy-open() will:
+* start a thread for background polling of the usb event queue
+* get the device firmware version, if less than the current minimum firmware version it will raise an exception
+
+Operations (methods?) on the touchy object:
+* file_reset(), file_save() and screen_load() - these are just thin wrappers over the host-api.md, with similar arguments
+* screen_save(screen_name, json || touchy_pad.ai.protobuf.Screen) - a higher level api for writing screens.  caller provides either a protobuf instance or a json file which can be converted to a Screen protobuf.  Most users who are setting screens will use this api rather than writing raw binary files directly (this method hides that complexity)
+* on_host_event(code, cb) - register a callback to be invoked by our event poller if it sees a host event message arrive
+* close() - stops our background thread and destroys any critical USB instances
+
+* change the existing "screen demo" cli command to use this new public API to do its work
+* write a highlevel guide to using this API in docs/python-api.md
+
 ## Stage 25: Allow host PC to configure the button matrixes/screen layout
 * Use protocol buffers (nanopb?) to communicate between the host/device (over a custom USB characteristic)
 * Provide a simple python library to allow host applications to easily configure the button matrixes/screen layout

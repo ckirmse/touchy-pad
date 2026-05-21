@@ -1,26 +1,28 @@
 {
   "name": "default",
   "version": "CURRENT",
-  "grid": {
-    "cols": 1,
-    "rows": 8,
-    "gap": 8
-  },
-  "widgets": [
-    {
-      "id": "msg",
-      "cell": {"col": 0, "row": 0, "colSpan": 1, "rowSpan": 1},
-      "styles": [{"textColor": 16777215}],
-      "label": {
-        "text": "Please do initial setup with Touchy-Pad app.",
-        "fontSize": 20,
-        "textAlign": "TEXT_ALIGN_CENTER"
-      }
+  "active": {
+    "grid": {
+      "cols": 1,
+      "rows": 8,
+      "gap": 8
     },
-    {
-      "id": "pad",
-      "cell": {"col": 0, "row": 1, "colSpan": 1, "rowSpan": 7},
-      "trackpad": {}
-    }
-  ]
+    "widgets": [
+      {
+        "id": "msg",
+        "cell": {"col": 0, "row": 0, "colSpan": 1, "rowSpan": 1},
+        "styles": [{"textColor": 16777215}],
+        "label": {
+          "text": "Please do initial setup with Touchy-Pad app.",
+          "fontSize": 20,
+          "textAlign": "TEXT_ALIGN_CENTER"
+        }
+      },
+      {
+        "id": "pad",
+        "cell": {"col": 0, "row": 1, "colSpan": 1, "rowSpan": 7},
+        "trackpad": {}
+      }
+    ]
+  }
 }

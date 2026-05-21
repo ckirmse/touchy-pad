@@ -913,12 +913,76 @@ def force_render(
 # ---------------------------------------------------------------------------
 
 
+class Layer:
+    """One LVGL layer's worth of widgets + layout manager.
+
+    Stage 24.1 — an LVGL display has four stacked screens (bottom, the
+    active screen, top, sys; see
+    `<https://lvgl.io/docs/open/main-modules/display/screen_layers>`_).
+    A :class:`Screen` carries one ``Layer`` per LVGL layer. Most users
+    only touch the active layer (via the :class:`Screen` ctor + ``+=``
+    sugar); ``Layer`` is exposed for the rare case where a script wants
+    to construct a persistent layer (``top`` / ``sys`` / ``bottom``)
+    explicitly.
+
+    An empty ``Layer()`` is the explicit "clear this layer" payload: a
+    :class:`Screen` carrying ``top=Layer()`` will wipe whatever the
+    previous screen put on ``lv_layer_top()``. Omitting the kwarg
+    instead leaves the previous content untouched.
+    """
+
+    def __init__(
+        self,
+        layout: _proto.LayoutAbsolute | _proto.LayoutFlex | _proto.LayoutGrid | None = None,
+        widgets: Iterable[_proto.Widget] = (),
+    ) -> None:
+        self.layout: _proto.LayoutAbsolute | _proto.LayoutFlex | _proto.LayoutGrid = (
+            layout if layout is not None else absolute()
+        )
+        self.widgets: list[_proto.Widget] = list(widgets)
+
+    def add(self, widget: _proto.Widget) -> Layer:
+        self.widgets.append(widget)
+        return self
+
+    def __iadd__(self, widget: _proto.Widget) -> Layer:
+        self.widgets.append(widget)
+        return self
+
+    def copy_into(self, msg: _proto.Layer) -> None:
+        """Populate a proto ``Layer`` message in place."""
+        if isinstance(self.layout, _proto.LayoutFlex):
+            msg.flex.CopyFrom(self.layout)
+        elif isinstance(self.layout, _proto.LayoutGrid):
+            msg.grid.CopyFrom(self.layout)
+        else:
+            msg.absolute.SetInParent()
+        # `extend` because msg may have been zero-initialised (empty repeated field).
+        del msg.widgets[:]
+        msg.widgets.extend(self.widgets)
+
+
 class Screen:
     """A single LVGL screen, identified by a unique ``name``.
 
     Instances are also auto-registered into a module-level list so the
     ``touchy screens push`` CLI can discover every screen a script defines
     without requiring the script to return them explicitly.
+
+    Stage 24.1 — ``Screen`` now exposes four LVGL layers
+    (`<https://lvgl.io/docs/open/main-modules/display/screen_layers>`_):
+
+    * ``active`` — the active screen LVGL swaps in via ``lv_screen_load``.
+      The ``layout=`` / ``widgets=`` ctor arguments and the ``add`` /
+      ``+=`` / ``extend`` helpers all target this layer; authoring code
+      that doesn't care about LVGL layers should ignore the others.
+    * ``top``, ``sys``, ``bottom`` — LVGL's persistent layers (top, sys,
+      bottom). They are NOT cleared when LVGL switches screens, so widgets
+      on them stay on screen until a later ``Screen`` explicitly replaces
+      that layer. Build them with :func:`add_top` / :func:`add_sys` /
+      :func:`add_bottom`. Pass an empty :class:`Layer` (e.g. ``top=Layer()``)
+      to clear a layer when switching to this screen; omit the kwarg to
+      leave the previous screen's widgets on that layer untouched.
     """
 
     # Populated by every ``Screen.__init__`` call; cleared by
@@ -930,42 +994,84 @@ class Screen:
         name: str,
         layout: _proto.LayoutAbsolute | _proto.LayoutFlex | _proto.LayoutGrid | None = None,
         widgets: Iterable[_proto.Widget] = (),
+        *,
+        top: Layer | None = None,
+        sys: Layer | None = None,
+        bottom: Layer | None = None,
     ) -> None:
         if not name:
             raise ValueError("Screen name must be non-empty")
         self.name = name
-        self.layout: _proto.LayoutAbsolute | _proto.LayoutFlex | _proto.LayoutGrid = (
-            layout if layout is not None else absolute()
-        )
-        self.widgets: list[_proto.Widget] = list(widgets)
+        self.active = Layer(layout=layout, widgets=widgets)
+        self.top = top
+        self.sys = sys
+        self.bottom = bottom
         Screen._registry.append(self)
+
+    # -- back-compat passthroughs for the active layer ----------------------
+
+    @property
+    def layout(self) -> _proto.LayoutAbsolute | _proto.LayoutFlex | _proto.LayoutGrid:
+        return self.active.layout
+
+    @layout.setter
+    def layout(self, value: _proto.LayoutAbsolute | _proto.LayoutFlex | _proto.LayoutGrid) -> None:
+        self.active.layout = value
+
+    @property
+    def widgets(self) -> list[_proto.Widget]:
+        return self.active.widgets
 
     # -- builder-style API --------------------------------------------------
 
     def add(self, widget: _proto.Widget) -> Screen:
-        """Append a widget, returning ``self`` for chaining."""
-        self.widgets.append(widget)
+        """Append a widget to the active layer, returning ``self`` for chaining."""
+        self.active.widgets.append(widget)
         return self
 
     def __iadd__(self, widget: _proto.Widget) -> Screen:
-        self.widgets.append(widget)
+        self.active.widgets.append(widget)
         return self
 
     def extend(self, widgets: Iterable[_proto.Widget]) -> Screen:
-        self.widgets.extend(widgets)
+        self.active.widgets.extend(widgets)
+        return self
+
+    # -- persistent-layer builders -----------------------------------------
+
+    def _ensure_layer(self, attr: str) -> Layer:
+        cur = getattr(self, attr)
+        if cur is None:
+            cur = Layer()
+            setattr(self, attr, cur)
+        return cur
+
+    def add_top(self, widget: _proto.Widget) -> Screen:
+        """Append a widget to the ``top`` LVGL layer (above the active screen)."""
+        self._ensure_layer("top").widgets.append(widget)
+        return self
+
+    def add_sys(self, widget: _proto.Widget) -> Screen:
+        """Append a widget to the ``sys`` LVGL layer (above ``top``)."""
+        self._ensure_layer("sys").widgets.append(widget)
+        return self
+
+    def add_bottom(self, widget: _proto.Widget) -> Screen:
+        """Append a widget to the ``bottom`` LVGL layer (below the active screen)."""
+        self._ensure_layer("bottom").widgets.append(widget)
         return self
 
     # -- serialisation ------------------------------------------------------
 
     def to_proto(self) -> _proto.Screen:
         msg = _proto.Screen(name=self.name, version=_proto.Screen.Version.CURRENT)
-        if isinstance(self.layout, _proto.LayoutFlex):
-            msg.flex.CopyFrom(self.layout)
-        elif isinstance(self.layout, _proto.LayoutGrid):
-            msg.grid.CopyFrom(self.layout)
-        else:
-            msg.absolute.SetInParent()
-        msg.widgets.extend(self.widgets)
+        self.active.copy_into(msg.active)
+        if self.top is not None:
+            self.top.copy_into(msg.top)
+        if self.sys is not None:
+            self.sys.copy_into(msg.sys)
+        if self.bottom is not None:
+            self.bottom.copy_into(msg.bottom)
         return msg
 
     def to_bytes(self) -> bytes:
@@ -979,7 +1085,7 @@ class Screen:
         return p
 
     def __repr__(self) -> str:
-        return f"Screen(name={self.name!r}, widgets={len(self.widgets)})"
+        return f"Screen(name={self.name!r}, widgets={len(self.active.widgets)})"
 
 
 def build_demo_screens() -> list[Screen]:
@@ -1014,9 +1120,23 @@ def build_demo_screens() -> list[Screen]:
     from . import macros as m
 
     def header(screen: Screen) -> None:
-        """Add the shared ``[Prev | FPS | Next]`` strip to row 0."""
-        screen += cell(button("prev", text="< Prev", on_click=prev_screen_action()), col=0, row=0)
-        screen += cell(button("next", text="Next >", on_click=next_screen_action()), col=3, row=0)
+        """Push the shared Prev/Next navigation strip onto the LVGL top
+        layer.
+
+        Stage 24.1 — the top layer persists across screen switches so
+        the navigation chrome survives without re-transmission. We use
+        the same 4×8 grid geometry as the active layer so the header
+        cells line up with the rest of the UI, and row 0 of the active
+        layer is left empty to make room. Both screens still re-emit
+        the header so a cold boot to either one shows the chrome.
+        """
+        screen.top = Layer(layout=grid(cols=4, rows=8, gap=8))
+        screen.add_top(
+            cell(button("prev", text="< Prev", on_click=prev_screen_action()), col=0, row=0)
+        )
+        screen.add_top(
+            cell(button("next", text="Next >", on_click=next_screen_action()), col=3, row=0)
+        )
 
     # ── home: trackpad-only ───────────────────────────────────────────
     home = Screen("home", layout=grid(cols=4, rows=8, gap=8))

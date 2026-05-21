@@ -21,7 +21,7 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 * Make README not suck
 * Make streamcontroller support
 * !ensure no 10ms delay on loop polling
-* Pick a real USB VID/PID for our device
+* Pick a real USB VID/PID for our device with https://github.com/espressif/usb-pids, send them a PR
 * !fix multitouch gestures - the change to lvgl instead of polling broke them
 * determine USB security issues (might need to set a secure key for future API operations - to prevent untrusted users from changing macro behavior)
 

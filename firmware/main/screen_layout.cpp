@@ -67,11 +67,11 @@ lv_flex_flow_t flex_flow_from_proto(touchy_LayoutFlex_Flow f)
 
 }  // namespace
 
-void apply_layout(lv_obj_t *scr, const touchy_Screen &S)
+void apply_layout(lv_obj_t *scr, const touchy_Layer &L)
 {
-    switch (S.which_layout) {
-    case touchy_Screen_flex_tag: {
-        const touchy_LayoutFlex &fl = S.layout.flex;
+    switch (L.which_layout) {
+    case touchy_Layer_flex_tag: {
+        const touchy_LayoutFlex &fl = L.layout.flex;
         lv_obj_set_flex_flow(scr, flex_flow_from_proto(fl.flow));
         if (fl.gap > 0) {
             lv_obj_set_style_pad_column(scr, fl.gap, 0);
@@ -79,8 +79,8 @@ void apply_layout(lv_obj_t *scr, const touchy_Screen &S)
         }
         break;
     }
-    case touchy_Screen_grid_tag: {
-        const touchy_LayoutGrid &g = S.layout.grid;
+    case touchy_Layer_grid_tag: {
+        const touchy_LayoutGrid &g = L.layout.grid;
         // Track templates. `cols` columns split the parent into equal
         // fractional units; `rows` does the same vertically when > 0,
         // otherwise we use a single content-sized row.
@@ -120,7 +120,7 @@ void apply_layout(lv_obj_t *scr, const touchy_Screen &S)
         }
         break;
     }
-    case touchy_Screen_absolute_tag:
+    case touchy_Layer_absolute_tag:
     default:
         // No layout manager — widgets place themselves via lv_obj_set_pos.
         break;

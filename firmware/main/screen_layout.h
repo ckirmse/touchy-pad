@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Stage 15 / 20.1 — Screen layout + widget placement.
+// Stage 15 / 20.1 / 24.1 — Layer layout + widget placement.
 //
 // Two scopes:
-//   * `apply_layout()` configures the screen-level LVGL layout manager
-//     (flex / grid / absolute) from `touchy.Screen`'s `layout` oneof.
+//   * `apply_layout()` configures the LVGL layout manager (flex / grid
+//     / absolute) on an LVGL container from `touchy.Layer`'s `layout`
+//     oneof. Used for the active screen and each populated LVGL
+//     persistent layer (top / sys / bottom).
 //   * `apply_rect()` / `apply_grid_cell()` place an individual widget
-//     within that screen's layout, mirroring the `Widget.layout` oneof.
+//     within that container's layout, mirroring the `Widget.layout`
+//     oneof.
 
 #pragma once
 
@@ -14,10 +17,10 @@
 #include "widgets.pb.h"
 #include "touchy.pb.h"
 
-// Configure the LVGL layout manager attached to `scr` from S.layout
-// (flex / grid / absolute). Idempotent — safe to call once per screen
+// Configure the LVGL layout manager attached to `parent` from L.layout
+// (flex / grid / absolute). Idempotent — safe to call once per layer
 // build.
-void apply_layout(lv_obj_t *scr, const touchy_Screen &S);
+void apply_layout(lv_obj_t *parent, const touchy_Layer &L);
 
 // Apply `Widget.layout.rect` to `obj`. When `absolute_layout` is true
 // (screen has no layout manager) we also write the x/y position; under

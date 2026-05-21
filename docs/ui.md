@@ -18,6 +18,32 @@ NOTE: much of this section is now out-of-date because I suspect we'll just be ab
 * A small number of buttons are standard and always visible on the screen (upper left by default?).  They include things like "Next screen", "Prev Screen".
 * All other screen components are screen specific and provided based on the (xml?) sent by the host.  Most commonly it will include a large rectangular TouchpadWidget and possibly some number of app specific Widgets.  
 
+## Layers
+
+LVGL exposes four per-display layers that we mirror in the `Screen`
+protobuf: `active`, `top`, `sys`, and `bottom`.  `lv_screen_load()`
+swaps only the active layer; the other three are *persistent* across
+screen changes, which makes them a natural home for navigation
+chrome that should stay put while the user flips between screens.
+
+* `active` — always present.  Rebuilt from scratch on every
+  `screen_load`.  This is what the DSL's `Screen.add(...)` /
+  `screen += widget` targets.
+* `top` / `sys` / `bottom` — `optional` in the protobuf.  Semantics:
+  * **Unset** (the default): the firmware leaves that LVGL layer
+    *untouched*, preserving whatever the previous screen left there.
+  * **Set to a populated `Layer`**: the firmware calls
+    `lv_obj_clean()` on the LVGL layer and rebuilds it from the
+    layer's widgets.
+  * **Set to an empty `Layer()`**: the explicit "clear this layer"
+    payload — the firmware still cleans the LVGL layer, just with
+    nothing to put back.
+
+In the Python DSL use `Screen(..., top=Layer(...))` (or the
+`screen.add_top(...)` / `add_sys(...)` / `add_bottom(...)` helpers)
+to populate a persistent layer.  Per-layer layouts are independent:
+`active` can be a grid while `top` is a flex row, for example.
+
 ## Image representation
 On the wire and on the device filesystem, images are stored in LVGL's
 native `.bin` format (12-byte header + pixel planes; RGB565A8 by
