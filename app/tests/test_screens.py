@@ -23,6 +23,7 @@ from touchy_pad.screens import (
     button,
     checkbox,
     col,
+    force_render,
     fps,
     grid,
     host_action,
@@ -151,19 +152,19 @@ def test_style_list_round_trip():
     assert styles_[1].for_state == STATE_PRESSED
 
 
-def test_screen_version_is_nine():
-    """Stage 24 wire-format bump: Screen.Version.CURRENT == 9.
+def test_screen_version_is_ten():
+    """Wire-format bump: Screen.Version.CURRENT == 10.
 
-    Stage 20.4 (v8) extended ``Trackpad`` with per-finger-count
-    ``*_touch_color`` fields and ``touch_ripple`` / ``tap_ripple``
-    ``RippleAnimation`` submessages. Stage 24 (v9) adds the ``Fps``
-    widget and the ``ActionDevice`` / ``ActionSwitchScreen`` action
-    subtype so on-device buttons can navigate between screens.
+    Stage 24 (v9) added the ``Fps`` widget and the
+    ``ActionDevice`` / ``ActionSwitchScreen`` action subtype. v10
+    adds the dev-only ``ForceRender`` widget used to benchmark the
+    LVGL pipeline by pinning the active screen to its maximum redraw
+    rate.
     """
     s = Screen("v")
     decoded = _proto.Screen.FromString(s.to_bytes())
     assert decoded.version == _proto.Screen.Version.CURRENT
-    assert int(_proto.Screen.Version.CURRENT) == 9
+    assert int(_proto.Screen.Version.CURRENT) == 10
 
 
 # -- Stage 20.2: optional Style fields + Transition -------------------------
@@ -489,6 +490,16 @@ def test_fps_widget_round_trip():
     w = decoded.widgets[0]
     assert w.id == "fps_label"
     assert w.WhichOneof("kind") == "fps"
+
+
+def test_force_render_widget_round_trip():
+    """`force_render()` builds a Widget whose `kind` oneof is `force_render`."""
+    s = Screen("h")
+    s += force_render("force_box")
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    w = decoded.widgets[0]
+    assert w.id == "force_box"
+    assert w.WhichOneof("kind") == "force_render"
 
 
 def test_switch_screen_action_by_name():

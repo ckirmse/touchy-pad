@@ -20,6 +20,7 @@ idf_component_register(
         "widget_builders.cpp"
         "widget_styles.cpp"
         "fps_widget.cpp"
+        "force_render_widget.cpp"
         "macros.cpp"
         "trackpad_widget.cpp"
         "log_line.cpp"

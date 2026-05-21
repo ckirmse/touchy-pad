@@ -36,6 +36,7 @@ from .widgets_pb2 import (  # noqa: F401  (re-exported)
     Arc,
     Button,
     Checkbox,
+    ForceRender,
     Fps,
     GridCell,
     Image,

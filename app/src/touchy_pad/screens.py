@@ -62,6 +62,7 @@ __all__ = [
     "ripple_animation",
     "log_line",
     "fps",
+    "force_render",
     "build_demo_screen",
     "build_demo_screens",
     # LvState / LvPart selector bits (see widgets.proto:LvState).
@@ -886,6 +887,27 @@ def fps(
     return w
 
 
+def force_render(
+    id: str = "force_render",
+    rect: _proto.Rect | None = None,
+    style: _proto.Style | Iterable[_proto.Style] | None = None,
+) -> _proto.Widget:
+    """Dev / benchmark toggle that pins LVGL to maximum redraw rate.
+
+    Renders on-device as an LVGL checkbox labelled ``"Force"``. While
+    checked, the firmware schedules a 1 ms LV timer that invalidates
+    the active screen each tick, so LVGL keeps the rendering pipeline
+    busy at the display's maximum rate. Pair with :func:`fps` to read
+    off the worst-case frame rate for the current layout.
+
+    Has no host-visible Actions — the checkbox's on-change effect is
+    handled entirely on-device.
+    """
+    w = _widget(id, rect=rect, style=style)
+    w.force_render.SetInParent()
+    return w
+
+
 # ---------------------------------------------------------------------------
 # Screen — the top-level container
 # ---------------------------------------------------------------------------
@@ -1070,7 +1092,13 @@ def build_demo_screens() -> list[Screen]:
         button("ping", text="Ping host", on_click=host_action(0x100)),
         col=1,
         row=1,
-        col_span=2,
+    )
+    # Dev-only force-render checkbox, kept next to the FPS readout in
+    # the header so a benchmarker can watch the number while toggling.
+    test += cell(
+        force_render("force"),
+        col=2,
+        row=1,
     )
     test += cell(
         slider("level", min=0, max=100, value=42, on_change=host_action(0x101)),

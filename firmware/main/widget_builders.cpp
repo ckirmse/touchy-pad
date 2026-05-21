@@ -11,6 +11,7 @@
 #include "widget_builders.h"
 
 #include "fps_widget.h"
+#include "force_render_widget.h"
 #include "log_line.h"
 #include "screens.h"           // screens_get_touch()
 #include "trackpad_widget.h"
@@ -307,6 +308,12 @@ lv_obj_t *build_fps(lv_obj_t *parent, const touchy_Widget &)
     return fw ? fw->obj() : nullptr;
 }
 
+lv_obj_t *build_force_render(lv_obj_t *parent, const touchy_Widget &)
+{
+    auto *frw = new (std::nothrow) ForceRenderWidget(parent);
+    return frw ? frw->obj() : nullptr;
+}
+
 }  // namespace
 
 lv_obj_t *widget_build(lv_obj_t *parent, const touchy_Widget &w)
@@ -324,6 +331,7 @@ lv_obj_t *widget_build(lv_obj_t *parent, const touchy_Widget &w)
     case touchy_Widget_trackpad_tag:     return build_trackpad(parent, w);
     case touchy_Widget_log_tag:          return build_log(parent, w);
     case touchy_Widget_fps_tag:          return build_fps(parent, w);
+    case touchy_Widget_force_render_tag: return build_force_render(parent, w);
     default:
         ESP_LOGW(TAG, "widget %s has unknown kind %d, skipping",
                  w.id, (int)w.which_kind);

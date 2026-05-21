@@ -492,6 +492,21 @@ message LogLine {
 message Fps {
 }
 
+// Dev / benchmarking toggle. Renders as an LVGL checkbox labelled
+// "Force". While checked, the firmware schedules a fast LV timer that
+// invalidates the active screen each tick, forcing LVGL to redraw
+// continuously at the display's maximum rate. Pair with `Fps` to read
+// off a worst-case frames-per-second number for the current screen.
+//
+// When unchecked the timer is removed and rendering returns to LVGL's
+// usual on-demand behaviour. Multiple ForceRender widgets on one
+// screen all share the same global "force" state — checking any one
+// of them turns it on; unchecking the last one turns it off.
+//
+// No Actions — its on_change effect is purely on-device.
+message ForceRender {
+}
+
 // A single widget inside a `Screen`. `id` is an opaque host-chosen string
 // that follows the widget into events; the device stores it via
 // `lv_obj_set_user_data` and copies it into the `user_data` field of
@@ -521,6 +536,7 @@ message Widget {
         LogLine  log      = 19;
         ImageButton image_button = 20;
         Fps      fps      = 21;
+        ForceRender force_render = 22;
     }
 }
 
@@ -538,7 +554,7 @@ message Screen {
     // from the device filesystem so the host re-uploads a fresh copy.
     enum Version {
         VERSION_UNKNOWN = 0;   // proto3 default — any file without a version field
-        CURRENT         = 9;   // current wire format
+        CURRENT         = 10;  // current wire format
     }
 
     // Must equal `CURRENT`; the firmware deletes and ignores files that
