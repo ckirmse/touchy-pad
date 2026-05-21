@@ -949,17 +949,27 @@ class Layer:
         self.widgets.append(widget)
         return self
 
-    def copy_into(self, msg: _proto.Layer) -> None:
-        """Populate a proto ``Layer`` message in place."""
+    def copy_into(self, msg: _proto.Widget) -> None:
+        """Populate a proto ``Widget`` as a layout-widget in place.
+
+        Stage 24.2 — Layer is no longer its own proto message; each LVGL
+        layer in a ``Screen`` is now a single ``Widget`` whose ``kind``
+        is one of ``LayoutAbsolute`` / ``LayoutFlex`` / ``LayoutGrid``.
+        This method fills ``msg`` with the appropriate layout-widget
+        kind plus a ``Layout.children`` list built from ``self.widgets``.
+        """
         if isinstance(self.layout, _proto.LayoutFlex):
-            msg.flex.CopyFrom(self.layout)
+            msg.layout_flex.CopyFrom(self.layout)
+            del msg.layout_flex.layout.children[:]
+            msg.layout_flex.layout.children.extend(self.widgets)
         elif isinstance(self.layout, _proto.LayoutGrid):
-            msg.grid.CopyFrom(self.layout)
+            msg.layout_grid.CopyFrom(self.layout)
+            del msg.layout_grid.layout.children[:]
+            msg.layout_grid.layout.children.extend(self.widgets)
         else:
-            msg.absolute.SetInParent()
-        # `extend` because msg may have been zero-initialised (empty repeated field).
-        del msg.widgets[:]
-        msg.widgets.extend(self.widgets)
+            msg.layout_absolute.SetInParent()
+            del msg.layout_absolute.layout.children[:]
+            msg.layout_absolute.layout.children.extend(self.widgets)
 
 
 class Screen:

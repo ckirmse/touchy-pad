@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Stage 15 / 20.1 — Screen + widget layout. See header.
+// Stage 15 / 20.1 / 24.1 / 24.2 — layout-widget configuration + child placement. See header.
 
 #include "screen_layout.h"
 
@@ -9,10 +9,17 @@
 
 static const char *TAG = "screens.layout";
 
+bool widget_is_layout(const touchy_Widget &w)
+{
+    return w.which_kind == touchy_Widget_layout_absolute_tag ||
+           w.which_kind == touchy_Widget_layout_flex_tag ||
+           w.which_kind == touchy_Widget_layout_grid_tag;
+}
+
 void apply_rect(lv_obj_t *obj, const touchy_Widget &w, bool absolute_layout)
 {
-    if (w.which_layout != touchy_Widget_rect_tag) return;
-    const auto &r = w.layout.rect;
+    if (w.which_placement != touchy_Widget_rect_tag) return;
+    const auto &r = w.placement.rect;
     if (absolute_layout) {
         lv_obj_set_pos(obj, r.x, r.y);
     }
@@ -34,11 +41,11 @@ void apply_rect(lv_obj_t *obj, const touchy_Widget &w, bool absolute_layout)
 void apply_grid_cell(lv_obj_t *obj, const touchy_Widget &w)
 {
     int32_t col = 0, row = 0, col_span = 1, row_span = 1;
-    if (w.which_layout == touchy_Widget_cell_tag) {
-        col      = w.layout.cell.col > 0 ? w.layout.cell.col : 0;
-        row      = w.layout.cell.row > 0 ? w.layout.cell.row : 0;
-        col_span = w.layout.cell.has_col_span ? w.layout.cell.col_span : 1;
-        row_span = w.layout.cell.has_row_span ? w.layout.cell.row_span : 1;
+    if (w.which_placement == touchy_Widget_cell_tag) {
+        col      = w.placement.cell.col > 0 ? w.placement.cell.col : 0;
+        row      = w.placement.cell.row > 0 ? w.placement.cell.row : 0;
+        col_span = w.placement.cell.has_col_span ? w.placement.cell.col_span : 1;
+        row_span = w.placement.cell.has_row_span ? w.placement.cell.row_span : 1;
     }
     ESP_LOGI(TAG, "apply_grid_cell id='%s' col=%ld row=%ld col_span=%ld row_span=%ld",
              w.id, (long)col, (long)row, (long)col_span, (long)row_span);
@@ -67,20 +74,20 @@ lv_flex_flow_t flex_flow_from_proto(touchy_LayoutFlex_Flow f)
 
 }  // namespace
 
-void apply_layout(lv_obj_t *scr, const touchy_Layer &L)
+void apply_layout(lv_obj_t *parent, const touchy_Widget &w)
 {
-    switch (L.which_layout) {
-    case touchy_Layer_flex_tag: {
-        const touchy_LayoutFlex &fl = L.layout.flex;
-        lv_obj_set_flex_flow(scr, flex_flow_from_proto(fl.flow));
+    switch (w.which_kind) {
+    case touchy_Widget_layout_flex_tag: {
+        const touchy_LayoutFlex &fl = w.kind.layout_flex;
+        lv_obj_set_flex_flow(parent, flex_flow_from_proto(fl.flow));
         if (fl.gap > 0) {
-            lv_obj_set_style_pad_column(scr, fl.gap, 0);
-            lv_obj_set_style_pad_row(scr, fl.gap, 0);
+            lv_obj_set_style_pad_column(parent, fl.gap, 0);
+            lv_obj_set_style_pad_row(parent, fl.gap, 0);
         }
         break;
     }
-    case touchy_Layer_grid_tag: {
-        const touchy_LayoutGrid &g = L.layout.grid;
+    case touchy_Widget_layout_grid_tag: {
+        const touchy_LayoutGrid &g = w.kind.layout_grid;
         // Track templates. `cols` columns split the parent into equal
         // fractional units; `rows` does the same vertically when > 0,
         // otherwise we use a single content-sized row.
@@ -112,17 +119,17 @@ void apply_layout(lv_obj_t *scr, const touchy_Layer &L)
         } else {
             row_ptr = row_dsc_content;
         }
-        lv_obj_set_grid_dsc_array(scr, col_dsc, row_ptr);
-        lv_obj_set_layout(scr, LV_LAYOUT_GRID);
+        lv_obj_set_grid_dsc_array(parent, col_dsc, row_ptr);
+        lv_obj_set_layout(parent, LV_LAYOUT_GRID);
         if (g.gap > 0) {
-            lv_obj_set_style_pad_column(scr, g.gap, 0);
-            lv_obj_set_style_pad_row(scr, g.gap, 0);
+            lv_obj_set_style_pad_column(parent, g.gap, 0);
+            lv_obj_set_style_pad_row(parent, g.gap, 0);
         }
         break;
     }
-    case touchy_Layer_absolute_tag:
+    case touchy_Widget_layout_absolute_tag:
     default:
-        // No layout manager — widgets place themselves via lv_obj_set_pos.
+        // No layout manager — children place themselves via lv_obj_set_pos.
         break;
     }
 }

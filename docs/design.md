@@ -556,7 +556,7 @@ At construction time touchy-open() will:
 
 Operations (methods?) on the touchy object:
 * file_reset(), file_save() and screen_load() - these are just thin wrappers over the host-api.md, with similar arguments
-* screen_save(screen_name, json || touchy_pad.ai.protobuf.Screen) - a higher level api for writing screens.  caller provides either a protobuf instance or a json file which can be converted to a Screen protobuf.  Most users who are setting screens will use this api rather than writing raw binary files directly (this method hides that complexity)
+* screen_save(json || touchy_pad.ai.protobuf.Screen) - a higher level api for writing screens.  caller provides either a protobuf instance or a json file which can be converted to a Screen protobuf.  Most users who are setting screens will use this api rather than writing raw binary files directly (this method hides that complexity)
 * on_host_event(code, cb) - register a callback to be invoked by our event poller if it sees a host event message arrive
 * close() - stops our background thread and destroys any critical USB instances
 

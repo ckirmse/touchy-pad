@@ -13,9 +13,11 @@
 #include "fps_widget.h"
 #include "force_render_widget.h"
 #include "log_line.h"
+#include "screen_layout.h"     // apply_layout / apply_rect / apply_grid_cell / widget_is_layout
 #include "screens.h"           // screens_get_touch()
 #include "trackpad_widget.h"
 #include "widget_actions.h"
+#include "widget_styles.h"
 
 #include "esp_log.h"
 #include "lvgl.h"
@@ -314,7 +316,56 @@ lv_obj_t *build_force_render(lv_obj_t *parent, const touchy_Widget &)
     return frw ? frw->obj() : nullptr;
 }
 
+// Nested layout-widget. Creates a bare `lv_obj` container, configures
+// its layout manager from the widget's own `LayoutAbsolute/Flex/Grid`
+// kind, then recursively builds its `Layout.children` into it. Styles
+// and placement of the container itself are applied by our caller
+// (the same path every other widget kind takes).
+lv_obj_t *build_layout(lv_obj_t *parent, const touchy_Widget &w)
+{
+    lv_obj_t *cont = lv_obj_create(parent);
+    if (!cont) return nullptr;
+    // LVGL 9 base obj defaults: opaque white bg + border. Keep
+    // layout containers visually transparent so authoring code only
+    // pays for what it asks for via Style.
+    lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(cont, 0, 0);
+    lv_obj_set_style_pad_all(cont, 0, 0);
+    apply_layout(cont, w);
+    widget_build_children(cont, w);
+    return cont;
+}
+
 }  // namespace
+
+void widget_build_children(lv_obj_t *parent, const touchy_Widget &container)
+{
+    const touchy_Layout *L = nullptr;
+    switch (container.which_kind) {
+    case touchy_Widget_layout_flex_tag:
+        L = &container.kind.layout_flex.layout; break;
+    case touchy_Widget_layout_grid_tag:
+        L = &container.kind.layout_grid.layout; break;
+    case touchy_Widget_layout_absolute_tag:
+        L = &container.kind.layout_absolute.layout; break;
+    default:
+        return;
+    }
+    const bool grid_layout = container.which_kind == touchy_Widget_layout_grid_tag;
+    const bool absolute_layout = container.which_kind == touchy_Widget_layout_absolute_tag;
+    for (pb_size_t i = 0; i < L->children_count; i++) {
+        const touchy_Widget &w = L->children[i];
+        lv_obj_t *obj = widget_build(parent, w);
+        if (!obj) continue;
+        apply_styles(obj, w);
+        if (grid_layout) {
+            apply_grid_cell(obj, w);
+        } else {
+            apply_rect(obj, w, absolute_layout);
+        }
+        if (w.centered) lv_obj_center(obj);
+    }
+}
 
 lv_obj_t *widget_build(lv_obj_t *parent, const touchy_Widget &w)
 {
@@ -332,6 +383,10 @@ lv_obj_t *widget_build(lv_obj_t *parent, const touchy_Widget &w)
     case touchy_Widget_log_tag:          return build_log(parent, w);
     case touchy_Widget_fps_tag:          return build_fps(parent, w);
     case touchy_Widget_force_render_tag: return build_force_render(parent, w);
+    case touchy_Widget_layout_absolute_tag:
+    case touchy_Widget_layout_flex_tag:
+    case touchy_Widget_layout_grid_tag:
+        return build_layout(parent, w);
     default:
         ESP_LOGW(TAG, "widget %s has unknown kind %d, skipping",
                  w.id, (int)w.which_kind);

@@ -282,13 +282,18 @@ message Action {
     }
 }
 
-// Absolute (default) screen layout: every widget is positioned exactly
-// where its `Widget.layout.rect` says. Widgets without a `rect` default
-// to (0, 0) with "size-to-content" dimensions.
+// Absolute (default) layout: every child widget is positioned exactly
+// where its `Widget.placement.rect` says. Children without a `rect`
+// default to (0, 0) with "size-to-content" dimensions.
+//
+// Stage 24.2: layout variants are themselves widgets (see
+// `Widget.kind.layout_*`), so each one carries its own `Layout` child
+// list rather than a parallel widget array on the enclosing screen.
 message LayoutAbsolute {
+    Layout layout = 1;
 }
 
-// Flex screen layout (lv_obj_set_flex_flow). `flow` selects the LVGL flex
+// Flex layout (lv_obj_set_flex_flow). `flow` selects the LVGL flex
 // flow mode; `gap` sets the pixel gap between children.
 message LayoutFlex {
     // Maps 1-to-1 onto lv_flex_flow_t.
@@ -302,22 +307,36 @@ message LayoutFlex {
         COLUMN_REVERSE      = 6;
         COLUMN_WRAP_REVERSE = 7;
     }
-    Flow   flow = 1;
-    uint32 gap  = 2;    // pixels between children
+    Flow   flow   = 1;
+    uint32 gap    = 2;    // pixels between children
+    Layout layout = 3;
 }
 
-// Grid screen layout (lv_obj_set_layout(…, LV_LAYOUT_GRID)).
+// Grid layout (lv_obj_set_layout(…, LV_LAYOUT_GRID)).
 //
 //   * `cols` columns, each LV_GRID_FR(1) wide. 0 → treated as 1.
 //   * `rows` rows, each LV_GRID_FR(1) tall. 0 → single content-sized row.
 //   * `gap` pixels between all tracks.
 //
-// Every widget should carry `Widget.layout.cell`; widgets without one
+// Every child should carry `Widget.placement.cell`; children without one
 // land in (col=0, row=0) with span 1×1.
 message LayoutGrid {
-    uint32 cols = 1;
-    uint32 rows = 2;    // 0 = CONTENT-sized single row track
-    uint32 gap  = 3;    // pixels between tracks
+    uint32 cols   = 1;
+    uint32 rows   = 2;    // 0 = CONTENT-sized single row track
+    uint32 gap    = 3;    // pixels between tracks
+    Layout layout = 4;
+}
+
+// Shared "container of widgets" used by every layout variant
+// (`LayoutAbsolute` / `LayoutFlex` / `LayoutGrid`). Pulled out into its
+// own message so the children list is described in exactly one place
+// and so nanopb's FT_POINTER decoration for it lives in one place too
+// (see `proto/widgets.options`).
+//
+// Stage 24.2 — replaces the old `Screen` widget arrays; every layout
+// variant now carries its own `Layout`.
+message Layout {
+    repeated Widget children = 1;
 }
 
 // Grid placement for a widget whose parent uses Layout.kind == GRID.
@@ -507,10 +526,15 @@ message Fps {
 message ForceRender {
 }
 
-// A single widget inside a `Screen`. `id` is an opaque host-chosen string
+// A single widget inside a `Layout`. `id` is an opaque host-chosen string
 // that follows the widget into events; the device stores it via
 // `lv_obj_set_user_data` and copies it into the `user_data` field of
 // every event the widget emits.
+//
+// Stage 24.2: the three layout variants (`LayoutAbsolute` / `LayoutFlex`
+// / `LayoutGrid`) are themselves `Widget.kind` choices, so a `Widget`
+// can be either a leaf control (button / label / trackpad / …) or a
+// container that arranges its own `Layout.children`.
 message Widget {
     string id    = 1;
     // Visual styling: zero or more `Style` messages, each tagged with the
@@ -518,10 +542,14 @@ message Widget {
     // order via `lv_obj_add_style`; see the `Style` doc-comment.
     repeated Style styles = 3;
     bool centered = 5;
-    // Placement: set `rect` for absolute/flex layouts, `cell` for GRID.
-    oneof layout {
-        Rect     rect = 2;   // absolute position / size
-        GridCell cell = 4;   // GRID column / row placement
+    // Where this widget sits inside its parent layout. `rect` is used by
+    // absolute and flex parents; `cell` by grid parents. Renamed from
+    // `layout` in Stage 24.2 to disambiguate from the layout-widget
+    // kinds below (which manage *this widget's* children, not its
+    // placement).
+    oneof placement {
+        Rect     rect = 2;   // absolute / flex position + size
+        GridCell cell = 4;   // grid column / row placement
     }
     oneof kind {
         Button   button   = 10;
@@ -537,12 +565,20 @@ message Widget {
         ImageButton image_button = 20;
         Fps      fps      = 21;
         ForceRender force_render = 22;
+
+        // Layout-widget kinds (Stage 24.2). A layout widget contains a
+        // `Layout` of children and tells LVGL how to arrange them.
+        LayoutAbsolute layout_absolute = 30;
+        LayoutFlex     layout_flex     = 31;
+        LayoutGrid     layout_grid     = 32;
     }
 }
 
 
 
-// Stage 24.1 — LVGL screen layer.
+// Stage 24.1 / 24.2 — `Screen` is just a name + four LVGL layers, each
+// of which is a single `Widget` (almost always a layout-widget kind
+// carrying its own children).
 //
 // An LVGL display has four stacked screens that render in z-order:
 // `bottom`, the active screen, `top`, and `sys`. See
@@ -550,19 +586,6 @@ message Widget {
 // non-active layers are NOT cleared when `lv_screen_load()` is called,
 // so widgets placed on them persist across screen switches.
 //
-// `Layer` carries what used to live on `Screen`: a screen-level
-// LVGL layout manager (absolute / flex / grid) plus the list of
-// widgets to instantiate. A `Screen` now holds one `Layer` per LVGL
-// layer (see below).
-message Layer {
-    oneof layout {
-        LayoutAbsolute absolute = 1;
-        LayoutFlex     flex     = 2;
-        LayoutGrid     grid     = 3;
-    }
-    repeated Widget widgets = 4;
-}
-
 // One on-device LVGL screen. The encoded `Screen` is what lives in
 // /from_host/screens/<name>.pb.
 message Screen {
@@ -575,7 +598,7 @@ message Screen {
     // from the device filesystem so the host re-uploads a fresh copy.
     enum Version {
         VERSION_UNKNOWN = 0;   // proto3 default — any file without a version field
-        CURRENT         = 11;  // current wire format
+        CURRENT         = 12;  // current wire format
     }
 
     // Must equal `CURRENT`; the firmware deletes and ignores files that
@@ -586,8 +609,11 @@ message Screen {
 
     // The active LVGL screen (what `lv_screen_load` swaps in). Authoring
     // code that doesn't think about LVGL layers should put everything
-    // here — this is where the bulk of every UI lives.
-    Layer active = 7;
+    // here — this is where the bulk of every UI lives. Almost always a
+    // layout-widget (`Widget.kind.layout_*`) carrying its own children;
+    // a leaf widget is allowed but only useful for degenerate
+    // single-widget screens.
+    Widget active = 7;
 
     // Optional layers stacked above / below the active screen. Each one
     // maps onto an LVGL layer object: `top` → `lv_layer_top()`,
@@ -597,9 +623,10 @@ message Screen {
     // new screen is loaded. The firmware honours that by only touching a
     // layer when the incoming `Screen` actually carries it — if `top`
     // is unset on the new screen, the previous screen's `top` widgets
-    // stay on screen. To clear a layer, send an explicit empty `Layer`
-    // for it (`top = Layer()`).
-    optional Layer top    = 8;
-    optional Layer sys    = 9;
-    optional Layer bottom = 10;
+    // stay on screen. To clear a layer, send an explicit empty `Widget`
+    // for it (`top = Widget()`), which the device materialises as an
+    // empty `LayoutAbsolute` container.
+    optional Widget top    = 8;
+    optional Widget sys    = 9;
+    optional Widget bottom = 10;
 }

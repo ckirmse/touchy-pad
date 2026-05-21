@@ -132,34 +132,37 @@ std::string g_default_screen_name;
 // anchor for ActionSwitchScreen NEXT/PREVIOUS traversals.
 std::string g_current_name;
 
-// Build (or rebuild) one LVGL layer from a decoded `touchy_Layer`:
-// applies the layer-level layout manager and then instantiates every
-// widget into `parent`. `parent` is the active screen object for the
-// "active" layer, or one of LVGL's persistent layer objects
-// (`lv_layer_top()` / `lv_layer_sys()` / `lv_layer_bottom()`) for the
-// other three. Caller must already hold the LVGL lock.
-void build_layer(lv_obj_t *parent, const touchy_Layer &L)
+// Build (or rebuild) one LVGL layer from a decoded `touchy_Widget`
+// (the value of `Screen.active` / `top` / `sys` / `bottom`).
+//
+// When the root widget is a layout-widget (`LayoutAbsolute/Flex/Grid`)
+// we configure `parent`'s layout manager from it and instantiate its
+// `Layout.children` directly into `parent` — there's no wrapping
+// `lv_obj`. When the root is a leaf widget (rare, only useful for
+// "single full-screen widget" layers) we build it as a normal child of
+// `parent`.
+//
+// `parent` is the active screen object for `Screen.active`, or one of
+// LVGL's persistent layer objects (`lv_layer_top()` / `lv_layer_sys()`
+// / `lv_layer_bottom()`) for the other three. Caller must already hold
+// the LVGL lock.
+void build_layer(lv_obj_t *parent, const touchy_Widget &root)
 {
-    apply_layout(parent, L);
-    const bool absolute_layout =
-        L.which_layout == touchy_Layer_absolute_tag ||
-        L.which_layout == 0;   // unset → absolute
-    const bool grid_layout =
-        L.which_layout == touchy_Layer_grid_tag;
-
-    for (pb_size_t i = 0; i < L.widgets_count; i++) {
-        const touchy_Widget &w = L.widgets[i];
-        lv_obj_t *obj = widget_build(parent, w);
-        if (!obj) continue;
-        apply_styles(obj, w);
-        if (grid_layout) {
-            // Grid manager owns size/position; we only place the cell.
-            apply_grid_cell(obj, w);
-        } else {
-            apply_rect(obj, w, absolute_layout);
-        }
-        if (w.centered) lv_obj_center(obj);
+    if (widget_is_layout(root)) {
+        apply_layout(parent, root);
+        widget_build_children(parent, root);
+        return;
     }
+    if (root.which_kind == 0) {
+        // Proto3 default — empty widget. Nothing to build (caller has
+        // already cleaned the parent if needed).
+        return;
+    }
+    lv_obj_t *obj = widget_build(parent, root);
+    if (!obj) return;
+    apply_styles(obj, root);
+    apply_rect(obj, root, /*absolute_layout=*/true);
+    if (root.centered) lv_obj_center(obj);
 }
 
 // Render a freshly-decoded screen. Takes ownership of `holder` on
@@ -194,12 +197,11 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
     // on `lv_screen_load`, so an unset layer in the new screen means
     // "leave whatever's there alone". A *populated* layer means
     // "replace its contents wholesale" — we clean and rebuild.
-    auto rebuild_persistent = [](lv_obj_t *layer, const touchy_Layer &L,
+    auto rebuild_persistent = [](lv_obj_t *layer, const touchy_Widget &W,
                                  const char *log_tag) {
         lv_obj_clean(layer);
-        build_layer(layer, L);
-        ESP_LOGI(TAG, "rebuilt %s layer (%u widgets)", log_tag,
-                 (unsigned)L.widgets_count);
+        build_layer(layer, W);
+        ESP_LOGI(TAG, "rebuilt %s layer", log_tag);
     };
     if (S.has_bottom) rebuild_persistent(lv_layer_bottom(), S.bottom, "bottom");
     if (S.has_top)    rebuild_persistent(lv_layer_top(),    S.top,    "top");
@@ -212,7 +214,6 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
     // freed by the unique_ptr reset.
     g_active_screen = std::move(holder);
     g_current_name = log_name ? log_name : "";
-    pb_size_t n_widgets = S.has_active ? S.active.widgets_count : 0;
     lvgl_port_unlock();
 
     // Persist last-loaded so a reboot restores it. The built-in fallback
@@ -222,8 +223,7 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
         Prefs::instance().set_current_screen(g_current_name);
     }
 
-    ESP_LOGI(TAG, "loaded screen '%s' (%u widgets)",
-             log_name, (unsigned)n_widgets);
+    ESP_LOGI(TAG, "loaded screen '%s'", log_name);
     return true;
 }
 

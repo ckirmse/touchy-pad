@@ -52,6 +52,35 @@ def _clear_registry():
     Screen._registry = []
 
 
+# Stage 24.2: each Layer in a decoded Screen is a single layout-`Widget`
+# whose `kind` oneof is `layout_absolute` / `layout_flex` / `layout_grid`,
+# and the children list lives at `<kind>.layout.children`. These helpers
+# hide that field shuffle so tests can keep asking "what's on the layer"
+# in one line.
+
+
+def _layer_kind(layer: object) -> str | None:
+    """Return the layout-widget kind name (`"layout_grid"` etc.) or ``None``."""
+    kind = layer.WhichOneof("kind")  # type: ignore[attr-defined]
+    if kind in ("layout_absolute", "layout_flex", "layout_grid"):
+        return kind
+    return None
+
+
+def _children(layer: object):
+    """Return the layout-widget's `Layout.children` list."""
+    kind = _layer_kind(layer)
+    assert kind is not None, f"layer is not a layout widget: kind={layer.WhichOneof('kind')}"
+    return getattr(layer, kind).layout.children
+
+
+def _layout(layer: object):
+    """Return the layout-widget's per-kind submessage (carrying flow/cols/gap/…)."""
+    kind = _layer_kind(layer)
+    assert kind is not None
+    return getattr(layer, kind)
+
+
 def test_button_round_trip():
     s = Screen("home", layout=col(gap=4))
     s += button("play", text="Play", on_click=host_action(0x42))
@@ -59,12 +88,12 @@ def test_button_round_trip():
 
     decoded = _proto.Screen.FromString(s.to_bytes())
     assert decoded.name == "home"
-    assert decoded.active.WhichOneof("layout") == "flex"
-    assert decoded.active.flex.flow == _proto.LayoutFlex.COLUMN
-    assert decoded.active.flex.gap == 4
-    assert len(decoded.active.widgets) == 2
+    assert _layer_kind(decoded.active) == "layout_flex"
+    assert decoded.active.layout_flex.flow == _proto.LayoutFlex.COLUMN
+    assert decoded.active.layout_flex.gap == 4
+    assert len(_children(decoded.active)) == 2
 
-    w0 = decoded.active.widgets[0]
+    w0 = _children(decoded.active)[0]
     assert w0.id == "play"
     assert w0.WhichOneof("kind") == "button"
     assert w0.button.text == "Play"
@@ -72,7 +101,7 @@ def test_button_round_trip():
     assert w0.button.on_click[0].WhichOneof("kind") == "host"
     assert w0.button.on_click[0].host.code == 0x42
 
-    w1 = decoded.active.widgets[1]
+    w1 = _children(decoded.active)[1]
     assert w1.WhichOneof("kind") == "label"
     assert w1.label.text == "Hello"
     assert w1.label.font_size == 24
@@ -90,10 +119,10 @@ def test_all_widget_kinds_serialise():
     s += spacer("sp", rect=rect(w=20, h=20))
 
     decoded = _proto.Screen.FromString(s.to_bytes())
-    kinds = [w.WhichOneof("kind") for w in decoded.active.widgets]
+    kinds = [w.WhichOneof("kind") for w in _children(decoded.active)]
     assert kinds == ["button", "label", "slider", "toggle", "checkbox", "image", "arc", "spacer"]
-    assert decoded.active.WhichOneof("layout") == "grid"
-    assert decoded.active.grid.cols == 3
+    assert _layer_kind(decoded.active) == "layout_grid"
+    assert decoded.active.layout_grid.cols == 3
 
 
 def test_style_and_rect_applied():
@@ -105,7 +134,7 @@ def test_style_and_rect_applied():
         style=style(bg_color=0xFF8800, radius=8, text_color=0xFFFFFF),
     )
     decoded = _proto.Screen.FromString(s.to_bytes())
-    w = decoded.active.widgets[0]
+    w = _children(decoded.active)[0]
     assert w.rect.x == 10
     assert w.rect.w == 100
     # Single Style is auto-wrapped into the repeated `styles` field.
@@ -124,13 +153,13 @@ def test_style_for_state_round_trip():
         style=style(bg_color=0x1E90FF, for_state=STATE_PRESSED),
     )
     decoded = _proto.Screen.FromString(s.to_bytes())
-    assert decoded.active.widgets[0].styles[0].for_state == STATE_PRESSED
+    assert _children(decoded.active)[0].styles[0].for_state == STATE_PRESSED
     # OR'ing state + part composes a valid selector.
     selector = STATE_PRESSED | PART_KNOB
     s2 = Screen("y")
     s2 += button("g2", style=style(bg_color=1, for_state=selector))
     decoded2 = _proto.Screen.FromString(s2.to_bytes())
-    assert decoded2.active.widgets[0].styles[0].for_state == selector
+    assert _children(decoded2.active)[0].styles[0].for_state == selector
 
 
 def test_style_list_round_trip():
@@ -144,7 +173,7 @@ def test_style_list_round_trip():
         ],
     )
     decoded = _proto.Screen.FromString(s.to_bytes())
-    styles_ = decoded.active.widgets[0].styles
+    styles_ = _children(decoded.active)[0].styles
     assert len(styles_) == 2
     assert styles_[0].bg_color == 0x101010
     assert styles_[0].for_state == 0
@@ -152,20 +181,23 @@ def test_style_list_round_trip():
     assert styles_[1].for_state == STATE_PRESSED
 
 
-def test_screen_version_is_eleven():
-    """Wire-format bump: Screen.Version.CURRENT == 11.
+def test_screen_version_is_twelve():
+    """Wire-format bump: Screen.Version.CURRENT == 12.
 
     Stage 24 (v9) added the ``Fps`` widget and the
     ``ActionDevice`` / ``ActionSwitchScreen`` action subtype. v10
     added the dev-only ``ForceRender`` widget. v11 (Stage 24.1)
-    moves layout + widgets off ``Screen`` and into a new ``Layer``
-    sub-message, with ``Screen`` carrying one ``active`` layer plus
-    optional ``top`` / ``sys`` / ``bottom`` persistent layers.
+    moved layout + widgets off ``Screen`` and into a ``Layer``
+    sub-message. v12 (Stage 24.2) collapses ``Layer`` into ``Widget``:
+    layout managers are themselves a ``Widget.kind`` choice carrying
+    their own ``Layout.children``, and each ``Screen`` layer
+    (``active`` / ``top`` / ``sys`` / ``bottom``) is now a single
+    ``Widget`` (almost always a layout-widget).
     """
     s = Screen("v")
     decoded = _proto.Screen.FromString(s.to_bytes())
     assert decoded.version == _proto.Screen.Version.CURRENT
-    assert int(_proto.Screen.Version.CURRENT) == 11
+    assert int(_proto.Screen.Version.CURRENT) == 12
 
 
 def test_default_screen_only_has_active_layer():
@@ -174,7 +206,7 @@ def test_default_screen_only_has_active_layer():
     s += button("b", text="B")
     decoded = _proto.Screen.FromString(s.to_bytes())
     assert decoded.HasField("active")
-    assert len(decoded.active.widgets) == 1
+    assert len(_children(decoded.active)) == 1
     assert not decoded.HasField("top")
     assert not decoded.HasField("sys")
     assert not decoded.HasField("bottom")
@@ -188,17 +220,17 @@ def test_persistent_layers_round_trip():
     s.add_sys(button("y", text="sys"))
     s.add_bottom(button("z", text="bottom"))
     decoded = _proto.Screen.FromString(s.to_bytes())
-    assert [w.id for w in decoded.active.widgets] == ["a"]
+    assert [w.id for w in _children(decoded.active)] == ["a"]
     assert decoded.HasField("top")
-    assert [w.id for w in decoded.top.widgets] == ["t"]
+    assert [w.id for w in _children(decoded.top)] == ["t"]
     assert decoded.HasField("sys")
-    assert [w.id for w in decoded.sys.widgets] == ["y"]
+    assert [w.id for w in _children(decoded.sys)] == ["y"]
     assert decoded.HasField("bottom")
-    assert [w.id for w in decoded.bottom.widgets] == ["z"]
+    assert [w.id for w in _children(decoded.bottom)] == ["z"]
     # The active layer's layout is independent of the persistent layers'.
-    assert decoded.active.WhichOneof("layout") == "flex"
+    assert _layer_kind(decoded.active) == "layout_flex"
     # Persistent layers default to absolute when constructed via add_*.
-    assert decoded.top.WhichOneof("layout") == "absolute"
+    assert _layer_kind(decoded.top) == "layout_absolute"
 
 
 def test_empty_layer_clears_persistent_layer():
@@ -208,7 +240,7 @@ def test_empty_layer_clears_persistent_layer():
     s = Screen("clr", top=Layer())
     decoded = _proto.Screen.FromString(s.to_bytes())
     assert decoded.HasField("top")
-    assert len(decoded.top.widgets) == 0
+    assert len(_children(decoded.top)) == 0
 
 
 def test_layer_per_layer_layout():
@@ -218,10 +250,10 @@ def test_layer_per_layer_layout():
     s = Screen("g", layout=grid(cols=2, gap=1))
     s.top = Layer(layout=row(gap=4))
     decoded = _proto.Screen.FromString(s.to_bytes())
-    assert decoded.active.WhichOneof("layout") == "grid"
-    assert decoded.top.WhichOneof("layout") == "flex"
-    assert decoded.top.flex.flow == _proto.LayoutFlex.ROW
-    assert decoded.top.flex.gap == 4
+    assert _layer_kind(decoded.active) == "layout_grid"
+    assert _layer_kind(decoded.top) == "layout_flex"
+    assert decoded.top.layout_flex.flow == _proto.LayoutFlex.ROW
+    assert decoded.top.layout_flex.gap == 4
 
 
 # -- Stage 20.2: optional Style fields + Transition -------------------------
@@ -232,7 +264,7 @@ def test_style_optional_zero_round_trips():
     s = Screen("z")
     s += button("b", style=style(bg_color=0x000000, transform_width=0))
     decoded = _proto.Screen.FromString(s.to_bytes())
-    st = decoded.active.widgets[0].styles[0]
+    st = _children(decoded.active)[0].styles[0]
     assert st.HasField("bg_color")
     assert st.bg_color == 0
     assert st.HasField("transform_width")
@@ -254,7 +286,7 @@ def test_style_recolor_and_transform_width_round_trip():
         ),
     )
     decoded = _proto.Screen.FromString(s.to_bytes())
-    st = decoded.active.widgets[0].styles[0]
+    st = _children(decoded.active)[0].styles[0]
     assert st.recolor == 0x123456
     assert st.recolor_opa == 76
     assert st.transform_width == 20
@@ -279,7 +311,7 @@ def test_transition_round_trip():
     s = Screen("t")
     s += button("b", style=style(transition=tr))
     decoded = _proto.Screen.FromString(s.to_bytes())
-    st = decoded.active.widgets[0].styles[0]
+    st = _children(decoded.active)[0].styles[0]
     assert st.HasField("transition")
     assert list(st.transition.props) == [PROP_TRANSFORM_WIDTH, PROP_IMAGE_RECOLOR_OPA]
     assert st.transition.path == ANIM_PATH_EASE_IN_OUT
@@ -305,7 +337,7 @@ def test_demo_smile_uses_transition_pattern():
     # the widget-showcase ("test") screen.
     s = next(s for s in build_demo_screens() if s.name == "test")
     decoded = _proto.Screen.FromString(s.to_bytes())
-    smile = next(w for w in decoded.active.widgets if w.id == "smile")
+    smile = next(w for w in _children(decoded.active) if w.id == "smile")
     assert len(smile.styles) == 2
     default_style, pressed_style = smile.styles
     # Default style binds the transition, no for_state and no bg colour.
@@ -345,7 +377,7 @@ def test_macro_action_round_trip():
         ),
     )
     decoded = _proto.Screen.FromString(s.to_bytes())
-    actions = decoded.active.widgets[0].button.on_click
+    actions = _children(decoded.active)[0].button.on_click
     assert len(actions) == 1
     assert actions[0].WhichOneof("kind") == "macro"
     steps = actions[0].macro.steps
@@ -366,7 +398,7 @@ def test_int_on_click_becomes_host_action():
     s = Screen("i")
     s += button("go", on_click=0x99)
     decoded = _proto.Screen.FromString(s.to_bytes())
-    actions = decoded.active.widgets[0].button.on_click
+    actions = _children(decoded.active)[0].button.on_click
     assert len(actions) == 1
     assert actions[0].host.code == 0x99
 
@@ -381,7 +413,7 @@ def test_action_list_mixes_host_and_macro():
         ],
     )
     decoded = _proto.Screen.FromString(s.to_bytes())
-    actions = decoded.active.widgets[0].button.on_click
+    actions = _children(decoded.active)[0].button.on_click
     assert len(actions) == 2
     assert actions[0].host.code == 7
     assert actions[1].WhichOneof("kind") == "macro"
@@ -404,14 +436,14 @@ def test_type_text_round_trip():
 
 def test_default_layout_is_absolute():
     decoded = _proto.Screen.FromString(Screen("d").to_bytes())
-    assert decoded.active.WhichOneof("layout") == "absolute"
+    assert _layer_kind(decoded.active) == "layout_absolute"
 
 
 def test_row_layout_helper():
     decoded = _proto.Screen.FromString(Screen("r", layout=row(gap=7)).to_bytes())
-    assert decoded.active.WhichOneof("layout") == "flex"
-    assert decoded.active.flex.flow == _proto.LayoutFlex.ROW
-    assert decoded.active.flex.gap == 7
+    assert _layer_kind(decoded.active) == "layout_flex"
+    assert decoded.active.layout_flex.flow == _proto.LayoutFlex.ROW
+    assert decoded.active.layout_flex.gap == 7
 
 
 def test_screen_requires_name():
@@ -431,7 +463,7 @@ def test_write_to_disk_and_reload(tmp_path: Path):
     assert p.exists()
     decoded = _proto.Screen.FromString(p.read_bytes())
     assert decoded.name == "disk"
-    assert decoded.active.widgets[0].label.text == "hi"
+    assert _children(decoded.active)[0].label.text == "hi"
 
 
 def test_collect_from_script(tmp_path: Path):
@@ -474,7 +506,7 @@ def test_ripple_animation_kwargs_roundtrip():
     s = Screen("rip")
     s += trackpad("pad", tap_ripple=r)
     decoded = _proto.Screen.FromString(s.to_bytes())
-    tp = decoded.active.widgets[0].trackpad
+    tp = _children(decoded.active)[0].trackpad
     assert tp.HasField("tap_ripple")
     assert tp.tap_ripple.start_opa == 128
     assert tp.tap_ripple.max_radius == 70
@@ -488,7 +520,7 @@ def test_trackpad_unset_optionals_have_no_color_or_ripple():
     s = Screen("t")
     s += trackpad("pad")
     decoded = _proto.Screen.FromString(s.to_bytes())
-    tp = decoded.active.widgets[0].trackpad
+    tp = _children(decoded.active)[0].trackpad
     assert tp.scroll_invert_y is False
     assert tp.scroll_invert_x is False
     assert not tp.HasField("left_touch_color")
@@ -511,7 +543,7 @@ def test_trackpad_full_kwargs_roundtrip():
         tap_ripple=ripple_animation(max_radius=50, border_width=3),
     )
     decoded = _proto.Screen.FromString(s.to_bytes())
-    tp = decoded.active.widgets[0].trackpad
+    tp = _children(decoded.active)[0].trackpad
     assert tp.scroll_invert_y is True
     assert tp.scroll_invert_x is True
     assert tp.left_touch_color == 0x112233
@@ -527,7 +559,7 @@ def test_build_demo_screen_trackpad_has_ripples():
     """Demo screen ships ripple eye-candy so users see the feature."""
     s = build_demo_screen()
     decoded = _proto.Screen.FromString(s.to_bytes())
-    pad = next(w for w in decoded.active.widgets if w.id == "pad")
+    pad = next(w for w in _children(decoded.active) if w.id == "pad")
     tp = pad.trackpad
     assert tp.HasField("touch_ripple")
     assert tp.HasField("tap_ripple")
@@ -544,7 +576,7 @@ def test_fps_widget_round_trip():
     s = Screen("h")
     s += fps("fps_label")
     decoded = _proto.Screen.FromString(s.to_bytes())
-    w = decoded.active.widgets[0]
+    w = _children(decoded.active)[0]
     assert w.id == "fps_label"
     assert w.WhichOneof("kind") == "fps"
 
@@ -554,7 +586,7 @@ def test_force_render_widget_round_trip():
     s = Screen("h")
     s += force_render("force_box")
     decoded = _proto.Screen.FromString(s.to_bytes())
-    w = decoded.active.widgets[0]
+    w = _children(decoded.active)[0]
     assert w.id == "force_box"
     assert w.WhichOneof("kind") == "force_render"
 

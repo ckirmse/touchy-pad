@@ -19,3 +19,11 @@
 // which case the caller should skip the widget — apply_styles &
 // apply_*layout are also skipped automatically when the return is null).
 lv_obj_t *widget_build(lv_obj_t *parent, const touchy_Widget &w);
+
+// Build every child of `container` (a layout widget — see
+// `widget_is_layout`) into `parent`. Picks the right `Layout.children`
+// list off `container.which_kind`, then for each child runs the full
+// build → apply_styles → apply_placement → optional center sequence.
+// Recursively descends into nested layout-widget children. No-op if
+// `container` is not a layout widget. Caller must hold the LVGL lock.
+void widget_build_children(lv_obj_t *parent, const touchy_Widget &container);
