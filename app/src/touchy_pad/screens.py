@@ -50,6 +50,7 @@ __all__ = [
     "toggle",
     "checkbox",
     "image",
+    "image_button",
     "arc",
     "spacer",
     "trackpad",
@@ -354,6 +355,31 @@ def image(
     return w
 
 
+def image_button(
+    id: str,
+    asset: str,
+    pressed_asset: str | None = None,
+    on_click=None,
+    rect: _proto.Rect | None = None,
+    style: _proto.Style | None = None,
+) -> _proto.Widget:
+    """Clickable image button backed by uploaded assets.
+
+    ``asset`` is the always-shown (released) image, resolved as
+    ``/from_host/<asset>``. ``pressed_asset`` is optional: pass ``None``
+    (the default) to leave LVGL's PRESSED state unset; LVGL then renders
+    the released image while pressed.
+
+    ``on_click`` accepts the same shapes as :func:`button`'s ``on_click``.
+    """
+    w = _widget(id, rect=rect, style=style)
+    w.image_button.asset = asset
+    if pressed_asset is not None:
+        w.image_button.pressed_asset = pressed_asset
+    w.image_button.on_click.extend(_normalise_actions(on_click))
+    return w
+
+
 def arc(
     id: str,
     min: int = 0,
@@ -510,7 +536,10 @@ def build_demo_screen(name: str = "demo") -> Screen:
           events).
         - slider        → host action 0x101 (extra carries int32 LE).
         - checkbox      → host action 0x102 (extra is 1 byte).
-    * Right column (rows 0-4, ``row_span=5``): the :func:`trackpad`
+        - smiley image-button (Stage 20) → host action 0x103. The asset
+          lives at ``/from_host/images/smiley.bmp`` and is uploaded by
+          the ``touchy screens demo`` command alongside this screen.
+    * Right column (rows 0-3, ``row_span=4``): the :func:`trackpad`
       surface for USB HID mouse output.
     * Bottom strip (row 5, ``col_span=2``): a :func:`log_line` that
       mirrors the device's most recent log message — e.g. each
@@ -523,9 +552,6 @@ def build_demo_screen(name: str = "demo") -> Screen:
 
     # ── left column: stacked control widgets ───────────────────────────
     s += cell(
-        label("title", text="Demo", font_size=12, style=style(text_color=0xFFFFFF)), col=0, row=0
-    )
-    s += cell(
         button(
             "hello",
             text="Type 'hi'",
@@ -537,16 +563,23 @@ def build_demo_screen(name: str = "demo") -> Screen:
             ),
         ),
         col=0,
-        row=1,
+        row=0,
     )
-    s += cell(button("ping", text="Ping host", on_click=host_action(0x100)), col=0, row=2)
-    s += cell(slider("level", min=0, max=100, value=42, on_change=host_action(0x101)), col=0, row=3)
+    s += cell(button("ping", text="Ping host", on_click=host_action(0x100)), col=0, row=1)
+    s += cell(slider("level", min=0, max=100, value=42, on_change=host_action(0x101)), col=0, row=2)
     s += cell(
-        checkbox("enable", text="Enabled", checked=True, on_change=host_action(0x102)), col=0, row=4
+        checkbox("enable", text="Enabled", checked=True, on_change=host_action(0x102)), col=0, row=3
     )
 
-    # ── right column: multitouch trackpad spans rows 0..4 ──────────────
+    # ── right column: multitouch trackpad spans rows 0..3 ──────────────
     s += cell(trackpad("pad"), col=1, row=0, row_span=5, col_span=3)
+
+    # ── Stage 20 smiley image-button: row 4, left column ───────────────
+    s += cell(
+        image_button("smile", asset="images/smiley.bmp", on_click=host_action(0x103)),
+        col=0,
+        row=4,
+    )
 
     # ── bottom strip: log readout spans both columns ───────────────────
     s += cell(log_line("log"), col=0, row=5, col_span=4)

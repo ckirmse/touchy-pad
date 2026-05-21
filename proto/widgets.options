@@ -18,6 +18,8 @@ touchy.Button.text                     max_size:64
 touchy.Label.text                      max_size:128
 touchy.Checkbox.text                   max_size:64
 touchy.Image.asset                     max_size:64
+touchy.ImageButton.asset               max_size:64
+touchy.ImageButton.pressed_asset       max_size:64
 touchy.Widget.id                       max_size:32
 touchy.Screen.name                     max_size:32
 
@@ -27,4 +29,5 @@ touchy.Button.on_click                 type:FT_POINTER
 touchy.Slider.on_change                type:FT_POINTER
 touchy.Switch.on_change                type:FT_POINTER
 touchy.Checkbox.on_change              type:FT_POINTER
+touchy.ImageButton.on_click            type:FT_POINTER
 touchy.ActionMacro.steps               type:FT_POINTER

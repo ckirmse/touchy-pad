@@ -24,6 +24,11 @@ classifiers = [
     "Topic :: System :: Hardware :: Hardware Drivers",
 ]
 packages = [{ include = "touchy_pad", from = "src" }]
+# Binary resources (e.g. demo BMP image) must be explicitly listed so they
+# end up in both the wheel and the sdist published to PyPI.
+include = [
+    { path = "src/touchy_pad/assets/*.bmp", format = ["sdist", "wheel"] },
+]
 
 [tool.poetry.dependencies]
 python = "^3.10"

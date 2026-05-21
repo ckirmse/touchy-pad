@@ -205,11 +205,14 @@ def screens_demo(listen: bool, as_json: bool) -> None:
       * a "hi" button wired to a device-side macro that types the text
         over USB HID (no host involvement);
       * a "ping" button, slider and checkbox wired to host actions
-        (codes 0x100 / 0x101 / 0x102).
+        (codes 0x100 / 0x101 / 0x102);
+      * a 16x16 BMP image button (Stage 20) wired to host action 0x103.
+        Its asset is auto-uploaded to /from_host/images/smiley.bmp.
 
     With ``--listen`` the CLI registers Python handlers for the host
     action codes and prints the incoming events.
     """
+    from .images import make_smiley_bmp
     from .screens import build_demo_screen
 
     s = build_demo_screen("demo")
@@ -220,8 +223,11 @@ def screens_demo(listen: bool, as_json: bool) -> None:
         click.echo(json_format.MessageToJson(s.to_proto(), indent=2))
         return
 
+    smiley = make_smiley_bmp()
     data = s.to_bytes()
     with _client() as c:
+        c.file_save("images/smiley.bmp", smiley)
+        click.echo(f"sent images/smiley.bmp ({len(smiley)} bytes)")
         c.file_save(f"screens/{s.name}.pb", data)
         click.echo(f"sent screens/{s.name}.pb ({len(data)} bytes, " f"{len(s.widgets)} widgets)")
         c.screen_load(s.name)
@@ -238,9 +244,13 @@ def screens_demo(listen: bool, as_json: bool) -> None:
             def on_enable(evt):
                 click.echo(f"[check]  widget={evt.user_data!r} on={evt.checked}")
 
+            def on_smile(evt):
+                click.echo(f"[smile]  widget={evt.user_data!r}")
+
             c.on_host_event(0x100, on_ping)
             c.on_host_event(0x101, on_level)
             c.on_host_event(0x102, on_enable)
+            c.on_host_event(0x103, on_smile)
             click.echo("listening for host events (Ctrl-C to stop)...")
             try:
                 for _ in c.stream_events():

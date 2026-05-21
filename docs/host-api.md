@@ -28,7 +28,16 @@ extension after writing to decide how to post-process it:
 * `screens/*.pb` — decoded as a `touchy.Screen` protobuf (see
   [Stage 15](../docs/why-not-xml.md)) and cached for `Screen_Load`.
 * anything else — written verbatim; reachable via the LVGL `F:` drive
-  letter so image/font loaders can resolve it on demand.
+  letter so image/font loaders can resolve it on demand. The firmware
+  enables `CONFIG_LV_USE_FS_POSIX` with `LV_FS_POSIX_PATH=/littlefs`,
+  so a host-uploaded `images/smiley.bmp` lands at
+  `/littlefs/from_host/images/smiley.bmp` on disk and resolves to
+  `F:/from_host/images/smiley.bmp` from LVGL. `Image` / `ImageButton`
+  widgets store the part after `F:/from_host/` (e.g.
+  `"images/smiley.bmp"`) in their `asset` field; the firmware prepends
+  the prefix when handing the path to LVGL. Images must be RGB565
+  BMPs (BI_BITFIELDS, masks `0xF800 / 0x07E0 / 0x001F`) because
+  `CONFIG_LV_USE_BMP` is the only image decoder enabled today.
 
 Commands:
 

@@ -266,14 +266,62 @@ lv_obj_t *build_image(lv_obj_t *parent, const touchy_Widget &w)
 {
     lv_obj_t *img = lv_image_create(parent);
     if (w.kind.image.asset[0] != '\0') {
-        // The host-uploaded files live under /from_host/; LVGL's FS bridge
-        // (registered separately for image assets) exposes them under the
-        // "F:" drive letter. Image decoder availability depends on
-        // sdkconfig CONFIG_LV_USE_PNG / CONFIG_LV_USE_BMP / etc.
-        std::string lv_path = std::string("F:") + w.kind.image.asset;
+        // The host-uploaded files live under /littlefs/from_host/; LVGL's
+        // POSIX FS bridge (CONFIG_LV_USE_FS_POSIX) exposes /littlefs as
+        // the "F:" drive, so the wire-format asset path is rebased here.
+        // BMP decoding requires CONFIG_LV_USE_BMP (enabled in sdkconfig).
+        std::string lv_path = std::string("F:/from_host/") + w.kind.image.asset;
+        ESP_LOGI(TAG, "build_image id='%s' src='%s'", w.id, lv_path.c_str());
         lv_image_set_src(img, lv_path.c_str());
     }
     return img;
+}
+
+// Two LVGL-allocated path strings owned by an `lv_imagebutton` for the
+// lifetime of the widget. Freed via an LV_EVENT_DELETE callback below.
+struct ImageButtonPaths {
+    char *released;
+    char *pressed;
+};
+
+void image_button_delete_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_DELETE) return;
+    auto *paths = static_cast<ImageButtonPaths *>(lv_event_get_user_data(e));
+    if (!paths) return;
+    free(paths->released);
+    free(paths->pressed);
+    delete paths;
+}
+
+lv_obj_t *build_image_button(lv_obj_t *parent, const touchy_Widget &w)
+{
+    lv_obj_t *btn = lv_imagebutton_create(parent);
+    const touchy_ImageButton &ib = w.kind.image_button;
+    if (ib.asset[0] != '\0') {
+        auto *paths = new (std::nothrow) ImageButtonPaths{nullptr, nullptr};
+        if (!paths) return btn;
+        std::string released = std::string("F:/from_host/") + ib.asset;
+        paths->released = strdup(released.c_str());
+        ESP_LOGI(TAG, "build_image_button id='%s' released='%s' has_pressed=%d",
+                 w.id, released.c_str(), (int)ib.has_pressed_asset);
+        // Pass as src_left (drawn once at natural size). src_mid is tiled
+        // to fill the widget width — avoid it for simple non-9-patch images.
+        lv_imagebutton_set_src(btn, LV_IMAGEBUTTON_STATE_RELEASED,
+                               paths->released, NULL, NULL);
+        lv_obj_set_size(btn, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        if (ib.has_pressed_asset && ib.pressed_asset[0] != '\0') {
+            std::string pressed = std::string("F:/from_host/") + ib.pressed_asset;
+            paths->pressed = strdup(pressed.c_str());
+            lv_imagebutton_set_src(btn, LV_IMAGEBUTTON_STATE_PRESSED,
+                                   paths->pressed, NULL, NULL);
+        }
+        lv_obj_add_event_cb(btn, image_button_delete_cb, LV_EVENT_DELETE, paths);
+    }
+    attach_actions(btn, w.id,
+                   ib.on_click, ib.on_click_count,
+                   LV_EVENT_CLICKED, set_value_none);
+    return btn;
 }
 
 lv_obj_t *build_arc(lv_obj_t *parent, const touchy_Widget &w)
@@ -519,6 +567,7 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
         case touchy_Widget_slider_tag:   obj = build_slider(scr, w);   break;
         case touchy_Widget_toggle_tag:   obj = build_switch(scr, w);   break;
         case touchy_Widget_image_tag:    obj = build_image(scr, w);    break;
+        case touchy_Widget_image_button_tag: obj = build_image_button(scr, w); break;
         case touchy_Widget_arc_tag:      obj = build_arc(scr, w);      break;
         case touchy_Widget_spacer_tag:   obj = build_spacer(scr, w);   break;
         case touchy_Widget_checkbox_tag: obj = build_checkbox(scr, w); break;

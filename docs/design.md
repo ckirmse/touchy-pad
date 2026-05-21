@@ -255,7 +255,7 @@ buttons or sliders.
   occupying the right half, and a `log_line` strip along the bottom
   echoing each recognised gesture.
 
-## Stage 19: Backlight auto-sleep + host control
+## Stage 19: Backlight auto-sleep + host control - DONE
 
 Implement display backlight power management:
 
@@ -278,6 +278,59 @@ Implement display backlight power management:
 * **Board API**: added `board_backlight_set(bool on)` to `board.h`, implemented
   in both board ports (GPIO for jc4827w543; CH422G IO expander for waveshare).
 * **`touch.h`**: added `touch_get_indev()` to both board touch drivers.
+
+## Stage 20: Image file support — DONE
+
+Host-uploaded image files in `/from_host/` can now back `Image` and the
+new `ImageButton` widgets. Image decoding is RGB565 BMP only — both
+target boards run LVGL in `LV_COLOR_DEPTH_16`, and LVGL's BMP decoder
+is zero-copy and refuses any other pixel layout.
+
+* **sdkconfig (defaults + both boards):** added
+  `CONFIG_LV_USE_FS_POSIX=y` with `LV_FS_POSIX_LETTER=70` (`'F'`) and
+  `LV_FS_POSIX_PATH="/littlefs"`, plus `CONFIG_LV_USE_BMP=y`. The
+  POSIX FS bridge maps `F:/...` straight onto the LittleFS mount, so
+  the existing `Fs::writeFile()` path used by `FileSave` is enough —
+  no separate driver registration.
+* **Protobuf (`proto/widgets.proto`):** new `ImageButton` widget with
+  `asset` (required), `optional pressed_asset`, and `repeated Action
+  on_click`. Added as `Widget.kind.image_button = 20`. `Screen.Version.CURRENT`
+  bumped to `3`; older `.pb` files are auto-deleted on boot by the
+  existing version-check path in `screens.cpp`.
+* **Firmware (`firmware/main/screens.cpp`):**
+    * Fixed `build_image` to rebase asset paths under `F:/from_host/`
+      (previously produced `F:<asset>` which couldn't resolve).
+    * New `build_image_button` uses `lv_imagebutton_create` +
+      `lv_imagebutton_set_src`. The PRESSED state is only set when
+      `has_pressed_asset` is true on the decoded message; otherwise we
+      let LVGL fall back to the released image on its own. Heap-allocated
+      path strings are owned by an `ImageButtonPaths` struct attached as
+      an `LV_EVENT_DELETE` callback so they're freed when the screen is
+      swapped out.
+* **Host DSL (`app/src/touchy_pad/screens.py`):** new
+  `image_button(id, asset, pressed_asset=None, on_click=...)` helper.
+  `pressed_asset=None` (the default) leaves the protobuf field unset
+  so the firmware skips the PRESSED-state assignment.
+* **Host image assets (`app/src/touchy_pad/images.py` +
+  `app/src/touchy_pad/assets/`):** demo BMPs are shipped as binary
+  resources inside the wheel/sdist. `make_smiley_bmp()` is a one-liner
+  that reads the pre-built `assets/smiley.bmp` via
+  `importlib.resources`, so the package has zero image-processing
+  dependencies. A runtime BMP encoder (and PNG/JPEG conversion) is
+  deferred to a later stage; for now users either ship pre-built BMPs
+  or generate them with an external tool.
+* **CLI (`touchy screens demo`):** uploads the smiley as
+  `images/smiley.bmp` alongside the screen `.pb`, and the demo screen
+  now includes an `image_button("smile", asset="images/smiley.bmp",
+  on_click=host_action(0x103))` in row 4 of the grid. `--listen`
+  registers a handler for `0x103`.
+* **Docs:** [docs/host-api.md](host-api.md) section on the file API
+  spells out the `F:/from_host/` rebase rule and the RGB565-BMP
+  requirement.
+
+Deferred (Stage-20 spec explicitly punts these): auto-conversion of
+PNG/JPEG sources to RGB565 BMP on the host, and PNG/JPEG decoders on
+the device (`LV_USE_PNG`, `LV_USE_LODEPNG`, etc.).
 
 ## Stage 21: Allow host PC to configure the button matrixes/screen layout
 * Use protocol buffers (nanopb?) to communicate between the host/device (over a custom USB characteristic)
