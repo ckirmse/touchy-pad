@@ -486,6 +486,15 @@ bump and overlap heavily on `screens.cpp`:
   about LVGL's bin format. The device-side PNG/JPEG decoder note in
   Stage 20 is now marked unnecessary.
 
+## Stage 20.4: Nice animations on touches to the "Trackpad"
+
+I'd like you to come up with a fairly general/protobuf driven abstraction so that we can show a nice 'water droplet effect' where the user touches with their fingers on the touchpad.  Features:
+
+* Extend protobufs so that there is a general/reusable set of optional 'touch', 'tap' and 'drag' animations on the Trackpad message. (Try to reuse/share/refactor existing Style/Image/Transition/Animation messages/code as much as is possible)
+* Read https://lvgl.io/docs/open/main-modules/animation and https://github.com/lvgl/lvgl/blob/master/examples/anim/lv_example_anim_2.c for inspiration
+* When touches/drags/taps start/stop create/remove animations as needed
+* Extend the demo python code to install whatever 'first attempt' animations you think make sense
+
 ## Stage 21: Allow host PC to configure the button matrixes/screen layout
 * Use protocol buffers (nanopb?) to communicate between the host/device (over a custom USB characteristic)
 * Provide a simple python library to allow host applications to easily configure the button matrixes/screen layout

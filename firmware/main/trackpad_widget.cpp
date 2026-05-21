@@ -10,6 +10,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <new>
 
 static const char *TAG = "trackpad";
 
@@ -18,10 +19,91 @@ static uint32_t millis()
     return static_cast<uint32_t>(esp_timer_get_time() / 1000);
 }
 
-TrackpadWidget::TrackpadWidget(esp_lcd_touch_handle_t touch, lv_obj_t *parent,
-                               bool scroll_invert_y, bool scroll_invert_x)
-    : _touch(touch), _scroll_invert_y(scroll_invert_y), _scroll_invert_x(scroll_invert_x)
+// ---------------------------------------------------------------------------
+// Ripple animation helpers
+//
+// A ripple is a single transient LVGL object: a coloured circle child of
+// the trackpad container, spawned at the touch point, that grows from
+// radius 0 to `cfg.max_radius` while fading `cfg.start_opa` → 0 over
+// `cfg.duration_ms`. Implementation follows the lv_anim docs / the
+// `lv_example_anim_2.c` pattern: one reused `lv_anim_t` template drives
+// two parallel animations (size and opacity) on the same target. The
+// opacity anim's `completed_cb` deletes the widget; widget deletion
+// auto-cancels the still-running size anim, so no extra bookkeeping is
+// required.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct RippleCtx {
+    int16_t cx;  // ripple center, widget-local px
+    int16_t cy;
+};
+
+// Exec callback for the radius animation. `v` is the current radius;
+// we resize the object to (2v × 2v) and reposition so the center stays
+// pinned at the stored (cx, cy) regardless of size.
+void ripple_size_cb(void *var, int32_t v)
 {
+    auto *o   = static_cast<lv_obj_t *>(var);
+    auto *ctx = static_cast<RippleCtx *>(lv_obj_get_user_data(o));
+    if (!ctx) return;
+    lv_obj_set_size(o, v * 2, v * 2);
+    lv_obj_set_pos(o, ctx->cx - v, ctx->cy - v);
+}
+
+// Exec callback for the opacity animation. Uses selector 0 = main part /
+// default state, the same selector our size/border/bg setup writes to.
+void ripple_opa_cb(void *var, int32_t opa)
+{
+    lv_obj_set_style_opa(static_cast<lv_obj_t *>(var),
+                         static_cast<lv_opa_t>(opa), 0);
+}
+
+// `completed_cb` for the opacity animation. By the time this fires the
+// ripple has fully faded; delete the LVGL object (which auto-cancels
+// any sibling animations targeting it) and free the heap-allocated
+// RippleCtx we stashed in user_data.
+void ripple_opa_completed(lv_anim_t *a)
+{
+    auto *o   = static_cast<lv_obj_t *>(a->var);
+    auto *ctx = static_cast<RippleCtx *>(lv_obj_get_user_data(o));
+    lv_obj_set_user_data(o, nullptr);
+    delete ctx;
+    lv_obj_delete(o);
+}
+
+lv_anim_path_cb_t ripple_path_for(touchy_AnimPath p)
+{
+    switch (p) {
+        case touchy_AnimPath_ANIM_PATH_EASE_IN:     return lv_anim_path_ease_in;
+        case touchy_AnimPath_ANIM_PATH_EASE_OUT:    return lv_anim_path_ease_out;
+        case touchy_AnimPath_ANIM_PATH_EASE_IN_OUT: return lv_anim_path_ease_in_out;
+        case touchy_AnimPath_ANIM_PATH_OVERSHOOT:   return lv_anim_path_overshoot;
+        case touchy_AnimPath_ANIM_PATH_BOUNCE:      return lv_anim_path_bounce;
+        case touchy_AnimPath_ANIM_PATH_STEP:        return lv_anim_path_step;
+        case touchy_AnimPath_ANIM_PATH_LINEAR:
+        default:                                    return lv_anim_path_linear;
+    }
+}
+
+}  // namespace
+
+TrackpadWidget::TrackpadWidget(esp_lcd_touch_handle_t touch, lv_obj_t *parent,
+                               const touchy_Trackpad &cfg)
+    : _touch(touch),
+      _scroll_invert_y(cfg.scroll_invert_y),
+      _scroll_invert_x(cfg.scroll_invert_x),
+      _has_touch_ripple(cfg.has_touch_ripple),
+      _has_tap_ripple(cfg.has_tap_ripple),
+      _touch_ripple_cfg(cfg.touch_ripple),
+      _tap_ripple_cfg(cfg.tap_ripple)
+{
+    // Resolve ripple colors: explicit proto value wins, otherwise keep
+    // the built-in defaults from the header initialiser.
+    if (cfg.has_left_touch_color)   _color_1 = cfg.left_touch_color;
+    if (cfg.has_right_touch_color)  _color_2 = cfg.right_touch_color;
+    if (cfg.has_middle_touch_color) _color_3 = cfg.middle_touch_color;
+
     // The widget *is* the LVGL container; caller sizes/styles it via the
     // host DSL's Rect / Style. Defaults are kept lean (no padding,
     // dark background) so the trackpad surface is visually unambiguous.
@@ -104,6 +186,17 @@ void TrackpadWidget::_process()
         _fingers[i].dragging = false;
         if (static_cast<uint8_t>(i + 1) > _session_max_fingers) {
             _session_max_fingers = static_cast<uint8_t>(i + 1);
+        }
+        // Spawn the touch ripple. Color tracks the *current* finger
+        // count so e.g. landing the 2nd finger spawns a "right-click"
+        // colored ripple even while the 1st finger's left-colored
+        // ripple is still fading from the earlier frame.
+        if (_has_touch_ripple) {
+            int16_t lx = static_cast<int16_t>(pts[i].x) -
+                         static_cast<int16_t>(lv_obj_get_x(_container));
+            int16_t ly = static_cast<int16_t>(pts[i].y) -
+                         static_cast<int16_t>(lv_obj_get_y(_container));
+            _spawn_ripple(lx, ly, _touch_ripple_cfg, _color_for_count(count));
         }
     }
 
@@ -204,7 +297,27 @@ void TrackpadWidget::_process()
                 break;
             }
         }
-        if (is_tap) _clickButton(_session_max_fingers);
+        if (is_tap) {
+            // Spawn the tap-burst ripple at the centroid of the tapping
+            // fingers' touch-down positions; color reflects the gesture
+            // (1/2/3-finger \u2192 left/right/middle palette).
+            if (_has_tap_ripple && _session_max_fingers > 0) {
+                int32_t sx = 0, sy = 0;
+                int n = _session_max_fingers;
+                if (n > MAX_FINGERS) n = MAX_FINGERS;
+                for (int i = 0; i < n; i++) {
+                    sx += _fingers[i].start_x;
+                    sy += _fingers[i].start_y;
+                }
+                int16_t lx = static_cast<int16_t>(sx / n) -
+                             static_cast<int16_t>(lv_obj_get_x(_container));
+                int16_t ly = static_cast<int16_t>(sy / n) -
+                             static_cast<int16_t>(lv_obj_get_y(_container));
+                _spawn_ripple(lx, ly, _tap_ripple_cfg,
+                              _color_for_count(_session_max_fingers));
+            }
+            _clickButton(_session_max_fingers);
+        }
 
         _session_max_fingers = 0;
         _scrolling           = false;
@@ -231,4 +344,79 @@ void TrackpadWidget::_clickButton(int finger_count)
     log_line_post("%s (%d finger%s)", name, finger_count,
                   finger_count > 1 ? "s" : "");
     ESP_LOGI(TAG, "%s", name);
+}
+
+uint32_t TrackpadWidget::_color_for_count(uint8_t n) const
+{
+    if (n <= 1) return _color_1;
+    if (n == 2) return _color_2;
+    return _color_3;
+}
+
+void TrackpadWidget::_spawn_ripple(int16_t cx, int16_t cy,
+                                   const touchy_RippleAnimation &cfg,
+                                   uint32_t color_rgb)
+{
+    if (!_container) return;
+
+    // Pull values with proto-default fallbacks.
+    const uint32_t start_opa   = cfg.has_start_opa    ? cfg.start_opa    : 200u;
+    const uint32_t max_radius  = cfg.has_max_radius   ? cfg.max_radius   : 40u;
+    const uint32_t duration_ms = cfg.has_duration_ms  ? cfg.duration_ms  : 350u;
+    const uint32_t border_w    = cfg.has_border_width ? cfg.border_width : 0u;
+    if (max_radius == 0 || duration_ms == 0) return;
+
+    auto *ctx = new (std::nothrow) RippleCtx{cx, cy};
+    if (!ctx) return;
+    lv_obj_t *o = lv_obj_create(_container);
+    if (!o) { delete ctx; return; }
+
+    // Decorations off so we don't get themed default borders/shadows.
+    lv_obj_remove_style_all(o);
+    lv_obj_set_user_data(o, ctx);
+    lv_obj_set_size(o, 0, 0);
+    lv_obj_set_pos(o, cx, cy);
+    lv_obj_add_flag(o, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_clear_flag(o, static_cast<lv_obj_flag_t>(
+        LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+
+    const lv_color_t col = lv_color_make(static_cast<uint8_t>(color_rgb >> 16),
+                                         static_cast<uint8_t>(color_rgb >> 8),
+                                         static_cast<uint8_t>(color_rgb));
+    // Always set radius huge so the rect renders as a circle regardless
+    // of its current animated width/height.
+    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_opa(o, static_cast<lv_opa_t>(start_opa), 0);
+    if (border_w > 0) {
+        // Hollow ring: transparent fill, coloured border.
+        lv_obj_set_style_bg_opa(o, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(o, static_cast<lv_coord_t>(border_w), 0);
+        lv_obj_set_style_border_color(o, col, 0);
+        lv_obj_set_style_border_opa(o, LV_OPA_COVER, 0);
+    } else {
+        // Filled disc.
+        lv_obj_set_style_bg_color(o, col, 0);
+        lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(o, 0, 0);
+    }
+
+    lv_anim_path_cb_t path = ripple_path_for(cfg.path);
+
+    // Single reusable template, copied by lv_anim_start each time.
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, o);
+    lv_anim_set_duration(&a, duration_ms);
+    lv_anim_set_path_cb(&a, path);
+
+    // Size animation: 0 -> max_radius.
+    lv_anim_set_exec_cb(&a, ripple_size_cb);
+    lv_anim_set_values(&a, 0, static_cast<int32_t>(max_radius));
+    lv_anim_start(&a);
+
+    // Opacity animation: start_opa -> 0, deletes the object on completion.
+    lv_anim_set_exec_cb(&a, ripple_opa_cb);
+    lv_anim_set_values(&a, static_cast<int32_t>(start_opa), 0);
+    lv_anim_set_completed_cb(&a, ripple_opa_completed);
+    lv_anim_start(&a);
 }

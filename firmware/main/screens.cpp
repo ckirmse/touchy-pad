@@ -449,8 +449,7 @@ lv_obj_t *build_trackpad(lv_obj_t *parent, const touchy_Widget &w)
     // can fire-and-forget here.
     const touchy_Trackpad &tp_pb = w.kind.trackpad;
     auto *tp = new (std::nothrow) TrackpadWidget(
-        s_touch_handle, parent,
-        tp_pb.scroll_invert_y, tp_pb.scroll_invert_x);
+        s_touch_handle, parent, tp_pb);
     return tp ? tp->obj() : nullptr;
 }
 

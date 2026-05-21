@@ -55,6 +55,7 @@ __all__ = [
     "arc",
     "spacer",
     "trackpad",
+    "ripple_animation",
     "log_line",
     "build_demo_screen",
     # LvState / LvPart selector bits (see widgets.proto:LvState).
@@ -695,21 +696,82 @@ def spacer(
     return w
 
 
+def ripple_animation(
+    *,
+    start_opa: int = 200,
+    max_radius: int = 40,
+    duration_ms: int = 350,
+    path: int = ANIM_PATH_LINEAR,
+    border_width: int = 0,
+) -> _proto.RippleAnimation:
+    """Touch-feedback ripple descriptor.
+
+    A circle grows from radius 0 to ``max_radius`` while its opacity
+    fades from ``start_opa`` (0-255) to 0 over ``duration_ms``, eased by
+    ``path``. ``border_width=0`` (default) renders a filled disc;
+    ``> 0`` renders a hollow ring of that thickness. Color is *not*
+    specified here — :func:`trackpad` picks it at spawn time from its
+    per-finger-count palette so one descriptor can be reused across
+    gestures.
+    """
+    r = _proto.RippleAnimation()
+    r.start_opa = start_opa
+    r.max_radius = max_radius
+    r.duration_ms = duration_ms
+    r.path = path
+    r.border_width = border_width
+    return r
+
+
 def trackpad(
     id: str,
     rect: _proto.Rect | None = None,
     style: _proto.Style | Iterable[_proto.Style] | None = None,
+    *,
+    scroll_invert_y: bool = False,
+    scroll_invert_x: bool = False,
+    left_touch_color: int | None = None,
+    right_touch_color: int | None = None,
+    middle_touch_color: int | None = None,
+    touch_ripple: _proto.RippleAnimation | None = None,
+    tap_ripple: _proto.RippleAnimation | None = None,
 ) -> _proto.Widget:
     """Multitouch trackpad surface (device-side HID mouse).
 
     Touches inside the widget become USB HID mouse events on the device:
-    one-finger drag → move, 1/2/3-finger tap → left / right / middle
-    click. Recognised gestures are echoed to the shared device log sink,
-    so placing a :func:`log_line` on the same screen surfaces them to
-    the user.
+    one-finger drag → move, two-finger drag → scroll wheel,
+    1/2/3-finger tap → left / right / middle click. Recognised gestures
+    are echoed to the shared device log sink, so placing a
+    :func:`log_line` on the same screen surfaces them to the user.
+
+    Set ``scroll_invert_y`` / ``scroll_invert_x`` true for macOS-style
+    "natural scrolling".
+
+    Optional ripple animations:
+
+    * ``touch_ripple`` spawns at each finger touch-down.
+    * ``tap_ripple`` spawns at the centroid of the touched fingers when
+      a tap (no drag) is recognised on release.
+
+    Both pick their color from ``left_touch_color`` /
+    ``right_touch_color`` / ``middle_touch_color`` (0xRRGGBB) based on
+    the gesture's finger count, matching the click convention. Unset
+    colors fall back to firmware defaults (cyan / orange / magenta).
     """
     w = _widget(id, rect=rect, style=style)
-    w.trackpad.SetInParent()
+    tp = w.trackpad
+    tp.scroll_invert_y = scroll_invert_y
+    tp.scroll_invert_x = scroll_invert_x
+    if left_touch_color is not None:
+        tp.left_touch_color = left_touch_color
+    if right_touch_color is not None:
+        tp.right_touch_color = right_touch_color
+    if middle_touch_color is not None:
+        tp.middle_touch_color = middle_touch_color
+    if touch_ripple is not None:
+        tp.touch_ripple.CopyFrom(touch_ripple)
+    if tap_ripple is not None:
+        tp.tap_ripple.CopyFrom(tap_ripple)
     return w
 
 
@@ -880,7 +942,37 @@ def build_demo_screen(name: str = "demo") -> Screen:
     )
 
     # ── right column: multitouch trackpad spans rows 0..3 ──────────────
-    s += cell(trackpad("pad"), col=1, row=0, row_span=5, col_span=3)
+    s += cell(
+        trackpad(
+            "pad",
+            # Cyan / orange / magenta map to 1- / 2- / 3-finger gestures
+            # so the user can see which click the firmware is about to
+            # synthesise as their fingers land.
+            left_touch_color=0x00BFFF,
+            right_touch_color=0xFFA500,
+            middle_touch_color=0xFF44FF,
+            # Soft, fast ripple under each finger as it touches down.
+            touch_ripple=ripple_animation(
+                start_opa=180,
+                max_radius=45,
+                duration_ms=400,
+                path=ANIM_PATH_EASE_OUT,
+            ),
+            # Bigger, brighter ring-burst when a tap is recognised on
+            # release so the click visibly punctuates the press.
+            tap_ripple=ripple_animation(
+                start_opa=255,
+                max_radius=70,
+                duration_ms=300,
+                path=ANIM_PATH_EASE_OUT,
+                border_width=4,
+            ),
+        ),
+        col=1,
+        row=0,
+        row_span=5,
+        col_span=3,
+    )
 
     # ── Stage 20.2 smiley image-button: row 4, left column ─────────────
     # Demonstrates style transitions on an image button. Effects are

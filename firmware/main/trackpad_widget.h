@@ -21,6 +21,7 @@
 
 #include "lvgl.h"
 #include "esp_lcd_touch.h"
+#include "proto/widgets.pb.h"
 
 class TrackpadWidget {
 public:
@@ -41,11 +42,13 @@ public:
     // press events, but multi-finger taps degrade to single-finger taps
     // because the LVGL indev only carries one point.
     //
-    // `scroll_invert_y` / `scroll_invert_x` flip the two-finger scroll
-    // direction for vertical / horizontal axes respectively. Set true for
-    // macOS "natural scrolling" feel.
+    // `cfg` carries every host-tunable knob from the `Trackpad` proto
+    // message: scroll inversion flags, per-finger-count ripple colors,
+    // and the optional touch / tap ripple animation descriptors. It is
+    // copied by value at construction; the caller does not need to keep
+    // it alive.
     TrackpadWidget(esp_lcd_touch_handle_t touch, lv_obj_t *parent,
-                   bool scroll_invert_y = false, bool scroll_invert_x = false);
+                   const touchy_Trackpad &cfg);
 
     // The LVGL container — pass back to `apply_rect` / `apply_style`.
     lv_obj_t *obj() const { return _container; }
@@ -77,6 +80,29 @@ private:
     // Inversion flags set at construction from the proto Trackpad message.
     bool _scroll_invert_y = false;
     bool _scroll_invert_x = false;
+
+    // Ripple animation configs (copied from the proto Trackpad message).
+    // `_has_*` mirrors the proto `has_*_ripple` flag so we can fall back
+    // to "disabled" cheaply in the hot finger-down loop.
+    bool _has_touch_ripple = false;
+    bool _has_tap_ripple   = false;
+    touchy_RippleAnimation _touch_ripple_cfg{};
+    touchy_RippleAnimation _tap_ripple_cfg{};
+
+    // Resolved ripple colors (defaults applied for unset proto fields).
+    // Indexed by finger count via `_color_for_count`.
+    uint32_t _color_1 = 0x00BFFFu;  // deep sky blue
+    uint32_t _color_2 = 0xFFA500u;  // orange
+    uint32_t _color_3 = 0xFF44FFu;  // magenta
+
+    // Spawn a ripple animation at widget-local (`cx`, `cy`) coordinates
+    // using `cfg` and `color_rgb`. No-op if `o`bject allocation fails.
+    void _spawn_ripple(int16_t cx, int16_t cy,
+                       const touchy_RippleAnimation &cfg,
+                       uint32_t color_rgb);
+
+    // Returns `_color_1` / `_color_2` / `_color_3` for `n` = 1 / 2 / 3+.
+    uint32_t _color_for_count(uint8_t n) const;
 
     // LVGL event entry points. `_process()` is the shared state machine,
     // dispatched from PRESSED / PRESSING / RELEASED. `_deleteCb` frees

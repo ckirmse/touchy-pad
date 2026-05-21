@@ -28,11 +28,13 @@ from touchy_pad.screens import (
     label,
     macro_action,
     rect,
+    ripple_animation,
     row,
     slider,
     spacer,
     style,
     toggle,
+    trackpad,
     transition,
 )
 
@@ -144,18 +146,18 @@ def test_style_list_round_trip():
     assert styles_[1].for_state == STATE_PRESSED
 
 
-def test_screen_version_is_six():
-    """Stage 20.3 wire-format bump: Screen.Version.CURRENT == 6.
+def test_screen_version_is_eight():
+    """Stage 20.4 wire-format bump: Screen.Version.CURRENT == 8.
 
-    Bumped when ``ImageButton`` was refactored to embed an ``Image``
-    submessage (so it could share ``scale`` / ``rotation`` with plain
-    ``Image`` widgets) and ``pressed_asset`` was promoted to a full
-    ``pressed`` ``Image``.
+    Stage 20.3.1 (v7) added ``scroll_invert_x`` / ``scroll_invert_y`` to
+    ``Trackpad``; Stage 20.4 (v8) extends ``Trackpad`` with per-finger-
+    count ``*_touch_color`` fields and ``touch_ripple`` / ``tap_ripple``
+    ``RippleAnimation`` submessages.
     """
     s = Screen("v")
     decoded = _proto.Screen.FromString(s.to_bytes())
     assert decoded.version == _proto.Screen.Version.CURRENT
-    assert int(_proto.Screen.Version.CURRENT) == 6
+    assert int(_proto.Screen.Version.CURRENT) == 8
 
 
 # -- Stage 20.2: optional Style fields + Transition -------------------------
@@ -379,3 +381,90 @@ def test_collect_from_script(tmp_path: Path):
     # Second invocation should not include the first batch.
     found2 = _collect_from_script(script)
     assert [s.name for s in found2] == ["one", "two"]
+
+
+# -- Stage 20.4: Trackpad ripple animations + colors ------------------------
+
+
+def test_ripple_animation_defaults():
+    """Bare ``ripple_animation()`` populates every documented default."""
+    r = ripple_animation()
+    assert r.start_opa == 200
+    assert r.max_radius == 40
+    assert r.duration_ms == 350
+    assert r.path == ANIM_PATH_LINEAR
+    assert r.border_width == 0
+
+
+def test_ripple_animation_kwargs_roundtrip():
+    r = ripple_animation(
+        start_opa=128,
+        max_radius=70,
+        duration_ms=500,
+        path=ANIM_PATH_EASE_IN_OUT,
+        border_width=4,
+    )
+    # Round-trip through the parent message to exercise the wire format.
+    s = Screen("rip")
+    s += trackpad("pad", tap_ripple=r)
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    tp = decoded.widgets[0].trackpad
+    assert tp.HasField("tap_ripple")
+    assert tp.tap_ripple.start_opa == 128
+    assert tp.tap_ripple.max_radius == 70
+    assert tp.tap_ripple.duration_ms == 500
+    assert tp.tap_ripple.path == ANIM_PATH_EASE_IN_OUT
+    assert tp.tap_ripple.border_width == 4
+
+
+def test_trackpad_unset_optionals_have_no_color_or_ripple():
+    """Bare trackpad leaves color + ripple fields cleared."""
+    s = Screen("t")
+    s += trackpad("pad")
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    tp = decoded.widgets[0].trackpad
+    assert tp.scroll_invert_y is False
+    assert tp.scroll_invert_x is False
+    assert not tp.HasField("left_touch_color")
+    assert not tp.HasField("right_touch_color")
+    assert not tp.HasField("middle_touch_color")
+    assert not tp.HasField("touch_ripple")
+    assert not tp.HasField("tap_ripple")
+
+
+def test_trackpad_full_kwargs_roundtrip():
+    s = Screen("t")
+    s += trackpad(
+        "pad",
+        scroll_invert_y=True,
+        scroll_invert_x=True,
+        left_touch_color=0x112233,
+        right_touch_color=0x445566,
+        middle_touch_color=0x778899,
+        touch_ripple=ripple_animation(max_radius=20, duration_ms=100),
+        tap_ripple=ripple_animation(max_radius=50, border_width=3),
+    )
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    tp = decoded.widgets[0].trackpad
+    assert tp.scroll_invert_y is True
+    assert tp.scroll_invert_x is True
+    assert tp.left_touch_color == 0x112233
+    assert tp.right_touch_color == 0x445566
+    assert tp.middle_touch_color == 0x778899
+    assert tp.touch_ripple.max_radius == 20
+    assert tp.touch_ripple.duration_ms == 100
+    assert tp.tap_ripple.max_radius == 50
+    assert tp.tap_ripple.border_width == 3
+
+
+def test_build_demo_screen_trackpad_has_ripples():
+    """Demo screen ships ripple eye-candy so users see the feature."""
+    s = build_demo_screen()
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    pad = next(w for w in decoded.widgets if w.id == "pad")
+    tp = pad.trackpad
+    assert tp.HasField("touch_ripple")
+    assert tp.HasField("tap_ripple")
+    assert tp.HasField("left_touch_color")
+    assert tp.HasField("right_touch_color")
+    assert tp.HasField("middle_touch_color")

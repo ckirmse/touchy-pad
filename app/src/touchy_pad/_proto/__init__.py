@@ -46,6 +46,7 @@ from .widgets_pb2 import (  # noqa: F401  (re-exported)
     MacroStep,
     MouseMove,
     Rect,
+    RippleAnimation,
     Screen,
     Slider,
     Spacer,
