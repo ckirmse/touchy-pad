@@ -19,6 +19,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <string>
+
 static const char *TAG = "main";
 
 extern "C" void app_main(void)
@@ -73,12 +75,17 @@ extern "C" void app_main(void)
     // snapshots (LVGL's indev only carries a single point).
     screens_set_touch(tp);
 
-    // Show something on the display from the very first frame: either
-    // the first host-uploaded screen discovered during screens_init(),
-    // or a built-in "No screens configured" fallback when the device
-    // hasn't been provisioned yet. Hosts can override at any time via
-    // ScreenLoadCmd.
-    screens_load(nullptr);
+    // Show something on the display from the very first frame. Preference
+    // order:
+    //   1. The screen the user was last viewing (saved by screens.cpp into
+    //      `prefs/prefs.pb` after every successful screens_load).
+    //   2. If that name isn't currently registered, screens_load() falls
+    //      back to the first discovered host screen.
+    //   3. If nothing has been provisioned, the built-in fallback compiled
+    //      in from proto/default_screen.json.
+    // Hosts can override at any time via ScreenLoadCmd.
+    const std::string &last = Prefs::instance().current_screen();
+    screens_load(last.empty() ? nullptr : last.c_str());
 
     ESP_LOGI(TAG, "Ready");
     // Nothing else to do here — host_api dispatches screen loads driven

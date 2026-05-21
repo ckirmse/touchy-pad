@@ -9,18 +9,21 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 * !Decide between QMK/ZMK/platformio base... (anyone already support the full touchpad USB spec?) - for now I'm using platformio
 * !make a mini PRD/design doc
 * !add datasheets
-* remove platformio
+* !remove platformio
 * !Ping Chris Kirmse
-* Fix screen drawing on new device
+* !Fix screen drawing on new device
 * !Specify key classes
 * !Make platformio shell
-* Make python helper app (share code with my streamdeck project)
+* !Make python helper app (share code with my streamdeck project)
 * !make a CLAUDE.md file
 * Add credits for BSD licenced https://github.com/moononournation/Arduino_GFX/blob/master/src/display/Arduino_NV3041A.cpp
+* add AI statement
+* Make README not suck
+* Make streamcontroller support
 * !ensure no 10ms delay on loop polling
 * Pick a real USB VID/PID for our device
-* fix multitouch gestures - the change to lvgl instead of polling broke them
-* determine security issues (might need to set a secure key for future API operations - to prevent untrusted users from changing macro behavior)
+* !fix multitouch gestures - the change to lvgl instead of polling broke them
+* determine USB security issues (might need to set a secure key for future API operations - to prevent untrusted users from changing macro behavior)
 
 ## For release Alpha 2
 

@@ -21,7 +21,8 @@ message PreferencesFile {
         option allow_alias = true;
         UNSPECIFIED = 0;
         V1 = 1;       // initial format: file_version + screen_timeout_ms
-        CURRENT = 1;  // alias: always equals the latest defined version
+        V2 = 2;       // Stage 24: + current_screen (last loaded screen name)
+        CURRENT = 2;  // alias: always equals the latest defined version
     }
 
     // Written on every save so forward migrations can detect old files.
@@ -30,4 +31,11 @@ message PreferencesFile {
     // Auto-sleep backlight timeout in milliseconds. 0 = disabled (backlight
     // stays on indefinitely). Set via ScreenSleepTimeoutCmd from the host.
     uint32 screen_timeout_ms = 2;
+
+    // Name of the most-recently-loaded screen (the registered stem under
+    // /from_host/screens/<name>.pb). Updated by the firmware on every
+    // successful `screens_load` so a reboot restores the screen the user
+    // was looking at. Empty means "no preference — load the first
+    // discovered screen, then the built-in fallback".
+    string current_screen = 3;
 }

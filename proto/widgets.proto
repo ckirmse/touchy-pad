@@ -237,13 +237,48 @@ message ActionHost {
     uint32 code = 1;
 }
 
+// Special-cased on-device behaviours. Like ActionMacro this runs
+// entirely on the firmware (no host round-trip), but instead of
+// replaying HID events the device interprets the chosen sub-message
+// and changes its own state (switching screens, etc.).
+message ActionDevice {
+    oneof kind {
+        ActionSwitchScreen switch_screen = 1;
+    }
+}
+
+// Replace the currently-loaded screen with another previously-registered
+// one (see screens_load() in firmware/main/screens.{h,cpp}).
+//
+//   * BY_NAME (default): load the screen whose registered stem matches
+//     the `name` field. The name is the same as the filename stem under
+//     /from_host/screens/<name>.pb.
+//   * NEXT / PREVIOUS: advance to the next / previous screen in the
+//     registry's iteration order (wraps around at the ends). `name` is
+//     ignored.
+//
+// Combined with a `Button` carrying labels like "Next" / "Previous"
+// this gives users a no-code way to build paged UIs entirely from the
+// host without round-tripping through ActionHost.
+message ActionSwitchScreen {
+    enum Behavior {
+        BY_NAME  = 0;
+        NEXT     = 1;
+        PREVIOUS = 2;
+    }
+    Behavior behavior = 1;
+    string   name     = 2;   // used iff behavior == BY_NAME
+}
+
 // Behaviour attached to a widget event trigger (click / value changed /
 // ...). Each widget event slot holds a list of Actions; the device runs
-// them in order. Mixing host- and macro-actions in one list is fine.
+// them in order. Mixing host-, macro- and device-actions in one list is
+// fine.
 message Action {
     oneof kind {
-        ActionHost  host  = 1;
-        ActionMacro macro = 2;
+        ActionHost   host   = 1;
+        ActionMacro  macro  = 2;
+        ActionDevice device = 3;
     }
 }
 
@@ -445,6 +480,18 @@ message RippleAnimation {
 message LogLine {
 }
 
+// Live frames-per-second readout for the active LVGL display.
+//
+// Renders as a small label that the firmware refreshes ~twice per
+// second with the value reported by `lv_display_get_refresh_period`
+// (i.e. how fast LVGL is currently flushing). Intended for profiling
+// — drop one onto a screen while iterating on layouts to see the
+// cost of expensive widgets (transitions, ripples, image scaling).
+//
+// Purely a viewer — no Actions.
+message Fps {
+}
+
 // A single widget inside a `Screen`. `id` is an opaque host-chosen string
 // that follows the widget into events; the device stores it via
 // `lv_obj_set_user_data` and copies it into the `user_data` field of
@@ -473,6 +520,7 @@ message Widget {
         Trackpad trackpad = 18;
         LogLine  log      = 19;
         ImageButton image_button = 20;
+        Fps      fps      = 21;
     }
 }
 
@@ -490,7 +538,7 @@ message Screen {
     // from the device filesystem so the host re-uploads a fresh copy.
     enum Version {
         VERSION_UNKNOWN = 0;   // proto3 default — any file without a version field
-        CURRENT         = 8;   // current wire format
+        CURRENT         = 9;   // current wire format
     }
 
     // Must equal `CURRENT`; the firmware deletes and ignores files that

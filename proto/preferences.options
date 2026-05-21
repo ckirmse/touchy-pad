@@ -1,6 +1,10 @@
 # nanopb options for preferences.proto.
 #
-# All fields are scalars — no variable-length arrays or strings — so the
-# default FT_STATIC allocation with no size hints is correct. This file is
-# intentionally empty but kept alongside the other .options files for
-# consistency and to avoid "missing options" warnings from the generator.
+# All scalar fields use the default FT_STATIC allocation. Strings need
+# explicit max_size buffers so nanopb can stack-allocate them in the
+# generated struct.
+
+# Last-loaded screen name. Must match touchy.Screen.name /
+# touchy.ActionSwitchScreen.name in widgets.options so any screen the
+# device can possibly load is representable here.
+touchy.PreferencesFile.current_screen   max_size:32

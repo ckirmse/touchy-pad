@@ -199,41 +199,50 @@ def screens_push(script: Path, load_name: str | None, dry_run: bool) -> None:
     help="Print the screen definition as protobuf JSON to stdout; " "do not talk to the device.",
 )
 def screens_demo(listen: bool, as_json: bool) -> None:
-    """Upload a sample screen exercising stage-16 actions.
+    """Upload the sample multi-screen demo (stages 16, 18, 20, 24).
 
-    The screen contains:
-      * a "hi" button wired to a device-side macro that types the text
-        over USB HID (no host involvement);
-      * a "ping" button, slider and checkbox wired to host actions
-        (codes 0x100 / 0x101 / 0x102);
-      * a 16x16 PNG image button (Stage 20) wired to host action 0x103.
-        Its asset is auto-uploaded to /from_host/images/smiley.png; the
-        host transparently converts the PNG to LVGL's native .bin
-        format before sending it.
+    Uploads two screens that share a ``[Prev | FPS | Next]`` header
+    row driven by Stage-24 device-side ``ActionSwitchScreen`` actions:
 
-    With ``--listen`` the CLI registers Python handlers for the host
-    action codes and prints the incoming events.
+      * ``home`` — full-bleed multitouch trackpad for USB HID mouse;
+      * ``test`` — the widget showcase (macro button, ping/slider/
+        checkbox host actions 0x100/0x101/0x102, the Stage-20 smiley
+        image button on 0x103, log line).
+
+    The 16x16 smiley PNG asset is auto-uploaded to
+    ``/from_host/images/smiley.png``; the host transparently converts
+    it to LVGL's native ``.bin`` format before sending.
+
+    After upload the device is told to load ``home``. With ``--listen``
+    the CLI registers Python handlers for the test screen's host
+    action codes and prints incoming events (flip to the ``test``
+    screen on-device with the ``Next >`` button).
     """
     from .images import make_smiley_png
-    from .screens import build_demo_screen
+    from .screens import build_demo_screens
 
-    s = build_demo_screen("demo")
+    screens = build_demo_screens()
 
     if as_json:
         from google.protobuf import json_format
 
-        click.echo(json_format.MessageToJson(s.to_proto(), indent=2))
+        for s in screens:
+            click.echo(f"// screen: {s.name}")
+            click.echo(json_format.MessageToJson(s.to_proto(), indent=2))
         return
 
     smiley = make_smiley_png()
-    data = s.to_bytes()
     with _client() as c:
         c.file_save("images/smiley.png", smiley)
         click.echo(f"sent images/smiley.png ({len(smiley)} bytes source)")
-        c.file_save(f"screens/{s.name}.pb", data)
-        click.echo(f"sent screens/{s.name}.pb ({len(data)} bytes, " f"{len(s.widgets)} widgets)")
-        c.screen_load(s.name)
-        click.echo(f"loaded screen {s.name!r}")
+        for s in screens:
+            data = s.to_bytes()
+            c.file_save(f"screens/{s.name}.pb", data)
+            click.echo(
+                f"sent screens/{s.name}.pb ({len(data)} bytes, " f"{len(s.widgets)} widgets)"
+            )
+        c.screen_load("home")
+        click.echo("loaded screen 'home'")
 
         if listen:
 

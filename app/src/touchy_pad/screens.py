@@ -45,6 +45,10 @@ __all__ = [
     "action",
     "host_action",
     "macro_action",
+    "device_action",
+    "switch_screen_action",
+    "next_screen_action",
+    "prev_screen_action",
     "button",
     "label",
     "slider",
@@ -57,7 +61,9 @@ __all__ = [
     "trackpad",
     "ripple_animation",
     "log_line",
+    "fps",
     "build_demo_screen",
+    "build_demo_screens",
     # LvState / LvPart selector bits (see widgets.proto:LvState).
     "STATE_DEFAULT",
     "STATE_CHECKED",
@@ -418,6 +424,78 @@ def macro_action(steps) -> _proto.Action:
     if len(macro.steps) == 0:
         raise ValueError("macro_action requires at least one step")
     return _proto.Action(macro=macro)
+
+
+# ---------------------------------------------------------------------------
+# Device-side actions (Stage 24)
+# ---------------------------------------------------------------------------
+#
+# ``ActionDevice`` is the third Action subtype, alongside ``ActionHost`` and
+# ``ActionMacro``. Unlike ``ActionMacro`` (which only replays HID events)
+# device actions ask the firmware to change its own state — currently only
+# *which* screen is loaded, via ``ActionSwitchScreen``. They run entirely
+# on-device with no host round-trip, so paged UIs keep responding when
+# the host computer is asleep or unplugged.
+
+
+def device_action(device: _proto.ActionDevice) -> _proto.Action:
+    """Wrap a pre-built :class:`_proto.ActionDevice` as an :class:`Action`.
+
+    Most callers want the higher-level :func:`switch_screen_action` /
+    :func:`next_screen_action` / :func:`prev_screen_action` helpers
+    instead; this exists for forward-compatibility with new
+    ``ActionDevice`` sub-kinds the firmware may add later.
+    """
+    return _proto.Action(device=device)
+
+
+def switch_screen_action(
+    name: str | None = None,
+    behavior: int | None = None,
+) -> _proto.Action:
+    """Build an Action that swaps the active screen on-device.
+
+    Parameters
+    ----------
+    name:
+        Stem of the target screen (the ``screens/<stem>.pb`` filename),
+        matching the ``name=`` passed to :class:`Screen`. Required when
+        ``behavior`` is :attr:`ActionSwitchScreen.BY_NAME` (the default),
+        ignored otherwise.
+    behavior:
+        One of :attr:`ActionSwitchScreen.BY_NAME` (0),
+        :attr:`ActionSwitchScreen.NEXT` (1) or
+        :attr:`ActionSwitchScreen.PREVIOUS` (2). NEXT/PREVIOUS step
+        through the firmware's registry in stable iteration order
+        (alphabetical, because the registry is a ``std::map``) and wrap
+        around at the ends.
+
+    The convenience wrappers :func:`next_screen_action` and
+    :func:`prev_screen_action` cover the most common case.
+    """
+    Behavior = _proto.ActionSwitchScreen.Behavior  # noqa: N806
+    if behavior is None:
+        behavior = Behavior.BY_NAME
+    if behavior == Behavior.BY_NAME:
+        if not name:
+            raise ValueError("switch_screen_action(BY_NAME) requires name=")
+        ss = _proto.ActionSwitchScreen(behavior=behavior, name=name)
+    else:
+        # NEXT / PREVIOUS ignore `name`; we drop any value silently so
+        # callers can pass switch_screen_action(name="x", behavior=NEXT)
+        # without it being a confusing error.
+        ss = _proto.ActionSwitchScreen(behavior=behavior)
+    return device_action(_proto.ActionDevice(switch_screen=ss))
+
+
+def next_screen_action() -> _proto.Action:
+    """Step to the next screen in the device registry (wraps around)."""
+    return switch_screen_action(behavior=_proto.ActionSwitchScreen.NEXT)
+
+
+def prev_screen_action() -> _proto.Action:
+    """Step to the previous screen in the device registry (wraps around)."""
+    return switch_screen_action(behavior=_proto.ActionSwitchScreen.PREVIOUS)
 
 
 def _normalise_actions(actions) -> list[_proto.Action]:
@@ -791,6 +869,23 @@ def log_line(
     return w
 
 
+def fps(
+    id: str = "fps",
+    rect: _proto.Rect | None = None,
+    style: _proto.Style | Iterable[_proto.Style] | None = None,
+) -> _proto.Widget:
+    """Live frames-per-second readout for the active LVGL display.
+
+    Renders as a small label that the firmware refreshes ~twice per
+    second from a counter incremented on every display flush. Useful
+    while iterating on layouts to spot the cost of expensive widgets
+    (image scaling, transitions, ...).
+    """
+    w = _widget(id, rect=rect, style=style)
+    w.fps.SetInParent()
+    return w
+
+
 # ---------------------------------------------------------------------------
 # Screen — the top-level container
 # ---------------------------------------------------------------------------
@@ -865,49 +960,85 @@ class Screen:
         return f"Screen(name={self.name!r}, widgets={len(self.widgets)})"
 
 
-def build_demo_screen(name: str = "demo") -> Screen:
-    """Build a sample screen exercising stages 16 and 18.
+def build_demo_screens() -> list[Screen]:
+    """Build the demo screen set exercising stages 16 / 18 / 20 / 24.
 
-    Used by the ``touchy screens demo`` CLI subcommand as a smoke test
-    for the action pipeline and the on-device trackpad widget.
+    Returns two ``Screen`` instances meant to be uploaded together (the
+    ``touchy screens demo`` CLI subcommand does this). They share a
+    common header row of navigation controls so the user can flip
+    between them on-device with no host involvement:
 
-    Layout is a 2-column / 6-row LVGL :func:`grid`. The grid manager
-    sizes every track to the parent (LV_GRID_FR(1) each), so the
-    layout adapts to the display resolution without any hard-coded
-    pixel coordinates.
+      ``[ Prev | FPS | Next ]``
 
-    Wiring:
+    using Stage-24 ``ActionSwitchScreen``-typed actions on the Prev/Next
+    buttons. The :func:`fps` widget in the middle is a live frames-per-
+    second readout courtesy of the same stage.
 
-    * Left column (rows 0-4): title label, two buttons, a slider, and
-      a checkbox.
-        - "hello" button → device-side macro that types ``"hi"`` over
-          USB HID (no host round-trip).
-        - "ping" button → host action 0x100 (demo CLI prints incoming
-          events).
-        - slider        → host action 0x101 (extra carries int32 LE).
-        - checkbox      → host action 0x102 (extra is 1 byte).
-        - smiley image-button (Stage 20) → host action 0x103. The asset
-          lives at ``/from_host/images/smiley.png`` (auto-converted to
-          LVGL's native .bin format on upload) and is uploaded by the
-          ``touchy screens demo`` command alongside this screen.
-    * Right column (rows 0-3, ``row_span=4``): the :func:`trackpad`
-      surface for USB HID mouse output.
-    * Bottom strip (row 5, ``col_span=2``): a :func:`log_line` that
-      mirrors the device's most recent log message — e.g. each
-      recognised trackpad gesture.
+    Screens:
+
+    * ``home`` — full-bleed :func:`trackpad` for USB HID mouse output,
+      so the device is immediately useful after the demo upload.
+    * ``test`` — the original Stage-16/18/20 widget showcase: hello
+      macro button, ping/slider/checkbox emitting host actions, the
+      Stage-20 image button, and a :func:`log_line` at the bottom that
+      mirrors the device's most recent log message.
+
+    The first screen returned (``home``) becomes the boot default
+    because the firmware autoloads the registry's lexicographically
+    first entry on first boot; subsequent boots restore whichever
+    screen was last viewed (Stage-24 prefs persistence).
     """
     from . import hid_keys as k
     from . import macros as m
 
-    s = Screen(name, layout=grid(cols=4, rows=6, gap=8))
+    def header(screen: Screen) -> None:
+        """Add the shared ``[Prev | FPS | Next]`` strip to row 0."""
+        screen += cell(button("prev", text="< Prev", on_click=prev_screen_action()), col=0, row=0)
+        screen += cell(fps("fps"), col=1, row=0)
+        screen += cell(button("next", text="Next >", on_click=next_screen_action()), col=2, row=0)
 
-    # ── left column: stacked control widgets ───────────────────────────
-    # The "hello" button mirrors the smiley's transition pattern on a
-    # non-image widget so we can tell whether transitions are working in
-    # general or only on image buttons. Default style carries a 200 ms
-    # linear transition over (TRANSFORM_WIDTH, BG_COLOR); pressed state
-    # widens by 20 px and tints the background red.
-    s += cell(
+    # ── home: trackpad-only ───────────────────────────────────────────
+    home = Screen("home", layout=grid(cols=3, rows=8, gap=8))
+    header(home)
+    home += cell(
+        trackpad(
+            "pad",
+            # Cyan / orange / magenta map to 1- / 2- / 3-finger gestures
+            # so the user can see which click the firmware is about to
+            # synthesise as their fingers land.
+            left_touch_color=0x00BFFF,
+            right_touch_color=0xFFA500,
+            middle_touch_color=0xFF44FF,
+            touch_ripple=ripple_animation(
+                start_opa=180,
+                max_radius=45,
+                duration_ms=400,
+                path=ANIM_PATH_EASE_OUT,
+            ),
+            tap_ripple=ripple_animation(
+                start_opa=255,
+                max_radius=70,
+                duration_ms=300,
+                path=ANIM_PATH_EASE_OUT,
+                border_width=4,
+            ),
+        ),
+        col=0,
+        row=1,
+        col_span=3,
+        row_span=7,
+    )
+
+    # ── test: widget showcase + log line ──────────────────────────────
+    # Same 3-col grid for header continuity; 8 rows so each widget gets
+    # its own track and the log line still has full width at the bottom.
+    test = Screen("test", layout=grid(cols=3, rows=8, gap=8))
+    header(test)
+
+    # Type-"hi" macro button on the left (mirrors the smiley's transition
+    # pattern on a non-image widget so we can tell whether transitions
+    # work in general or only on image buttons).
+    test += cell(
         button(
             "hello",
             text="Type 'hi'",
@@ -933,59 +1064,34 @@ def build_demo_screen(name: str = "demo") -> Screen:
             ],
         ),
         col=0,
-        row=0,
+        row=1,
     )
-    s += cell(button("ping", text="Ping host", on_click=host_action(0x100)), col=0, row=1)
-    s += cell(slider("level", min=0, max=100, value=42, on_change=host_action(0x101)), col=0, row=2)
-    s += cell(
-        checkbox("enable", text="Enabled", checked=True, on_change=host_action(0x102)), col=0, row=3
-    )
-
-    # ── right column: multitouch trackpad spans rows 0..3 ──────────────
-    s += cell(
-        trackpad(
-            "pad",
-            # Cyan / orange / magenta map to 1- / 2- / 3-finger gestures
-            # so the user can see which click the firmware is about to
-            # synthesise as their fingers land.
-            left_touch_color=0x00BFFF,
-            right_touch_color=0xFFA500,
-            middle_touch_color=0xFF44FF,
-            # Soft, fast ripple under each finger as it touches down.
-            touch_ripple=ripple_animation(
-                start_opa=180,
-                max_radius=45,
-                duration_ms=400,
-                path=ANIM_PATH_EASE_OUT,
-            ),
-            # Bigger, brighter ring-burst when a tap is recognised on
-            # release so the click visibly punctuates the press.
-            tap_ripple=ripple_animation(
-                start_opa=255,
-                max_radius=70,
-                duration_ms=300,
-                path=ANIM_PATH_EASE_OUT,
-                border_width=4,
-            ),
-        ),
+    test += cell(
+        button("ping", text="Ping host", on_click=host_action(0x100)),
         col=1,
-        row=0,
-        row_span=5,
+        row=1,
+        col_span=2,
+    )
+    test += cell(
+        slider("level", min=0, max=100, value=42, on_change=host_action(0x101)),
+        col=0,
+        row=2,
         col_span=3,
     )
+    test += cell(
+        checkbox("enable", text="Enabled", checked=True, on_change=host_action(0x102)),
+        col=0,
+        row=3,
+    )
 
-    # ── Stage 20.2 smiley image-button: row 4, left column ─────────────
-    # Demonstrates style transitions on an image button. Effects are
-    # cranked up for visual debugging — if these don't show but the
-    # "Type 'hi'" button's transition does, the bug is specific to
-    # lv_imagebutton's rendering path.
-    s += cell(
+    # Stage-20.2 smiley image-button with cranked-up press feedback.
+    test += cell(
         image_button(
             "smile",
             asset="images/smiley.png",
             on_click=host_action(0x103),
-            scale=2.0,  # 200% — source asset is only 16x16 px
-            pressed_scale=2.5,  # bump scale while held for visible feedback
+            scale=2.0,
+            pressed_scale=2.5,
             style=[
                 style(
                     transition=transition(
@@ -995,21 +1101,38 @@ def build_demo_screen(name: str = "demo") -> Screen:
                     )
                 ),
                 style(
-                    transform_width=80,  # +80 px on each side
+                    transform_width=80,
                     recolor=0xFF0000,
-                    recolor_opa=255,  # full red tint
-                    bg_color=0x00FF00,  # bright green background
+                    recolor_opa=255,
+                    bg_color=0x00FF00,
                     for_state=STATE_PRESSED,
                 ),
             ],
         ),
-        col=0,
-        row=4,
+        col=1,
+        row=3,
+        col_span=2,
     )
 
-    # ── bottom strip: log readout spans both columns ───────────────────
-    s += cell(log_line("log"), col=0, row=5, col_span=4)
-    return s
+    # Log strip spans the bottom 4 rows so multi-line wrapped messages
+    # stay readable.
+    test += cell(log_line("log"), col=0, row=4, col_span=3, row_span=4)
+
+    return [home, test]
+
+
+def build_demo_screen(name: str = "demo") -> Screen:
+    """Back-compat shim returning the trackpad-bearing demo screen.
+
+    Pre-Stage-24 callers expected one screen; the demo is now split
+    into two. We return the ``home`` screen because it carries the
+    multitouch trackpad ("pad") that the previous demo led with, and
+    that's what existing tests / docs key off.
+    """
+    screens = build_demo_screens()
+    target = next(s for s in screens if s.name == "home")
+    target.name = name
+    return target
 
 
 def _collect_from_script(path: str | Path) -> list[Screen]:

@@ -10,13 +10,17 @@
 
 #include "esp_log.h"
 
+#include <cstdio>
+
 static const char *TAG = "prefs";
 
 // Filesystem path (relative to the LittleFS mount root).
 static constexpr const char *PREFS_PATH = "prefs/prefs.pb";
 
-// Encode buffer — `PreferencesFile` is all scalars, so 64 bytes is ample.
-static constexpr size_t PREFS_BUF_SIZE = 64;
+// Encode buffer — `PreferencesFile` carries one fixed-size string
+// (current_screen, max 32 bytes via preferences.options) plus a couple
+// of scalars. 128 bytes is comfortably above the worst-case encoding.
+static constexpr size_t PREFS_BUF_SIZE = 128;
 
 Prefs &Prefs::instance()
 {
@@ -41,12 +45,21 @@ bool Prefs::begin()
 
     if (ok) {
         m_timeout_ms = pf->screen_timeout_ms;
-        ESP_LOGI(TAG, "Loaded prefs: screen_timeout_ms=%" PRIu32,
-                 m_timeout_ms);
+        m_current_screen = pf->current_screen;  // fixed-size buf, NUL-terminated
+        ESP_LOGI(TAG, "Loaded prefs: screen_timeout_ms=%" PRIu32
+                      " current_screen='%s'",
+                 m_timeout_ms, m_current_screen.c_str());
     } else {
         ESP_LOGW(TAG, "Prefs file corrupt — using defaults");
     }
     return true;  // never hard-fail on prefs
+}
+
+void Prefs::set_current_screen(const std::string &name)
+{
+    if (name == m_current_screen) return;   // no churn for repeat loads
+    m_current_screen = name;
+    save();
 }
 
 void Prefs::set_screen_timeout_ms(uint32_t ms)
@@ -58,8 +71,13 @@ void Prefs::set_screen_timeout_ms(uint32_t ms)
 void Prefs::save()
 {
     PbMessage<touchy_PreferencesFile> pf(touchy_PreferencesFile_fields);
-    pf->file_version     = touchy_PreferencesFile_Version_CURRENT;
+    pf->file_version      = touchy_PreferencesFile_Version_CURRENT;
     pf->screen_timeout_ms = m_timeout_ms;
+    // current_screen is a fixed-size char[N] in the generated struct;
+    // snprintf truncates safely if the source ever exceeds the bound
+    // (which it shouldn't — the bound matches touchy.Screen.name).
+    snprintf(pf->current_screen, sizeof(pf->current_screen), "%s",
+             m_current_screen.c_str());
 
     uint8_t buf[PREFS_BUF_SIZE];
     size_t  n = 0;
@@ -71,6 +89,7 @@ void Prefs::save()
         ESP_LOGE(TAG, "Failed to write prefs to %s", PREFS_PATH);
         return;
     }
-    ESP_LOGI(TAG, "Saved prefs (screen_timeout_ms=%" PRIu32 ")",
-             m_timeout_ms);
+    ESP_LOGI(TAG, "Saved prefs (screen_timeout_ms=%" PRIu32
+                  " current_screen='%s')",
+             m_timeout_ms, m_current_screen.c_str());
 }

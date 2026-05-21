@@ -56,6 +56,26 @@ bool screens_load(const char *name);
 // FileResetCmd so the device state matches the post-wipe filesystem.
 void screens_clear(void);
 
+// Touch controller handle stored by `screens_set_touch`. Exposed so the
+// Trackpad widget builder can recover multi-finger data without each
+// new file having to know about the screens module's internals.
+// Returns NULL until `screens_set_touch()` has been called.
+esp_lcd_touch_handle_t screens_get_touch(void);
+
+// Stage 24: jump to another registered screen by behaviour code.
+//   * 0 = BY_NAME   — load `name`.
+//   * 1 = NEXT      — advance one entry in registry iteration order.
+//   * 2 = PREVIOUS  — step back one entry.
+// NEXT/PREVIOUS wrap around at the registry ends; `name` is ignored.
+// Returns false if no screen could be loaded (empty registry, unknown
+// name, etc.).
+bool screens_switch(int behavior, const char *name);
+
+// Stage 24: name of the currently-loaded screen, or "" before any
+// successful `screens_load`. Used by the prefs subsystem to persist the
+// last-viewed screen across reboots.
+const char *screens_current_name(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -486,7 +486,7 @@ bump and overlap heavily on `screens.cpp`:
   about LVGL's bin format. The device-side PNG/JPEG decoder note in
   Stage 20 is now marked unnecessary.
 
-## Stage 20.4: Nice animations on touches to the "Trackpad"
+## Stage 20.4: Nice animations on touches to the "Trackpad" - DONE
 
 I'd like you to come up with a fairly general/protobuf driven abstraction so that we can show a nice 'water droplet effect' where the user touches with their fingers on the touchpad.  Features:
 
@@ -495,7 +495,22 @@ I'd like you to come up with a fairly general/protobuf driven abstraction so tha
 * When touches/drags/taps start/stop create/remove animations as needed
 * Extend the demo python code to install whatever 'first attempt' animations you think make sense
 
-## Stage 21: Allow host PC to configure the button matrixes/screen layout
+## Stage 24: Add widgets for "on-device" behaviors  ✅ done
+
+Add a few widgets to the protobufs so that users can optionally include the following widgets in their layouts:
+* FPS - just shows the current display update FPS (for profiling)
+
+Make new subtype of Action: "ActionDevice" is analogous to the ActionHost actions, but it is for special code we want run on the device itself when that action occurs.  
+The first subtype of ActionDevice is ActionSwitchScreen - it has a nested enum for Behavior (BY_NAME=0 NEXT, PREVIOUS).  Since BY_NAME is the default value, also have a name string field which will be used as the base filename (relative to /from_host/screens/NAME.pb). 
+
+My attaching an ActionSwitchScreen to a button (with text labels like "Next" and "Previous") the demo can be enhanced.
+
+* Extend the demo so that:
+  * First screen has next and previous screen buttons in the upper left/right areas respectively, and a big touchpad region in the middle/bottom of the screen.  Also put a FPS widget in that same top row with the other buttons.  In the future we might put other buttons there
+  * Second screen is various test widgets - you can move them from the current demo.  Also put next/prev screen buttons on this page - with a matching layout to the first page.  Also move the debug logging line from the old demo to the bottom of this page.
+* have the device preferences store the current screen name, whenever rebooting try to restore the old previous current screen
+
+## Stage 25: Allow host PC to configure the button matrixes/screen layout
 * Use protocol buffers (nanopb?) to communicate between the host/device (over a custom USB characteristic)
 * Provide a simple python library to allow host applications to easily configure the button matrixes/screen layout
 * Provide a simple python CLI tool to allow users to easily configure the buttons via that library

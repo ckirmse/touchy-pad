@@ -19,20 +19,25 @@ from touchy_pad.screens import (
     _collect_from_script,
     arc,
     build_demo_screen,
+    build_demo_screens,
     button,
     checkbox,
     col,
+    fps,
     grid,
     host_action,
     image,
     label,
     macro_action,
+    next_screen_action,
+    prev_screen_action,
     rect,
     ripple_animation,
     row,
     slider,
     spacer,
     style,
+    switch_screen_action,
     toggle,
     trackpad,
     transition,
@@ -146,18 +151,19 @@ def test_style_list_round_trip():
     assert styles_[1].for_state == STATE_PRESSED
 
 
-def test_screen_version_is_eight():
-    """Stage 20.4 wire-format bump: Screen.Version.CURRENT == 8.
+def test_screen_version_is_nine():
+    """Stage 24 wire-format bump: Screen.Version.CURRENT == 9.
 
-    Stage 20.3.1 (v7) added ``scroll_invert_x`` / ``scroll_invert_y`` to
-    ``Trackpad``; Stage 20.4 (v8) extends ``Trackpad`` with per-finger-
-    count ``*_touch_color`` fields and ``touch_ripple`` / ``tap_ripple``
-    ``RippleAnimation`` submessages.
+    Stage 20.4 (v8) extended ``Trackpad`` with per-finger-count
+    ``*_touch_color`` fields and ``touch_ripple`` / ``tap_ripple``
+    ``RippleAnimation`` submessages. Stage 24 (v9) adds the ``Fps``
+    widget and the ``ActionDevice`` / ``ActionSwitchScreen`` action
+    subtype so on-device buttons can navigate between screens.
     """
     s = Screen("v")
     decoded = _proto.Screen.FromString(s.to_bytes())
     assert decoded.version == _proto.Screen.Version.CURRENT
-    assert int(_proto.Screen.Version.CURRENT) == 8
+    assert int(_proto.Screen.Version.CURRENT) == 9
 
 
 # -- Stage 20.2: optional Style fields + Transition -------------------------
@@ -237,7 +243,9 @@ def test_transition_defaults_are_linear_200ms():
 
 def test_demo_smile_uses_transition_pattern():
     """The smiley image-button carries the imagebutton_1-style transition."""
-    s = build_demo_screen("demo")
+    # Stage 24 split the demo across two screens; the smiley lives on
+    # the widget-showcase ("test") screen.
+    s = next(s for s in build_demo_screens() if s.name == "test")
     decoded = _proto.Screen.FromString(s.to_bytes())
     smile = next(w for w in decoded.widgets if w.id == "smile")
     assert len(smile.styles) == 2
@@ -468,3 +476,69 @@ def test_build_demo_screen_trackpad_has_ripples():
     assert tp.HasField("left_touch_color")
     assert tp.HasField("right_touch_color")
     assert tp.HasField("middle_touch_color")
+
+
+# -- Stage 24: FPS widget + ActionDevice/ActionSwitchScreen -----------------
+
+
+def test_fps_widget_round_trip():
+    """`fps()` builds a Widget whose `kind` oneof is `fps`."""
+    s = Screen("h")
+    s += fps("fps_label")
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    w = decoded.widgets[0]
+    assert w.id == "fps_label"
+    assert w.WhichOneof("kind") == "fps"
+
+
+def test_switch_screen_action_by_name():
+    """BY_NAME (default) packs the name into the proto."""
+    a = switch_screen_action(name="home")
+    assert a.WhichOneof("kind") == "device"
+    ss = a.device.switch_screen
+    assert ss.name == "home"
+    assert ss.behavior == _proto.ActionSwitchScreen.Behavior.BY_NAME
+
+
+def test_switch_screen_action_by_name_requires_name():
+    """A missing name is a hard error — silent fallback would surprise users."""
+    with pytest.raises(ValueError):
+        switch_screen_action()
+
+
+def test_next_screen_action():
+    a = next_screen_action()
+    ss = a.device.switch_screen
+    assert ss.behavior == _proto.ActionSwitchScreen.Behavior.NEXT
+    assert ss.name == ""
+
+
+def test_prev_screen_action():
+    a = prev_screen_action()
+    ss = a.device.switch_screen
+    assert ss.behavior == _proto.ActionSwitchScreen.Behavior.PREVIOUS
+    assert ss.name == ""
+
+
+def test_build_demo_screens_returns_two_named_screens():
+    screens = build_demo_screens()
+    assert [s.name for s in screens] == ["home", "test"]
+    for s in screens:
+        # Every demo screen carries the [Prev | FPS | Next] header.
+        ids = [w.id for w in s.widgets]
+        assert "prev" in ids and "next" in ids and "fps" in ids
+
+
+def test_build_demo_screens_header_wires_switch_actions():
+    """Header buttons emit ActionDevice(switch_screen=NEXT/PREVIOUS)."""
+    home = build_demo_screens()[0]
+    prev = next(w for w in home.widgets if w.id == "prev")
+    nxt = next(w for w in home.widgets if w.id == "next")
+    for w, expected in [
+        (prev, _proto.ActionSwitchScreen.Behavior.PREVIOUS),
+        (nxt, _proto.ActionSwitchScreen.Behavior.NEXT),
+    ]:
+        assert len(w.button.on_click) == 1
+        act = w.button.on_click[0]
+        assert act.WhichOneof("kind") == "device"
+        assert act.device.switch_screen.behavior == expected
