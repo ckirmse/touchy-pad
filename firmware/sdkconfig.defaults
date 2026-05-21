@@ -72,6 +72,8 @@ CONFIG_LV_FS_POSIX_PATH="/littlefs"
 # decoder only feeds line-by-line via get_area_cb, so transforming an
 # image renders garbage (random pixels from adjacent file data).
 CONFIG_LV_BIN_DECODER_RAM_LOAD=y
+# Doesnt increase FPS
+# CONFIG_LV_USE_DRAW_SW_ASM=255
 
 # ----- Log -----
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
