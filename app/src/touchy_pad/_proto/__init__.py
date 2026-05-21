@@ -30,6 +30,7 @@ from .widgets_pb2 import (  # noqa: F401  (re-exported)
     Action,
     ActionHost,
     ActionMacro,
+    AnimPath,
     Arc,
     Button,
     Checkbox,
@@ -49,9 +50,11 @@ from .widgets_pb2 import (  # noqa: F401  (re-exported)
     Slider,
     Spacer,
     Style,
+    StyleProp,
     Switch,
     TextAlign,
     Trackpad,
+    Transition,
     Widget,
 )
 

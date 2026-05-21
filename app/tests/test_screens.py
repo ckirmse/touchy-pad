@@ -8,11 +8,17 @@ import pytest
 
 from touchy_pad import _proto, hid_keys, macros
 from touchy_pad.screens import (
+    ANIM_PATH_EASE_IN_OUT,
+    ANIM_PATH_LINEAR,
     PART_KNOB,
+    PROP_BG_COLOR,
+    PROP_IMAGE_RECOLOR_OPA,
+    PROP_TRANSFORM_WIDTH,
     STATE_PRESSED,
     Screen,
     _collect_from_script,
     arc,
+    build_demo_screen,
     button,
     checkbox,
     col,
@@ -27,6 +33,7 @@ from touchy_pad.screens import (
     spacer,
     style,
     toggle,
+    transition,
 )
 
 
@@ -137,12 +144,112 @@ def test_style_list_round_trip():
     assert styles_[1].for_state == STATE_PRESSED
 
 
-def test_screen_version_is_four():
-    """Stage 20.1 wire-format bump: Screen.Version.CURRENT == 4."""
+def test_screen_version_is_five():
+    """Stage 20.2 wire-format bump: Screen.Version.CURRENT == 5."""
     s = Screen("v")
     decoded = _proto.Screen.FromString(s.to_bytes())
     assert decoded.version == _proto.Screen.Version.CURRENT
-    assert int(_proto.Screen.Version.CURRENT) == 4
+    assert int(_proto.Screen.Version.CURRENT) == 5
+
+
+# -- Stage 20.2: optional Style fields + Transition -------------------------
+
+
+def test_style_optional_zero_round_trips():
+    """Explicit zero values are preserved (no longer indistinguishable from unset)."""
+    s = Screen("z")
+    s += button("b", style=style(bg_color=0x000000, transform_width=0))
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    st = decoded.widgets[0].styles[0]
+    assert st.HasField("bg_color")
+    assert st.bg_color == 0
+    assert st.HasField("transform_width")
+    assert st.transform_width == 0
+    # Other visual fields stay unset.
+    assert not st.HasField("radius")
+    assert not st.HasField("recolor")
+
+
+def test_style_recolor_and_transform_width_round_trip():
+    s = Screen("r")
+    s += button(
+        "b",
+        style=style(
+            recolor=0x123456,
+            recolor_opa=76,
+            transform_width=20,
+            for_state=STATE_PRESSED,
+        ),
+    )
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    st = decoded.widgets[0].styles[0]
+    assert st.recolor == 0x123456
+    assert st.recolor_opa == 76
+    assert st.transform_width == 20
+    assert st.for_state == STATE_PRESSED
+
+
+def test_style_recolor_opa_range_checked():
+    with pytest.raises(ValueError):
+        style(recolor_opa=256)
+    with pytest.raises(ValueError):
+        style(recolor_opa=-1)
+
+
+def test_transition_round_trip():
+    """Transition props/path/durations survive a serialize round-trip."""
+    tr = transition(
+        props=[PROP_TRANSFORM_WIDTH, PROP_IMAGE_RECOLOR_OPA],
+        path=ANIM_PATH_EASE_IN_OUT,
+        duration_ms=250,
+        delay_ms=50,
+    )
+    s = Screen("t")
+    s += button("b", style=style(transition=tr))
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    st = decoded.widgets[0].styles[0]
+    assert st.HasField("transition")
+    assert list(st.transition.props) == [PROP_TRANSFORM_WIDTH, PROP_IMAGE_RECOLOR_OPA]
+    assert st.transition.path == ANIM_PATH_EASE_IN_OUT
+    assert st.transition.duration_ms == 250
+    assert st.transition.delay_ms == 50
+
+
+def test_transition_requires_props():
+    with pytest.raises(ValueError):
+        transition(props=[])
+
+
+def test_transition_defaults_are_linear_200ms():
+    tr = transition(props=[PROP_TRANSFORM_WIDTH])
+    assert tr.path == ANIM_PATH_LINEAR
+    assert tr.duration_ms == 200
+    assert tr.delay_ms == 0
+
+
+def test_demo_smile_uses_transition_pattern():
+    """The smiley image-button carries the imagebutton_1-style transition."""
+    s = build_demo_screen("demo")
+    decoded = _proto.Screen.FromString(s.to_bytes())
+    smile = next(w for w in decoded.widgets if w.id == "smile")
+    assert len(smile.styles) == 2
+    default_style, pressed_style = smile.styles
+    # Default style binds the transition, no for_state and no bg colour.
+    assert default_style.for_state == 0
+    assert not default_style.HasField("bg_color")
+    assert default_style.HasField("transition")
+    assert list(default_style.transition.props) == [
+        PROP_TRANSFORM_WIDTH,
+        PROP_IMAGE_RECOLOR_OPA,
+        PROP_BG_COLOR,
+    ]
+    assert default_style.transition.duration_ms == 300
+    # Pressed style grows + tints the button (cranked up for visual debug).
+    assert pressed_style.for_state == STATE_PRESSED
+    assert pressed_style.transform_width == 80
+    assert pressed_style.recolor == 0xFF0000
+    assert pressed_style.recolor_opa == 255
+    assert pressed_style.bg_color == 0x00FF00
 
 
 # -- Stage 16 ---------------------------------------------------------------

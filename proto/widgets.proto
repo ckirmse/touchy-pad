@@ -81,11 +81,72 @@ enum LvState {
     LV_PART_ANY        = 0x0F0000;
 }
 
+// Curated subset of `lv_style_prop_t` values that a `Transition` may
+// interpolate. Wire IDs are stable; the firmware translates each into
+// the matching `LV_STYLE_*` constant at decode time so the wire format
+// stays insulated from LVGL version drift / `LV_USE_*` build flags.
+enum StyleProp {
+    STYLE_PROP_UNSET             = 0;
+    STYLE_PROP_BG_COLOR          = 1;
+    STYLE_PROP_BG_OPA            = 2;
+    STYLE_PROP_RADIUS            = 3;
+    STYLE_PROP_BORDER_WIDTH      = 4;
+    STYLE_PROP_BORDER_COLOR      = 5;
+    // Per-side pad props. LVGL has no single "all sides" transition
+    // prop; pad-everywhere transitions need all four entries.
+    STYLE_PROP_PAD_TOP           = 6;
+    STYLE_PROP_TEXT_COLOR        = 7;
+    STYLE_PROP_IMAGE_RECOLOR     = 8;
+    STYLE_PROP_IMAGE_RECOLOR_OPA = 9;
+    STYLE_PROP_TRANSFORM_WIDTH   = 10;
+    STYLE_PROP_TRANSFORM_HEIGHT  = 11;
+    STYLE_PROP_PAD_BOTTOM        = 12;
+    STYLE_PROP_PAD_LEFT          = 13;
+    STYLE_PROP_PAD_RIGHT         = 14;
+}
+
+// Animation path (easing curve) selector. Maps 1-to-1 onto the
+// `lv_anim_path_*` built-ins. Default = LINEAR.
+enum AnimPath {
+    ANIM_PATH_LINEAR      = 0;
+    ANIM_PATH_EASE_IN     = 1;
+    ANIM_PATH_EASE_OUT    = 2;
+    ANIM_PATH_EASE_IN_OUT = 3;
+    ANIM_PATH_OVERSHOOT   = 4;
+    ANIM_PATH_BOUNCE      = 5;
+    ANIM_PATH_STEP        = 6;
+}
+
+// Style-property transition. Mirrors `lv_style_transition_dsc_t`: when
+// the parent `Style` is added/removed from a widget's selector match
+// (e.g. on entering/leaving `LV_STATE_PRESSED`), LVGL animates every
+// `prop` in this list from the previous value to the new one along
+// `path` over `duration_ms`, starting after `delay_ms`.
+//
+// The classic "bind on the default style → covers both directions"
+// pattern works: attach one Transition to the `for_state = 0` Style
+// and LVGL uses it for both press and release. Attach a second
+// (different) Transition to the `for_state = LV_STATE_PRESSED` Style to
+// get an asymmetric in/out animation (fast in, slow out).
+//
+// See https://lvgl.io/docs/open/main-modules/animation and the
+// `lv_example_imagebutton_1` / `lv_example_style_11` examples.
+message Transition {
+    repeated StyleProp props = 1;       // properties to interpolate
+    AnimPath  path           = 2;       // easing; default = LINEAR
+    uint32    duration_ms    = 3;
+    uint32    delay_ms       = 4;
+}
+
 // Cosmetic overrides applied to a widget via an `lv_style_t` instance
 // and `lv_obj_add_style(obj, st, for_state)`. Treat one `Style` message
 // as ≈ one `lv_style_t`: each populated scalar maps to one
-// `lv_style_set_<prop>()` call; fields left at their proto3 default
-// (zero) are skipped and inherit the theme's value.
+// `lv_style_set_<prop>()` call; fields left unset are skipped and
+// inherit the theme's value.
+//
+// Every visual field is `optional` so an explicit zero (e.g.
+// `bg_color = 0x000000`, `transform_width = 0`) round-trips faithfully
+// instead of being indistinguishable from "unset".
 //
 // `for_state` is the `lv_style_selector_t` selector passed to
 // `lv_obj_add_style`. It is the OR of any `LvState` (state + part) bits;
@@ -99,13 +160,25 @@ enum LvState {
 //
 // Colours are packed 0xRRGGBB; the top byte is ignored.
 message Style {
-    uint32 bg_color   = 1;
-    int32  radius     = 2;
-    int32  border_w   = 3;
-    int32  pad        = 4;
-    uint32 text_color = 5;
+    optional uint32 bg_color        = 1;
+    optional int32  radius          = 2;
+    optional int32  border_w        = 3;
+    optional int32  pad             = 4;
+    optional uint32 text_color      = 5;
     // Bitwise OR of `LvState` values; 0 = PART_MAIN | STATE_DEFAULT.
-    uint32 for_state  = 6;
+    uint32          for_state       = 6;
+    // image recolor (0xRRGGBB) — used to tint icons / image buttons.
+    optional uint32 recolor         = 7;
+    // image recolor opacity, 0..255 (255 = full tint). LVGL `LV_OPA_*`
+    // constants are valid (e.g. 76 ≈ `LV_OPA_30`).
+    optional uint32 recolor_opa     = 8;
+    // pixels added to the widget's drawn width while this style is
+    // active; commonly negative for "shrink on press" or positive for
+    // "grow on press". Maps to `lv_style_set_transform_width`.
+    optional int32  transform_width = 9;
+    // Animate the listed properties when this style is added / removed
+    // from the widget's selector match. See `Transition` doc-comment.
+    optional Transition transition  = 10;
 }
 
 // Single device-side keystroke step inside an `ActionMacro`.
@@ -360,7 +433,7 @@ message Screen {
     // from the device filesystem so the host re-uploads a fresh copy.
     enum Version {
         VERSION_UNKNOWN = 0;   // proto3 default — any file without a version field
-        CURRENT         = 4;   // current wire format
+        CURRENT         = 5;   // current wire format
     }
 
     // Must equal `CURRENT`; the firmware deletes and ignores files that

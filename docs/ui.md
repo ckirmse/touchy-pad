@@ -38,10 +38,15 @@ FIXME Perhaps the gesture stuff I've been hand coding could be do instead with h
 Each `Widget` carries a `repeated Style styles` field. Treat one
 `Style` message as ≈ one `lv_style_t` instance on the device: every
 populated scalar (`bg_color`, `radius`, `border_w`, `pad`,
-`text_color`) maps to exactly one `lv_style_set_<prop>` call inside
+`text_color`, `recolor`, `recolor_opa`, `transform_width`) maps to
+exactly one `lv_style_set_<prop>` call inside
 `build_lv_style()` in [firmware/main/screens.cpp](../firmware/main/screens.cpp);
-fields left at their proto3 default (zero) are skipped and inherit the
-theme.
+fields left unset (`Style.HasField(...)` is false) are skipped and
+inherit the theme.
+
+Every visual field is wire-level `optional`, so explicit zero values
+(`bg_color=0x000000`, `transform_width=0`) round-trip faithfully
+instead of being indistinguishable from "unset".
 
 Each `Style` also carries a `for_state` selector — the OR of any
 `LvState` bits (state + part). The firmware passes it verbatim to
@@ -75,19 +80,72 @@ The smiley image-button in `build_demo_screen` shows the pattern
 end-to-end:
 
 ```python
-from touchy_pad.screens import image_button, host_action, style, STATE_PRESSED
+from touchy_pad.screens import (
+    image_button, host_action, style, transition,
+    STATE_PRESSED, PROP_TRANSFORM_WIDTH, PROP_IMAGE_RECOLOR_OPA,
+)
 
 image_button(
     "smile",
     asset="images/smiley.bmp",
     on_click=host_action(0x103),
-    style=[style(bg_color=0x1E90FF, for_state=STATE_PRESSED)],
+    style=[
+        # Default-state style binds the transition; LVGL uses it for
+        # both entering and leaving the pressed state.
+        style(transition=transition(
+            props=[PROP_TRANSFORM_WIDTH, PROP_IMAGE_RECOLOR_OPA],
+            duration_ms=200,
+        )),
+        # Pressed state: widen by 20 px and tint black at ~30 % opacity.
+        style(
+            transform_width=20,
+            recolor=0x000000,
+            recolor_opa=76,        # ≈ LV_OPA_30
+            for_state=STATE_PRESSED,
+        ),
+    ],
 )
 ```
 
-A Dodger-blue background only paints under the smiley while the user
-is actively pressing it; on release LVGL drops back to the
-default-state look (no background, theme defaults).
+While the user holds the smiley, LVGL animates its width up by 20 px
+and fades in a black image-recolor over 200 ms; on release the
+animation plays in reverse. The visual matches LVGL's stock
+[`lv_example_imagebutton_1`](https://github.com/lvgl/lvgl/blob/master/examples/widgets/imagebutton/lv_example_imagebutton_1.c)
+example.
+
+### Transitions
+
+A `Style` may carry an optional `transition` field — a
+`Transition` message that mirrors `lv_style_transition_dsc_t`. When
+the parent style is added to or removed from the widget's selector
+match (e.g. entering or leaving `STATE_PRESSED`), LVGL interpolates
+every property in `Transition.props` from the previous value to the
+new one along the chosen `path` over `duration_ms`, starting after
+`delay_ms`.
+
+`Transition.props` references curated wire-stable `StyleProp` values
+(re-exported as `PROP_BG_COLOR`, `PROP_TRANSFORM_WIDTH`,
+`PROP_IMAGE_RECOLOR_OPA`, …); the firmware translates each to the
+corresponding `LV_STYLE_*` constant at decode time. `Transition.path`
+selects an `AnimPath` easing curve (`ANIM_PATH_LINEAR`,
+`ANIM_PATH_EASE_IN_OUT`, `ANIM_PATH_OVERSHOOT`, `ANIM_PATH_BOUNCE`,
+`ANIM_PATH_STEP`, …) that maps onto LVGL's built-in `lv_anim_path_*`
+callbacks.
+
+Two common patterns:
+
+* **Symmetric in/out** — attach the transition to the default-state
+  Style (`for_state = 0`). LVGL plays the same animation both ways.
+* **Asymmetric** — attach *different* transitions to the default and
+  pressed-state Styles (e.g. fast 100 ms into-press, slow 500 ms
+  out-of-press). Each `Style.transition` controls the *entering* edge
+  of the state to which that style is bound.
+
+See LVGL's
+[animation overview](https://lvgl.io/docs/open/main-modules/animation)
+and the
+[`lv_example_style_11`](https://github.com/lvgl/lvgl/blob/master/examples/styles/lv_example_style_11.c)
+example for the underlying behaviour.
 
 ### Lifetime
 
@@ -95,9 +153,13 @@ default-state look (no background, theme defaults).
 firmware can't stack-allocate styles inside the build loop. They live
 on the heap, owned by a `WidgetStyles` struct that the build loop
 attaches to the widget via an `LV_EVENT_DELETE` callback
-(`widget_styles_delete_cb`). When the widget is destroyed — typically
-by `lv_obj_clean()` on screen switch — the callback calls
-`lv_style_reset` + `delete` on each entry. Authors of new widget
+(`widget_styles_delete_cb`). The same struct also owns any
+heap-allocated `lv_style_transition_dsc_t` descriptors and their
+0-terminated `lv_style_prop_t[]` arrays (LVGL stores both by pointer
+when `lv_style_set_transition` is called). When the widget is
+destroyed — typically by `lv_obj_clean()` on screen switch — the
+callback calls `lv_style_reset` + `delete` on each style and frees the
+companion transition / prop-array buffers. Authors of new widget
 factories don't need to wire any of this up: it's done once in
 `apply_styles()`.
 

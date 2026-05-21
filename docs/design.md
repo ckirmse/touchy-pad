@@ -384,6 +384,60 @@ is now `4`.
   through the Style ↔ `lv_style_t` mapping, selector composition and
   cascade rules, plus the smiley pressed-state example.
 
+## Stage 20.2: Style transitions, recolor & transform — DONE
+
+Adds the missing visual knobs needed for the LVGL-stock "press to
+widen + darken" image-button look, plus a wire-level **Transition**
+type so styles can animate when added / removed from a widget's
+selector match. Wire-format bump: `Screen.Version.CURRENT` is now `5`.
+
+* **Proto** ([proto/widgets.proto](../proto/widgets.proto)):
+  - Every visual `Style` field is now `optional`, so explicit zeros
+    (e.g. `bg_color=0x000000`, `transform_width=0`) round-trip
+    faithfully instead of being indistinguishable from "unset". Only
+    `for_state` stays required (default 0 = main / default).
+  - New `Style` fields: `recolor`, `recolor_opa`, `transform_width`,
+    and `transition` (a `Transition` sub-message).
+  - New `Transition` message mirroring `lv_style_transition_dsc_t`:
+    `repeated StyleProp props`, `AnimPath path`, `duration_ms`,
+    `delay_ms`.
+  - New curated enums `StyleProp` and `AnimPath`. Both are wire-stable
+    subsets translated to the matching `LV_STYLE_*` constant /
+    `lv_anim_path_*` callback at decode time, so the wire format stays
+    insulated from LVGL version drift.
+* **Firmware** ([firmware/main/screens.cpp](../firmware/main/screens.cpp)):
+  - `build_lv_style()` now reads `has_<field>` on each scalar (instead
+    of "non-zero means set") and emits the new
+    `lv_style_set_image_recolor` / `_image_recolor_opa` /
+    `_transform_width` calls.
+  - New `build_lv_transition()` heap-allocates an
+    `lv_style_transition_dsc_t` and a 0-terminated
+    `lv_style_prop_t[]`, initialises the descriptor, and stashes both
+    in the widget's `WidgetStyles` so they outlive the widget.
+  - `WidgetStyles` and `widget_styles_delete_cb` extended to own and
+    free the new transition descriptors + prop arrays alongside the
+    existing styles list.
+* **Host DSL** ([app/src/touchy_pad/screens.py](../app/src/touchy_pad/screens.py)):
+  - `style()` gains `recolor`, `recolor_opa`, `transform_width`, and
+    `transition=` kwargs. `recolor_opa` is range-checked (0..255).
+  - New `transition(props=[...], path=ANIM_PATH_LINEAR,
+    duration_ms=200, delay_ms=0)` helper.
+  - Module-level `PROP_*` and `ANIM_PATH_*` constants re-export the
+    new enums for convenient use with `transition()`.
+* **Demo** (`build_demo_screen`): the smiley `image_button` now uses
+  the [`lv_example_imagebutton_1`](https://github.com/lvgl/lvgl/blob/master/examples/widgets/imagebutton/lv_example_imagebutton_1.c)
+  pattern — default style binds a transition over
+  `(TRANSFORM_WIDTH, IMAGE_RECOLOR_OPA)`, pressed style widens by
+  20 px and applies a 30 %-opaque black image-recolor. Both press and
+  release animate over 200 ms linear.
+* **Tests** ([app/tests/test_screens.py](../app/tests/test_screens.py)):
+  explicit-zero round-trip, new scalar fields round-trip, transition
+  round-trip (props order, path, durations), default-transition
+  values, range check for `recolor_opa`, demo smile structural test,
+  and `Screen.Version.CURRENT == 5`.
+* **Docs:** [docs/ui.md](ui.md) gains a "Transitions" subsection and
+  the smiley example is rewritten to the new pattern.
+
 ## Stage 21: Allow host PC to configure the button matrixes/screen layout
 * Use protocol buffers (nanopb?) to communicate between the host/device (over a custom USB characteristic)
 * Provide a simple python library to allow host applications to easily configure the button matrixes/screen layout

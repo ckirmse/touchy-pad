@@ -41,6 +41,7 @@ __all__ = [
     "cell",
     "rect",
     "style",
+    "transition",
     "action",
     "host_action",
     "macro_action",
@@ -74,6 +75,29 @@ __all__ = [
     "PART_ITEMS",
     "PART_CURSOR",
     "PART_ANY",
+    # StyleProp values for use with `transition(props=[...])`.
+    "PROP_BG_COLOR",
+    "PROP_BG_OPA",
+    "PROP_RADIUS",
+    "PROP_BORDER_WIDTH",
+    "PROP_BORDER_COLOR",
+    "PROP_PAD_TOP",
+    "PROP_PAD_BOTTOM",
+    "PROP_PAD_LEFT",
+    "PROP_PAD_RIGHT",
+    "PROP_TEXT_COLOR",
+    "PROP_IMAGE_RECOLOR",
+    "PROP_IMAGE_RECOLOR_OPA",
+    "PROP_TRANSFORM_WIDTH",
+    "PROP_TRANSFORM_HEIGHT",
+    # AnimPath easing curves for use with `transition(path=...)`.
+    "ANIM_PATH_LINEAR",
+    "ANIM_PATH_EASE_IN",
+    "ANIM_PATH_EASE_OUT",
+    "ANIM_PATH_EASE_IN_OUT",
+    "ANIM_PATH_OVERSHOOT",
+    "ANIM_PATH_BOUNCE",
+    "ANIM_PATH_STEP",
 ]
 
 
@@ -100,6 +124,38 @@ PART_SELECTED = _proto.LvState.LV_PART_SELECTED
 PART_ITEMS = _proto.LvState.LV_PART_ITEMS
 PART_CURSOR = _proto.LvState.LV_PART_CURSOR
 PART_ANY = _proto.LvState.LV_PART_ANY
+
+
+# ---------------------------------------------------------------------------
+# StyleProp / AnimPath constants — used with :func:`transition`.
+# ---------------------------------------------------------------------------
+#
+# These mirror the curated wire-stable subsets defined in
+# ``widgets.proto`` (``StyleProp`` and ``AnimPath``). The firmware
+# translates each into the matching ``LV_STYLE_*`` constant or
+# ``lv_anim_path_*`` callback at decode time.
+PROP_BG_COLOR = _proto.StyleProp.STYLE_PROP_BG_COLOR
+PROP_BG_OPA = _proto.StyleProp.STYLE_PROP_BG_OPA
+PROP_RADIUS = _proto.StyleProp.STYLE_PROP_RADIUS
+PROP_BORDER_WIDTH = _proto.StyleProp.STYLE_PROP_BORDER_WIDTH
+PROP_BORDER_COLOR = _proto.StyleProp.STYLE_PROP_BORDER_COLOR
+PROP_PAD_TOP = _proto.StyleProp.STYLE_PROP_PAD_TOP
+PROP_PAD_BOTTOM = _proto.StyleProp.STYLE_PROP_PAD_BOTTOM
+PROP_PAD_LEFT = _proto.StyleProp.STYLE_PROP_PAD_LEFT
+PROP_PAD_RIGHT = _proto.StyleProp.STYLE_PROP_PAD_RIGHT
+PROP_TEXT_COLOR = _proto.StyleProp.STYLE_PROP_TEXT_COLOR
+PROP_IMAGE_RECOLOR = _proto.StyleProp.STYLE_PROP_IMAGE_RECOLOR
+PROP_IMAGE_RECOLOR_OPA = _proto.StyleProp.STYLE_PROP_IMAGE_RECOLOR_OPA
+PROP_TRANSFORM_WIDTH = _proto.StyleProp.STYLE_PROP_TRANSFORM_WIDTH
+PROP_TRANSFORM_HEIGHT = _proto.StyleProp.STYLE_PROP_TRANSFORM_HEIGHT
+
+ANIM_PATH_LINEAR = _proto.AnimPath.ANIM_PATH_LINEAR
+ANIM_PATH_EASE_IN = _proto.AnimPath.ANIM_PATH_EASE_IN
+ANIM_PATH_EASE_OUT = _proto.AnimPath.ANIM_PATH_EASE_OUT
+ANIM_PATH_EASE_IN_OUT = _proto.AnimPath.ANIM_PATH_EASE_IN_OUT
+ANIM_PATH_OVERSHOOT = _proto.AnimPath.ANIM_PATH_OVERSHOOT
+ANIM_PATH_BOUNCE = _proto.AnimPath.ANIM_PATH_BOUNCE
+ANIM_PATH_STEP = _proto.AnimPath.ANIM_PATH_STEP
 
 
 # ---------------------------------------------------------------------------
@@ -192,11 +248,17 @@ def style(
     pad: int | None = None,
     text_color: int | None = None,
     for_state: int = 0,
+    recolor: int | None = None,
+    recolor_opa: int | None = None,
+    transform_width: int | None = None,
+    transition: _proto.Transition | None = None,
 ) -> _proto.Style:
     """Cosmetic overrides; unset fields fall back to theme defaults.
 
     Colours are packed ``0xRRGGBB`` integers. Pass ``None`` to leave a
-    property untouched.
+    property untouched. Every visual field is wire-level ``optional``,
+    so explicit zeros (``bg_color=0x000000``, ``transform_width=0``)
+    round-trip faithfully — they are *not* treated as "unset".
 
     ``for_state`` is the LVGL style selector — a bitwise OR of
     ``STATE_*`` and/or ``PART_*`` constants (see
@@ -205,9 +267,21 @@ def style(
 
         style(bg_color=0x1E90FF, for_state=STATE_PRESSED)
 
-    attaches a blue background that LVGL only applies while the widget
-    is being pressed. Stack several ``Style`` instances on a widget by
-    passing a list as the factory's ``style=`` argument.
+    Other knobs:
+
+    * ``recolor`` (``0xRRGGBB``) and ``recolor_opa`` (0..255) tint
+      images / image-buttons; mirrors
+      ``lv_style_set_image_recolor`` / ``_image_recolor_opa``.
+    * ``transform_width`` adds (or subtracts) pixels from the widget's
+      drawn width while the style is active. Combine with
+      :func:`transition` for a smooth "grow on press" effect.
+    * ``transition`` attaches a :class:`_proto.Transition` so LVGL
+      animates the listed properties when the style is added / removed
+      from the widget's selector match (e.g. entering / leaving
+      ``STATE_PRESSED``). See :func:`transition` for the pattern.
+
+    Stack several ``Style`` instances on a widget by passing a list as
+    the factory's ``style=`` argument.
     """
     s = _proto.Style()
     if bg_color is not None:
@@ -222,7 +296,74 @@ def style(
         s.text_color = text_color
     if for_state:
         s.for_state = for_state
+    if recolor is not None:
+        s.recolor = recolor
+    if recolor_opa is not None:
+        if recolor_opa < 0 or recolor_opa > 255:
+            raise ValueError("recolor_opa must fit in a uint8 (0..255)")
+        s.recolor_opa = recolor_opa
+    if transform_width is not None:
+        s.transform_width = transform_width
+    if transition is not None:
+        s.transition.CopyFrom(transition)
     return s
+
+
+def transition(
+    props: Iterable[int],
+    path: int = ANIM_PATH_LINEAR,
+    duration_ms: int = 200,
+    delay_ms: int = 0,
+) -> _proto.Transition:
+    """Smoothly animate style properties when the style becomes active.
+
+    Mirrors ``lv_style_transition_dsc_t``. Pass the returned object as
+    the ``transition=`` argument to :func:`style`. When the parent style
+    is added or removed from a widget's selector match (e.g. entering /
+    leaving ``STATE_PRESSED``) LVGL interpolates every ``prop`` in the
+    list from the previous value to the new one along ``path`` over
+    ``duration_ms``, starting after ``delay_ms``.
+
+    The classic "bind on the default style → covers both directions"
+    pattern works: attach one transition to the default-state Style and
+    LVGL uses it for both press and release. For asymmetric in/out
+    timings, attach a different transition to the pressed-state Style.
+
+    Example — image-button that widens by 20 px and darkens when
+    pressed, both directions animated linearly over 200 ms::
+
+        image_button(
+            "smile",
+            asset="images/smiley.bmp",
+            style=[
+                style(transition=transition(
+                    props=[PROP_TRANSFORM_WIDTH, PROP_IMAGE_RECOLOR_OPA],
+                    duration_ms=200,
+                )),
+                style(
+                    transform_width=20,
+                    recolor=0x000000,
+                    recolor_opa=80,        # ≈ LV_OPA_30
+                    for_state=STATE_PRESSED,
+                ),
+            ],
+        )
+
+    See https://lvgl.io/docs/open/main-modules/animation for the
+    underlying animation engine.
+    """
+    props_list = [int(p) for p in props]
+    if not props_list:
+        raise ValueError("transition() requires at least one StyleProp")
+    if duration_ms < 0 or delay_ms < 0:
+        raise ValueError("transition durations must be non-negative")
+    t = _proto.Transition(
+        path=path,
+        duration_ms=duration_ms,
+        delay_ms=delay_ms,
+    )
+    t.props.extend(props_list)
+    return t
 
 
 def action(*args, **kwargs) -> _proto.Action:
@@ -625,6 +766,11 @@ def build_demo_screen(name: str = "demo") -> Screen:
     s = Screen(name, layout=grid(cols=4, rows=6, gap=8))
 
     # ── left column: stacked control widgets ───────────────────────────
+    # The "hello" button mirrors the smiley's transition pattern on a
+    # non-image widget so we can tell whether transitions are working in
+    # general or only on image buttons. Default style carries a 200 ms
+    # linear transition over (TRANSFORM_WIDTH, BG_COLOR); pressed state
+    # widens by 20 px and tints the background red.
     s += cell(
         button(
             "hello",
@@ -635,6 +781,20 @@ def build_demo_screen(name: str = "demo") -> Screen:
                     m.key_tap(k.KEY_I),
                 ]
             ),
+            style=[
+                style(
+                    transition=transition(
+                        props=[PROP_TRANSFORM_WIDTH, PROP_BG_COLOR],
+                        path=ANIM_PATH_LINEAR,
+                        duration_ms=200,
+                    )
+                ),
+                style(
+                    transform_width=20,
+                    bg_color=0xCC2222,
+                    for_state=STATE_PRESSED,
+                ),
+            ],
         ),
         col=0,
         row=0,
@@ -648,16 +808,32 @@ def build_demo_screen(name: str = "demo") -> Screen:
     # ── right column: multitouch trackpad spans rows 0..3 ──────────────
     s += cell(trackpad("pad"), col=1, row=0, row_span=5, col_span=3)
 
-    # ── Stage 20 smiley image-button: row 4, left column ───────────────
-    # The pressed-state style demonstrates Stage 20.1's selector-aware
-    # styling: a Dodger-blue background appears under the image only
-    # while the user is actively pressing it.
+    # ── Stage 20.2 smiley image-button: row 4, left column ─────────────
+    # Demonstrates style transitions on an image button. Effects are
+    # cranked up for visual debugging — if these don't show but the
+    # "Type 'hi'" button's transition does, the bug is specific to
+    # lv_imagebutton's rendering path.
     s += cell(
         image_button(
             "smile",
             asset="images/smiley.bmp",
             on_click=host_action(0x103),
-            style=[style(bg_color=0x1E90FF, for_state=STATE_PRESSED)],
+            style=[
+                style(
+                    transition=transition(
+                        props=[PROP_TRANSFORM_WIDTH, PROP_IMAGE_RECOLOR_OPA, PROP_BG_COLOR],
+                        path=ANIM_PATH_LINEAR,
+                        duration_ms=300,
+                    )
+                ),
+                style(
+                    transform_width=80,  # +80 px on each side
+                    recolor=0xFF0000,
+                    recolor_opa=255,  # full red tint
+                    bg_color=0x00FF00,  # bright green background
+                    for_state=STATE_PRESSED,
+                ),
+            ],
         ),
         col=0,
         row=4,

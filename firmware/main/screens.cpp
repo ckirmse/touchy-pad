@@ -277,46 +277,92 @@ lv_obj_t *build_image(lv_obj_t *parent, const touchy_Widget &w)
     return img;
 }
 
-// Two LVGL-allocated path strings owned by an `lv_imagebutton` for the
-// lifetime of the widget. Freed via an LV_EVENT_DELETE callback below.
-struct ImageButtonPaths {
+// Image-button architecture: an `lv_button` (clickable, full state
+// machine, theme-aware bg/border) wraps a non-clickable `lv_image`
+// child that just renders the bitmap. This is LVGL's canonical pattern
+// for "image button with state feedback" and avoids the pitfalls of
+// the alternatives:
+//
+//   * `lv_imagebutton` is a 9-patch widget. With only `src_mid` it
+//     tiles to fill the widget when grid/flex stretches it; with only
+//     `src_left` its `refr_image()` short-circuits so press-state
+//     redraws never fire.
+//   * A bare `lv_image` made clickable enters LV_STATE_PRESSED, but its
+//     own draw path (`lv_image_event` → `draw_image`) and the base
+//     obj's bg/border draw don't compose cleanly with style states,
+//     transitions, or transform_width — visually nothing changes on
+//     press even though events fire.
+//
+// The wrapping button receives all per-state styles from the protobuf
+// (so apply_styles attaches them to the button); the inner image just
+// renders. Press/release src-swap is attached to the button and forwards
+// to the child image.
+
+// User-data for the press/release src-swap handler. `img_child` is the
+// inner lv_image owned by the button; `released`/`pressed` are heap
+// strings freed in image_button_delete_cb.
+struct ImageButtonState {
+    lv_obj_t *img_child;
     char *released;
     char *pressed;
 };
 
-void image_button_delete_cb(lv_event_t *e)
+static void image_button_state_delete_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) != LV_EVENT_DELETE) return;
-    auto *paths = static_cast<ImageButtonPaths *>(lv_event_get_user_data(e));
-    if (!paths) return;
-    free(paths->released);
-    free(paths->pressed);
-    delete paths;
+    auto *st = static_cast<ImageButtonState *>(lv_event_get_user_data(e));
+    if (!st) return;
+    free(st->released);
+    free(st->pressed);
+    delete st;
+}
+
+static void image_button_press_release_cb(lv_event_t *e)
+{
+    auto *st = static_cast<ImageButtonState *>(lv_event_get_user_data(e));
+    if (!st || !st->pressed || !st->img_child) return;
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_PRESSED) {
+        lv_image_set_src(st->img_child, st->pressed);
+    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        lv_image_set_src(st->img_child, st->released);
+    }
 }
 
 lv_obj_t *build_image_button(lv_obj_t *parent, const touchy_Widget &w)
 {
-    lv_obj_t *btn = lv_imagebutton_create(parent);
+    // Outer clickable button — receives styles and emits click events.
+    lv_obj_t *btn = lv_button_create(parent);
+    // Inner image — non-clickable so events bubble up to the button.
+    lv_obj_t *img = lv_image_create(btn);
+    lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(img);
+
     const touchy_ImageButton &ib = w.kind.image_button;
     if (ib.asset[0] != '\0') {
-        auto *paths = new (std::nothrow) ImageButtonPaths{nullptr, nullptr};
-        if (!paths) return btn;
+        auto *st = new (std::nothrow) ImageButtonState{img, nullptr, nullptr};
+        if (!st) return btn;
         std::string released = std::string("F:/from_host/") + ib.asset;
-        paths->released = strdup(released.c_str());
+        st->released = strdup(released.c_str());
         ESP_LOGI(TAG, "build_image_button id='%s' released='%s' has_pressed=%d",
                  w.id, released.c_str(), (int)ib.has_pressed_asset);
-        // Pass as src_left (drawn once at natural size). src_mid is tiled
-        // to fill the widget width — avoid it for simple non-9-patch images.
-        lv_imagebutton_set_src(btn, LV_IMAGEBUTTON_STATE_RELEASED,
-                               paths->released, NULL, NULL);
-        lv_obj_set_size(btn, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_image_set_src(img, st->released);
         if (ib.has_pressed_asset && ib.pressed_asset[0] != '\0') {
             std::string pressed = std::string("F:/from_host/") + ib.pressed_asset;
-            paths->pressed = strdup(pressed.c_str());
-            lv_imagebutton_set_src(btn, LV_IMAGEBUTTON_STATE_PRESSED,
-                                   paths->pressed, NULL, NULL);
+            st->pressed = strdup(pressed.c_str());
+            // Listen on the button (which owns the press state machine);
+            // the handler updates the inner image's src.
+            lv_obj_add_event_cb(btn, image_button_press_release_cb,
+                                LV_EVENT_PRESSED, st);
+            lv_obj_add_event_cb(btn, image_button_press_release_cb,
+                                LV_EVENT_RELEASED, st);
+            lv_obj_add_event_cb(btn, image_button_press_release_cb,
+                                LV_EVENT_PRESS_LOST, st);
         }
-        lv_obj_add_event_cb(btn, image_button_delete_cb, LV_EVENT_DELETE, paths);
+        // Free `st` (and its strings) when the button is deleted; the
+        // child image is destroyed automatically by the parent.
+        lv_obj_add_event_cb(btn, image_button_state_delete_cb,
+                            LV_EVENT_DELETE, st);
     }
     attach_actions(btn, w.id,
                    ib.on_click, ib.on_click_count,
@@ -367,8 +413,16 @@ lv_obj_t *build_log(lv_obj_t *parent, const touchy_Widget &)
 // LVGL keeps a pointer to each style added via `lv_obj_add_style` and reads
 // from it on every redraw, so we cannot stack-allocate them inside the
 // build loop. Freed via an LV_EVENT_DELETE callback below.
+//
+// `transitions` / `prop_arrays` are owned the same way: a
+// `lv_style_transition_dsc_t` stored via `lv_style_set_transition` is
+// referenced by pointer, and the descriptor itself holds a pointer to a
+// 0-terminated `lv_style_prop_t[]`. Both must outlive every style they
+// belong to.
 struct WidgetStyles {
     std::vector<lv_style_t *> styles;
+    std::vector<lv_style_transition_dsc_t *> transitions;
+    std::vector<lv_style_prop_t *> prop_arrays;
 };
 
 void widget_styles_delete_cb(lv_event_t *e)
@@ -380,27 +434,114 @@ void widget_styles_delete_cb(lv_event_t *e)
         lv_style_reset(st);
         delete st;
     }
+    for (lv_style_transition_dsc_t *tr : ws->transitions) {
+        delete tr;
+    }
+    for (lv_style_prop_t *props : ws->prop_arrays) {
+        delete[] props;
+    }
     delete ws;
 }
 
+// Translate a wire-stable `touchy_StyleProp` into the matching
+// `lv_style_prop_t` value. Unknown values become `LV_STYLE_PROP_INV`
+// so LVGL silently skips them.
+static lv_style_prop_t lv_prop_from_proto(touchy_StyleProp p)
+{
+    switch (p) {
+        case touchy_StyleProp_STYLE_PROP_BG_COLOR:          return LV_STYLE_BG_COLOR;
+        case touchy_StyleProp_STYLE_PROP_BG_OPA:            return LV_STYLE_BG_OPA;
+        case touchy_StyleProp_STYLE_PROP_RADIUS:            return LV_STYLE_RADIUS;
+        case touchy_StyleProp_STYLE_PROP_BORDER_WIDTH:      return LV_STYLE_BORDER_WIDTH;
+        case touchy_StyleProp_STYLE_PROP_BORDER_COLOR:      return LV_STYLE_BORDER_COLOR;
+        case touchy_StyleProp_STYLE_PROP_PAD_TOP:           return LV_STYLE_PAD_TOP;
+        case touchy_StyleProp_STYLE_PROP_PAD_BOTTOM:        return LV_STYLE_PAD_BOTTOM;
+        case touchy_StyleProp_STYLE_PROP_PAD_LEFT:          return LV_STYLE_PAD_LEFT;
+        case touchy_StyleProp_STYLE_PROP_PAD_RIGHT:         return LV_STYLE_PAD_RIGHT;
+        case touchy_StyleProp_STYLE_PROP_TEXT_COLOR:        return LV_STYLE_TEXT_COLOR;
+        case touchy_StyleProp_STYLE_PROP_IMAGE_RECOLOR:     return LV_STYLE_IMAGE_RECOLOR;
+        case touchy_StyleProp_STYLE_PROP_IMAGE_RECOLOR_OPA: return LV_STYLE_IMAGE_RECOLOR_OPA;
+        case touchy_StyleProp_STYLE_PROP_TRANSFORM_WIDTH:   return LV_STYLE_TRANSFORM_WIDTH;
+        case touchy_StyleProp_STYLE_PROP_TRANSFORM_HEIGHT:  return LV_STYLE_TRANSFORM_HEIGHT;
+        default:                                            return LV_STYLE_PROP_INV;
+    }
+}
+
+// Translate a wire-stable `touchy_AnimPath` into the matching LVGL path
+// callback. Unknown values fall back to linear.
+static lv_anim_path_cb_t lv_path_from_proto(touchy_AnimPath p)
+{
+    switch (p) {
+        case touchy_AnimPath_ANIM_PATH_EASE_IN:     return lv_anim_path_ease_in;
+        case touchy_AnimPath_ANIM_PATH_EASE_OUT:    return lv_anim_path_ease_out;
+        case touchy_AnimPath_ANIM_PATH_EASE_IN_OUT: return lv_anim_path_ease_in_out;
+        case touchy_AnimPath_ANIM_PATH_OVERSHOOT:   return lv_anim_path_overshoot;
+        case touchy_AnimPath_ANIM_PATH_BOUNCE:      return lv_anim_path_bounce;
+        case touchy_AnimPath_ANIM_PATH_STEP:        return lv_anim_path_step;
+        case touchy_AnimPath_ANIM_PATH_LINEAR:
+        default:                                    return lv_anim_path_linear;
+    }
+}
+
+// Allocate (heap-owned) a `lv_style_transition_dsc_t` + a 0-terminated
+// prop array describing `t`, stash both in `ws`, and return the
+// descriptor pointer (suitable for passing to `lv_style_set_transition`).
+// Returns nullptr on allocation failure or empty prop list.
+static lv_style_transition_dsc_t *build_lv_transition(const touchy_Transition &t,
+                                                      WidgetStyles *ws)
+{
+    if (t.props_count == 0 || t.props == nullptr || ws == nullptr) return nullptr;
+    // +1 for the trailing LV_STYLE_PROP_INV terminator LVGL scans for.
+    auto *props = new (std::nothrow) lv_style_prop_t[t.props_count + 1];
+    if (!props) return nullptr;
+    pb_size_t n = 0;
+    for (pb_size_t i = 0; i < t.props_count; ++i) {
+        lv_style_prop_t lp = lv_prop_from_proto(t.props[i]);
+        if (lp != LV_STYLE_PROP_INV) props[n++] = lp;
+    }
+    props[n] = LV_STYLE_PROP_INV;   // 0-terminator
+    if (n == 0) {
+        delete[] props;
+        return nullptr;
+    }
+    auto *tr = new (std::nothrow) lv_style_transition_dsc_t;
+    if (!tr) {
+        delete[] props;
+        return nullptr;
+    }
+    lv_style_transition_dsc_init(tr, props, lv_path_from_proto(t.path),
+                                 t.duration_ms, t.delay_ms, nullptr);
+    ws->prop_arrays.push_back(props);
+    ws->transitions.push_back(tr);
+    return tr;
+}
+
 // Build one `lv_style_t` from a `touchy_Style` message. Each populated
-// scalar contributes one `lv_style_set_<prop>` call; zero / unset fields
-// inherit the theme. Returns a heap-allocated style — caller takes
-// ownership and is responsible for `lv_style_reset` + `delete`.
-lv_style_t *build_lv_style(const touchy_Style &s)
+// scalar contributes one `lv_style_set_<prop>` call; fields whose
+// `has_<field>` is false inherit the theme. Returns a heap-allocated
+// style — caller takes ownership and is responsible for `lv_style_reset`
+// + `delete` (handled by `widget_styles_delete_cb`).
+lv_style_t *build_lv_style(const touchy_Style &s, WidgetStyles *ws)
 {
     auto *st = new (std::nothrow) lv_style_t;
     if (!st) return nullptr;
     lv_style_init(st);
-    if (s.bg_color != 0) {
+    if (s.has_bg_color) {
         lv_style_set_bg_color(st, color_from_u32(s.bg_color));
         lv_style_set_bg_opa(st, LV_OPA_COVER);
     }
-    if (s.radius > 0)   lv_style_set_radius(st, s.radius);
-    if (s.border_w > 0) lv_style_set_border_width(st, s.border_w);
-    if (s.pad > 0)      lv_style_set_pad_all(st, s.pad);
-    if (s.text_color != 0)
-        lv_style_set_text_color(st, color_from_u32(s.text_color));
+    if (s.has_radius)     lv_style_set_radius(st, s.radius);
+    if (s.has_border_w)   lv_style_set_border_width(st, s.border_w);
+    if (s.has_pad)        lv_style_set_pad_all(st, s.pad);
+    if (s.has_text_color) lv_style_set_text_color(st, color_from_u32(s.text_color));
+    if (s.has_recolor)    lv_style_set_image_recolor(st, color_from_u32(s.recolor));
+    if (s.has_recolor_opa)
+        lv_style_set_image_recolor_opa(st, (lv_opa_t)(s.recolor_opa & 0xFF));
+    if (s.has_transform_width) lv_style_set_transform_width(st, s.transform_width);
+    if (s.has_transition) {
+        lv_style_transition_dsc_t *tr = build_lv_transition(s.transition, ws);
+        if (tr) lv_style_set_transition(st, tr);
+    }
     return st;
 }
 
@@ -412,14 +553,17 @@ void apply_styles(lv_obj_t *obj, const touchy_Widget &w)
     if (!ws) return;
     for (pb_size_t i = 0; i < w.styles_count; ++i) {
         const touchy_Style &s = w.styles[i];
-        lv_style_t *st = build_lv_style(s);
+        lv_style_t *st = build_lv_style(s, ws);
         if (!st) continue;
         ws->styles.push_back(st);
         ESP_LOGI(TAG, "  [%u] for_state=0x%08lx bg=0x%06lx text=0x%06lx "
-                      "radius=%ld border=%ld pad=%ld",
+                      "radius=%ld border=%ld pad=%ld recolor=0x%06lx opa=%lu "
+                      "tw=%ld transition=%d",
                  (unsigned)i, (unsigned long)s.for_state,
                  (unsigned long)s.bg_color, (unsigned long)s.text_color,
-                 (long)s.radius, (long)s.border_w, (long)s.pad);
+                 (long)s.radius, (long)s.border_w, (long)s.pad,
+                 (unsigned long)s.recolor, (unsigned long)s.recolor_opa,
+                 (long)s.transform_width, (int)s.has_transition);
         lv_obj_add_style(obj, st, (lv_style_selector_t)s.for_state);
     }
     if (ws->styles.empty()) {
