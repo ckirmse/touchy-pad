@@ -203,6 +203,11 @@ void TrackpadWidget::_process()
     uint32_t now = millis();
 
     // ── New fingers touching down ────────────────────────────────────
+    // If `count` grew, re-anchor the centroid sums using ALL currently
+    // reported pts at their CURRENT positions (not stale `_fingers[].start`
+    // — those may be from a different slot ordering). This is the
+    // slot-order-invariant baseline used by the tap-vs-drag check.
+    uint8_t prev_max = _session_max_fingers;
     int new_start = (_prev_count < MAX_FINGERS) ? _prev_count : MAX_FINGERS;
     for (int i = new_start; i < count; i++) {
         _fingers[i].active   = true;
@@ -216,8 +221,10 @@ void TrackpadWidget::_process()
         // Spawn the touch ripple, tracked in `_finger_ripples[i]` so
         // subsequent finger movements can drag its center along and
         // count-changes can recolor every still-running ripple in
-        // unison (handled below).
-        if (_has_touch_ripple) {
+        // unison (handled below). Suppressed while a scrollbar handle
+        // is showing: during two-finger scroll the user only wants the
+        // scrollbar visual, not finger ripples competing with it.
+        if (_has_touch_ripple && !_scrollbar) {
             int16_t lx = static_cast<int16_t>(pts[i].x) -
                          static_cast<int16_t>(lv_obj_get_x(_container));
             int16_t ly = static_cast<int16_t>(pts[i].y) -
@@ -226,6 +233,16 @@ void TrackpadWidget::_process()
                           _color_for_count(count), &_finger_ripples[i],
                           /*is_touch=*/true);
         }
+    }
+    if (_session_max_fingers > prev_max) {
+        int32_t sx = 0, sy = 0;
+        for (int i = 0; i < count; i++) {
+            sx += pts[i].x;
+            sy += pts[i].y;
+        }
+        _centroid_start_sum_x = _centroid_last_sum_x = sx;
+        _centroid_start_sum_y = _centroid_last_sum_y = sy;
+        _centroid_n           = count;
     }
 
     // ── Recolor all live touch ripples when the finger count changes ─
@@ -261,13 +278,28 @@ void TrackpadWidget::_process()
     }
 
     // ── Single-finger drag (mouse move) ──────────────────────────────
-    if (count == 1 && _fingers[0].active) {
+    // Gated on `count == _session_max_fingers` so that during a
+    // multi-finger session, once any finger lifts (count drops to 1
+    // while max is 2/3), we do NOT enter this branch: the GT911
+    // reuses slot 0 for the remaining physical finger and pts[0]
+    // would now refer to a different finger than `_fingers[0]` was
+    // tracking. Updating `_fingers[0].last_x/y` with the survivor's
+    // coordinates contaminates the tap-vs-drag movement check at
+    // all-fingers-lifted time, causing two-finger taps to fail to be
+    // recognised as right-clicks (and just silently disappear).
+    if (count == 1 && _fingers[0].active && _session_max_fingers == 1) {
         int16_t dx = static_cast<int16_t>(pts[0].x) - _fingers[0].last_x;
         int16_t dy = static_cast<int16_t>(pts[0].y) - _fingers[0].last_y;
 
-        int16_t total_move = std::abs(static_cast<int>(pts[0].x) - _fingers[0].start_x) +
-                             std::abs(static_cast<int>(pts[0].y) - _fingers[0].start_y);
-        if (total_move > TAP_MAX_MOVE) _fingers[0].dragging = true;
+        // Centroid (= single finger here) — refresh and re-check drag.
+        _centroid_last_sum_x = pts[0].x;
+        _centroid_last_sum_y = pts[0].y;
+        int32_t centroid_move =
+            std::abs(_centroid_last_sum_x - _centroid_start_sum_x) +
+            std::abs(_centroid_last_sum_y - _centroid_start_sum_y);
+        if (centroid_move > static_cast<int32_t>(TAP_MAX_MOVE) * _centroid_n) {
+            _fingers[0].dragging = true;
+        }
 
         if (_fingers[0].dragging && (dx != 0 || dy != 0)) {
             auto clamp = [](float v) -> int8_t {
@@ -289,7 +321,11 @@ void TrackpadWidget::_process()
     // Lock to the dominant axis once movement crosses TAP_MAX_MOVE; that
     // also flags the fingers as `dragging`, suppressing the right-click
     // that a stationary 2-finger tap would otherwise produce on release.
-    if (count == 2 && _fingers[0].active && _fingers[1].active) {
+    // Also gated on `count == _session_max_fingers`: if a third finger
+    // briefly grazed the pad and lifted, we keep the session at max=3
+    // and stop processing scroll until everyone lifts.
+    if (count == 2 && _fingers[0].active && _fingers[1].active
+            && _session_max_fingers == 2) {
         float dx0 = static_cast<float>(pts[0].x) - _fingers[0].last_x;
         float dy0 = static_cast<float>(pts[0].y) - _fingers[0].last_y;
         float dx1 = static_cast<float>(pts[1].x) - _fingers[1].last_x;
@@ -297,9 +333,17 @@ void TrackpadWidget::_process()
         float dx = (dx0 + dx1) * 0.5f;
         float dy = (dy0 + dy1) * 0.5f;
 
-        int16_t total_move = std::abs(static_cast<int>(pts[0].x) - _fingers[0].start_x) +
-                             std::abs(static_cast<int>(pts[0].y) - _fingers[0].start_y);
-        if (total_move > TAP_MAX_MOVE) {
+        // Refresh the slot-order-invariant centroid sum for this frame
+        // (only when at peak count — see comment on `_centroid_*`).
+        _centroid_last_sum_x = static_cast<int32_t>(pts[0].x) + pts[1].x;
+        _centroid_last_sum_y = static_cast<int32_t>(pts[0].y) + pts[1].y;
+        // Threshold scales with `_centroid_n` because we are comparing
+        // sums (not averages) of N fingers; per-finger budget stays at
+        // TAP_MAX_MOVE.
+        int32_t cdx = _centroid_last_sum_x - _centroid_start_sum_x;
+        int32_t cdy = _centroid_last_sum_y - _centroid_start_sum_y;
+        int32_t centroid_move = std::abs(cdx) + std::abs(cdy);
+        if (centroid_move > static_cast<int32_t>(TAP_MAX_MOVE) * _centroid_n) {
             _fingers[0].dragging = true;
             _fingers[1].dragging = true;
             _scrolling = true;
@@ -307,8 +351,10 @@ void TrackpadWidget::_process()
 
         if (_scrolling) {
             if (!_scroll_axis_locked) {
-                int adx = std::abs(static_cast<int>(pts[0].x) - _fingers[0].start_x);
-                int ady = std::abs(static_cast<int>(pts[0].y) - _fingers[0].start_y);
+                // Use centroid travel for axis selection so a swapped
+                // slot index can't flip the chosen axis.
+                int adx = std::abs(static_cast<int>(cdx));
+                int ady = std::abs(static_cast<int>(cdy));
                 _scroll_axis_h      = adx > ady;
                 _scroll_axis_locked = true;
                 // First frame after axis lock-in: spawn the optional
@@ -318,6 +364,15 @@ void TrackpadWidget::_process()
                 // horizontal bar on the bottom edge).
                 if (_has_scrollbar && !_scrollbar) {
                     _spawn_scrollbar(_scroll_axis_h);
+                    // The scrollbar is now the primary visual; fade
+                    // out any active finger ripples so they don't
+                    // compete with it during the scroll.
+                    for (int i = 0; i < MAX_FINGERS; i++) {
+                        if (_finger_ripples[i]) {
+                            _fade_out_ripple(_finger_ripples[i]);
+                            _finger_ripples[i] = nullptr;
+                        }
+                    }
                 }
             }
             if (_scroll_axis_h) {
@@ -370,14 +425,24 @@ void TrackpadWidget::_process()
 
     // ── All fingers lifted → check for tap ───────────────────────────
     if (_prev_count > 0 && count == 0) {
-        bool is_tap = true;
-        for (int i = 0; i < _session_max_fingers && i < MAX_FINGERS; i++) {
-            int16_t moved = std::abs(_fingers[i].last_x - _fingers[i].start_x) +
-                            std::abs(_fingers[i].last_y - _fingers[i].start_y);
-            uint32_t held = now - _fingers[i].start_ms;
-            if (moved > TAP_MAX_MOVE || held > _tap_max_ms) {
-                is_tap = false;
-                break;
+        // Slot-order-invariant tap check: compare centroid sum at last
+        // peak-count frame to centroid sum at the moment peak count
+        // was first established. The threshold scales with the number
+        // of fingers contributing to the sums (per-finger budget =
+        // TAP_MAX_MOVE).
+        //
+        // Hold-time still uses per-finger `start_ms` (slot identity
+        // doesn't matter for time): if any finger was down too long
+        // it isn't a tap.
+        int32_t centroid_move =
+            std::abs(_centroid_last_sum_x - _centroid_start_sum_x) +
+            std::abs(_centroid_last_sum_y - _centroid_start_sum_y);
+        bool is_tap = _centroid_n > 0 &&
+            centroid_move <= static_cast<int32_t>(TAP_MAX_MOVE) * _centroid_n;
+        if (is_tap) {
+            for (int i = 0; i < _session_max_fingers && i < MAX_FINGERS; i++) {
+                uint32_t held = now - _fingers[i].start_ms;
+                if (held > _tap_max_ms) { is_tap = false; break; }
             }
         }
         if (is_tap) {
@@ -408,6 +473,9 @@ void TrackpadWidget::_process()
         _scroll_axis_h       = false;
         _scroll_accum_v      = 0.0f;
         _scroll_accum_h      = 0.0f;
+        _centroid_n          = 0;
+        _centroid_start_sum_x = _centroid_start_sum_y = 0;
+        _centroid_last_sum_x  = _centroid_last_sum_y  = 0;
         for (int i = 0; i < MAX_FINGERS; i++) _fingers[i] = FingerState{};
         // Take down the scrollbar (if it was up). Animation is a quick
         // fade-out; the bar deletes itself when the opacity anim ends.

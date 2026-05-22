@@ -78,6 +78,26 @@ private:
     uint8_t     _prev_count          = 0;
     uint8_t     _session_max_fingers = 0;
 
+    // Slot-order-invariant centroid tracking. The GT911 does not
+    // guarantee that `pts[i]` keeps a stable identity across frames —
+    // notably, when a 2nd finger lands the controller may sort the
+    // two reported points by position rather than landing order, so
+    // `pts[0]` can flip between the older and newer finger. Per-slot
+    // tap-vs-drag detection using `_fingers[i].start_x/y` then sees
+    // huge spurious deltas (≈ inter-finger distance) and triggers
+    // drag/scroll on a stationary 2-finger tap.
+    //
+    // We additionally track the SUM of all current pts (a centroid up
+    // to a constant divisor of `_centroid_n`) re-anchored each time
+    // the peak finger count grows. Centroid is invariant to any
+    // reordering of `pts[]`, so a stationary multi-finger tap shows a
+    // small `|last − start|` regardless of slot reshuffling.
+    int32_t _centroid_start_sum_x = 0;
+    int32_t _centroid_start_sum_y = 0;
+    int32_t _centroid_last_sum_x  = 0;
+    int32_t _centroid_last_sum_y  = 0;
+    uint8_t _centroid_n           = 0;
+
     // Two-finger scroll state (reset on all-fingers-up).
     bool  _scrolling          = false;
     bool  _scroll_axis_locked = false;
