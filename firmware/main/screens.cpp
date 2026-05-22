@@ -208,11 +208,25 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
     if (S.has_top)    rebuild_persistent(lv_layer_top(),    S.top,    "top");
     if (S.has_sys)    rebuild_persistent(lv_layer_sys(),    S.sys,    "sys");
 
+    // Remember the previously-active screen so we can free it after the
+    // swap. `lv_screen_load()` only changes which screen LVGL renders;
+    // it does NOT delete the old one, so without this every ScreenLoad
+    // leaks the entire previous LVGL subtree (every Style, every
+    // animation, every widget's user-data — including the C++
+    // `TrackpadWidget` whose `LV_EVENT_DELETE` callback would never
+    // fire). Three or four switches were enough to exhaust the heap
+    // and reboot the device.
+    lv_obj_t *old_scr = lv_screen_active();
     lv_screen_load(scr);
-    // Replace the previously-active decoded Screen *after* loading the
-    // new LVGL screen, so its widgets' delete-callbacks (which still
-    // dereference the old action arrays) fire before the old struct is
-    // freed by the unique_ptr reset.
+
+    // Delete the old LVGL subtree BEFORE releasing the old decoded
+    // proto: widget delete-callbacks (e.g. ActionMacro / ActionSwitch
+    // bindings, the trackpad's deleter) still index into the previous
+    // `g_active_screen`'s heap-allocated action arrays.
+    if (old_scr && old_scr != scr) {
+        lv_obj_delete(old_scr);
+    }
+
     g_active_screen = std::move(holder);
     g_current_name = log_name ? log_name : "";
     lvgl_port_unlock();

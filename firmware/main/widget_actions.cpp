@@ -62,14 +62,43 @@ void widget_event_cb(lv_event_t *e)
                 const touchy_ActionSwitchScreen &ss = dev.kind.switch_screen;
                 // ActionSwitchScreen.Behavior values match the int code
                 // expected by screens_switch() 1:1.
-                bool ok = screens_switch((int)ss.behavior,
-                                         ss.name[0] ? ss.name : nullptr);
-                if (!ok) {
-                    ESP_LOGW(TAG,
-                             "switch_screen failed (widget '%s' behavior=%d "
-                             "name='%s')",
-                             slot->widget_id, (int)ss.behavior, ss.name);
+                //
+                // CRITICAL: defer to `lv_async_call`. We're being called
+                // from the middle of LVGL's event dispatch on a widget
+                // whose owning screen would be torn down by
+                // `screens_switch()` (it calls `lv_obj_delete(old_scr)`
+                // on the current screen). Deleting LVGL objects while
+                // their event chain is still being walked is a
+                // use-after-free — LVGL's standard remedy is to defer
+                // such "destroy myself" actions via `lv_async_call`,
+                // which runs the callback at the start of the next
+                // `lv_timer_handler` tick, after every in-flight event
+                // has fully unwound.
+                struct SwitchReq {
+                    int  behavior;
+                    char name[32];
+                };
+                auto *req = new (std::nothrow) SwitchReq{};
+                if (!req) {
+                    ESP_LOGE(TAG, "OOM scheduling switch_screen");
+                    break;
                 }
+                req->behavior = (int)ss.behavior;
+                snprintf(req->name, sizeof(req->name), "%s", ss.name);
+                lv_async_call(
+                    [](void *p) {
+                        auto *r = static_cast<SwitchReq *>(p);
+                        bool ok = screens_switch(
+                            r->behavior, r->name[0] ? r->name : nullptr);
+                        if (!ok) {
+                            ESP_LOGW(TAG,
+                                     "switch_screen failed "
+                                     "(behavior=%d name='%s')",
+                                     r->behavior, r->name);
+                        }
+                        delete r;
+                    },
+                    req);
                 break;
             }
             default:
