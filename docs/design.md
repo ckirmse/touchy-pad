@@ -606,11 +606,30 @@ Improved the trackpad animations.
 Tap ripples retain the legacy grow + fade-out + auto-delete behavior;
 only touch ripples were re-orchestrated.
 
-## Stage 25: Allow host PC to configure the button matrixes/screen layout
+## Stage 30: device simulator
+Big task - please be careful.
+I'd like you to make a 'simple' simulator in python of the device side code.  It doesn't have to be exactly right or render exactly the same as the lvgl/c++ implementation.  Mainly I want a tool so I can do app development without needing my device hardware with me.
+
+Requirements:
+* has to support rendering the screens in a smallish (480x300 by default) window
+* has to be 100% python (though if you use python libs that have native bits thats fine)
+* Provides a bidirectional stream interface analogous to what the USB device provides for the host-api.
+* Provide a new class that is a subclass of Transport (SimDeviceTransport), so it can be provided to the TouchyClient constructor (instead of the USB implementation).  if an instance of that class is created you'll need to open the gui window and get ready to start displaying screens.  Don't start the gui until that happens
+* Add a --sim option to the cli that configures the touchy device enumeration so it finds this 'sim device with a fake serial number' and eventually creates a SimDeviceTransport
+* definitely don't bother with/not required: any of the USB HID emulation stuff.  Exactly matching lvgl layouts, no need to do any animations or transitions.
+* you don't need to copy the fancy preferences behavior of the real device or implement 'backlight' operations etc...  I really just want a basic window to see and use as if it was a screen.
+* you do need to support the change screen device actions
+* Since this sim device will be receving protobufs originally destined for the lvgl hardware solution it will need to keep a filesystem directory to store files
+
+Ideas/recommendations:
+* Use a popular python library for the gui rendering.  CustomTkinter?  something better? I'm new at this.
+* if it makes things easier you could change Transport to have a bool property "needs_image_conversion".  The real USB based transport would set that true and the python API code would see that and know that it needs to convert image formats to the 'native' lvgl image representation before sending (current behavior).  But the sim device would return false for that flag, allowing the simulator to be easier because it could use pngs instead of raws etc...
+
+## Stage 50: Allow host PC to configure the button matrixes/screen layout
 * Use protocol buffers (nanopb?) to communicate between the host/device (over a custom USB characteristic)
 * Provide a simple python library to allow host applications to easily configure the button matrixes/screen layout
 * Provide a simple python CLI tool to allow users to easily configure the buttons via that library
 
-## Stage 30: development environment improvements
+## Stage 80: development environment improvements
 * Support running a sim on the linux host?
 * Use https://lvgl.io/docs/open/debugging/gdb_plugin to faciltiate debugging
