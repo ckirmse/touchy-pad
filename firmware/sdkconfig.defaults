@@ -17,6 +17,22 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_FREERTOS_HZ=1000
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
+# Stage 24.2 — `Screen.active` is a recursive `Widget` (with nested
+# `Layout.children`), and nanopb's `pb_release` walks the tree
+# recursively at boot to free the version-probe decode of each
+# host-uploaded screen. The default 3584-byte main task stack overflows
+# during this release for non-trivial screens (observed: a ~415-byte
+# encoded screen with one grid + a couple of widgets, on the second file
+# in the boot scan, smashes the stack and the device crashes during
+# board_init right after screens_init returns). 16 KB gives plenty of
+# headroom for arbitrary user-provisioned screens.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+
+# Trip a clean panic + backtrace if the main (or any) task ever does
+# overflow again, instead of silently corrupting whatever lives below
+# the stack.
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+
 # ----- Console / UART -----
 # Primary console: UART0.  This works at boot, before USB enumerates, and
 # when no USB host is connected.  The USB-Serial/JTAG controller is disabled
