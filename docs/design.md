@@ -625,10 +625,34 @@ Ideas/recommendations:
 * Use a popular python library for the gui rendering.  CustomTkinter?  something better? I'm new at this.
 * if it makes things easier you could change Transport to have a bool property "needs_image_conversion".  The real USB based transport would set that true and the python API code would see that and know that it needs to convert image formats to the 'native' lvgl image representation before sending (current behavior).  But the sim device would return false for that flag, allowing the simulator to be easier because it could use pngs instead of raws etc...
 
-## Stage 50: Allow host PC to configure the button matrixes/screen layout
-* Use protocol buffers (nanopb?) to communicate between the host/device (over a custom USB characteristic)
-* Provide a simple python library to allow host applications to easily configure the button matrixes/screen layout
-* Provide a simple python CLI tool to allow users to easily configure the buttons via that library
+# Stage 50: Emulate the StreamDeck API
+
+So one end goal of this project is that I want the [StreamController](https://github.com/StreamController/StreamController) app to be able to use these cheap $15 devices as if they were SteamDeck like devices.
+
+That app uses [this library](https://github.com/StreamController/streamcontroller-python-elgato-streamdeck) (pypi package [here](https://pypi.org/project/streamcontroller-streamdeck/)).
+
+The API described by that package is fairly [simple](https://python-elgato-streamdeck.readthedocs.io/en/stable/) but a bit underspecified, so I'm worried if I just ask my AI to start coding up something based on it I might get garbage.  So!  I propose substages
+
+## Stage 50.1 Reverse engineer a real StreamDeck device using the existing library
+
+Make a new mini project in a new "reverse-engineering" sub directory.  It should contain a minimal poetry build based on the examples https://python-elgato-streamdeck.readthedocs.io/en/stable/examples/deckinfo.html and https://python-elgato-streamdeck.readthedocs.io/en/stable/examples/basic.html.  
+
+This project should do a whole series of operations as documented in that API, but focus on outputting logging data that you will later refer to when implementing the version for our device.  In particular our device will be quite similar to this: https://python-elgato-streamdeck.readthedocs.io/en/stable/modules/devices.html#module-StreamDeck.Devices.StreamDeckOriginal
+
+Focus on logging things you are curious about given that fairly underspecified documentation.
+
+When you are ready to run this tool, tell me and I'll run it for you while talking to my test StreamDeck device.
+
+Have this tool emit the logs into a datafile you can refer to later when planning stage 50.2.
+
+## Stage 50.2 Implement our Sim StreamDeck API
+
+* Put the code for this simulator/wrapper in app/src/touchy_pad/touchymdeck.
+* The main class in this module will be subclassing an ABC called [StreamDeck.Devices.StreamDeck.StreamDeck](https://github.com/StreamController/streamcontroller-python-elgato-streamdeck/blob/master/src/StreamDeck/Devices/StreamDeck.py).  Call our subclass TouchyDeck.
+* In that subclass you'll USE the public touchypad.api to implement most of those methods.  At the very least, I want you to support sending images to the device for each of the 'buttons' making a button layout and passing presses back as if it was a StreamDeck.
+* You'll need to come up with a scheme for mapping hostids (for press events) to the proper asyncio invocations as required by the StreamDeck API
+* Monkey patch the DeviceManager().enumerate() method so it **also** includes any TouchyDecks connected to our machine.  Ideally you'll be able to install that monkey patch automatically on any project that has a poetry dependency on our touchy-pad package.
+* Change the original reverse engineering tool made in 50.1 so that it uses our library and therefore you can modify that tool so it also dumps TouchyDecks the exact same way it dumped the original StreamDeck usage.
 
 ## Stage 80: development environment improvements
 * Support running a sim on the linux host?
