@@ -85,5 +85,12 @@
 		"ghcr.io/guiyomh/features/just:0": {}
 	},
 	// "postAttachCommand": "sudo service udev restart",
-	"initializeCommand": "sudo chown -R 1000 /dev/bus/usb"
+	"initializeCommand": "sudo chown -R 1000 /dev/bus/usb",
+	// X11 forwarding: use the host display directly via the mounted /tmp/.X11-unix sockets.
+	// XAUTHORITY points to the mounted host auth file (kept up to date by fix-xauth.sh on the host).
+	// DISPLAY :0 is the host display; VSCode may override with its own tunnel but Qt needs the real one.
+	"remoteEnv": {
+		"DISPLAY": ":0",
+		"XAUTHORITY": "/tmp/.docker.xauth"
+	}
 }

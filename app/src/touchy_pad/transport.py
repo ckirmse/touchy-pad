@@ -51,6 +51,17 @@ class Transport(ABC):
     (length prefix, endpoint selection) is handled here.
     """
 
+    #: True when the transport speaks to real device firmware that only
+    #: understands raw LVGL ``.bin`` image assets. The host-side image
+    #: pipeline in :mod:`touchy_pad.api.images` converts PNG/JPG/etc.
+    #: to that format before upload when this flag is set.
+    #:
+    #: Subclasses targeting a Python-side consumer (e.g. the Stage 30
+    #: device simulator, which decodes images with Pillow) should
+    #: override this to ``False`` so source-format bytes pass through
+    #: untouched.
+    needs_image_conversion: bool = True
+
     @abstractmethod
     def send_command(self, payload: bytes) -> None: ...
 

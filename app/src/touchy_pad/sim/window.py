@@ -1,0 +1,271 @@
+"""PySide6 main window for the Touchy-Pad device simulator.
+
+:class:`SimWindow` renders the active screen of a :class:`SimDevice`
+inside a fixed-size canvas alongside a small log panel. Screen
+switches (from on-screen ``Prev``/``Next`` buttons, ``screen load``
+RPCs, etc.) trigger a re-render via a cross-thread signal.
+
+Click handling is deferred to :mod:`touchy_pad.sim.window` rather than
+sitting inside :mod:`touchy_pad.sim.widgets` so the renderer stays
+pure: the window walks each clicked widget's ``on_click`` actions and
+either dispatches them to the device (screen switches), echoes them to
+the log panel (macros), or feeds them back into the host-event queue
+(host actions).
+
+Top / sys / bottom LVGL layers are rendered as transparent overlays
+above the active screen so the header chrome from
+:func:`touchy_pad.api.screens.build_demo_screens` shows up correctly.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from PySide6 import QtCore, QtWidgets
+
+from .. import _proto
+from .device import SimDevice
+from .widgets import build_widget
+
+_log = logging.getLogger("touchy_pad.sim")
+
+
+class _Canvas(QtWidgets.QFrame):
+    """Fixed-size frame that hosts the active+overlay screen widgets.
+
+    Children are placed at full canvas size via ``setGeometry`` so
+    layers stack correctly; the canvas itself paints a dark background
+    so the device's "screen area" is visually distinct from window chrome.
+    """
+
+    def __init__(self, size: tuple[int, int], parent: QtWidgets.QWidget) -> None:
+        super().__init__(parent)
+        self._w, self._h = size
+        self.setFixedSize(self._w, self._h)
+        self.setStyleSheet("QFrame { background: #101010; }")
+        self.setFrameShape(QtWidgets.QFrame.Box)
+
+    def add_layer(self, widget: QtWidgets.QWidget) -> None:
+        widget.setParent(self)
+        widget.setGeometry(0, 0, self._w, self._h)
+        widget.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+        widget.show()
+        widget.raise_()
+
+    def clear_layers(self) -> None:
+        for child in self.findChildren(QtWidgets.QWidget, options=QtCore.Qt.FindDirectChildrenOnly):
+            child.setParent(None)
+            child.deleteLater()
+
+
+class SimWindow(QtWidgets.QMainWindow):
+    """Main window: device-screen canvas + side log panel."""
+
+    # Cross-thread relay for SimDevice → window updates. SimDevice's
+    # callback fires on whatever thread runs the command worker; this
+    # signal hops back to the Qt main thread before re-rendering.
+    _screen_changed = QtCore.Signal(object)
+
+    def __init__(
+        self,
+        device: SimDevice,
+        *,
+        size: tuple[int, int] = (480, 300),
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._device = device
+        self._size = size
+
+        self.setWindowTitle("touchy-pad sim")
+        self.resize(size[0] + 260, max(size[1] + 40, 360))
+
+        central = QtWidgets.QWidget(self)
+        self.setCentralWidget(central)
+        outer = QtWidgets.QHBoxLayout(central)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(8)
+
+        # ── screen canvas ───────────────────────────────────────────
+        self._canvas = _Canvas(size, central)
+        outer.addWidget(self._canvas, 0, QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
+
+        # ── log panel ──────────────────────────────────────────────
+        right = QtWidgets.QVBoxLayout()
+        right.setSpacing(4)
+        right.addWidget(QtWidgets.QLabel("Events / log"))
+        self._log_view = QtWidgets.QPlainTextEdit()
+        self._log_view.setReadOnly(True)
+        self._log_view.setMaximumBlockCount(500)
+        right.addWidget(self._log_view, 1)
+        outer.addLayout(right, 1)
+
+        # Wire device → window. The callback fires on the sim worker
+        # thread, so we hop through a Qt signal (QueuedConnection) to
+        # land on the GUI thread before touching widgets.
+        self._screen_changed.connect(self._render_screen, QtCore.Qt.QueuedConnection)
+        device.set_screen_change_callback(lambda scr: self._screen_changed.emit(scr))
+
+        self._render_screen(device.active_screen)
+
+    # -- log panel ---------------------------------------------------------
+
+    def log(self, msg: str) -> None:
+        """Append a single timestamped line to the event/log panel."""
+        ts = QtCore.QTime.currentTime().toString("HH:mm:ss.zzz")
+        self._log_view.appendPlainText(f"[{ts}] {msg}")
+
+    # -- screen rendering --------------------------------------------------
+
+    def _render_screen(self, screen: _proto.Screen | None) -> None:
+        self._canvas.clear_layers()
+        if screen is None:
+            self.setWindowTitle("touchy-pad sim — (no screen)")
+            return
+        self.setWindowTitle(f"touchy-pad sim — {screen.name or '(unnamed)'}")
+        # Bottom → active → top → sys (LVGL z-order).
+        for attr in ("bottom", "active", "top", "sys"):
+            if attr == "active":
+                w = screen.active
+            else:
+                if not screen.HasField(attr):
+                    continue
+                w = getattr(screen, attr)
+            if w.WhichOneof("kind") is None:
+                continue
+            try:
+                qw = build_widget(w, self._device.fs, on_event=self._on_widget_event)
+            except Exception:  # noqa: BLE001 — broken authoring shouldn't kill the window
+                _log.exception("sim: failed to render layer %r", attr)
+                continue
+            self._canvas.add_layer(qw)
+
+    # -- click / change dispatch ------------------------------------------
+
+    def _on_widget_event(self, w: _proto.Widget, kind: str, state: dict) -> None:
+        """Walk a widget's action list and dispatch each entry.
+
+        Mirrors what the firmware's event handler does in
+        ``firmware/main/widget_actions.cpp``:
+
+        * :class:`ActionSwitchScreen` → calls back into
+          :class:`SimDevice` to load the named (or next/previous) screen;
+        * :class:`ActionMacro` → echoed to the log panel; the sim does
+          not emulate HID;
+        * :class:`ActionHost` → pushed onto the device event queue with
+          any current widget state so a connected client sees the same
+          ``LvEvent`` it would on real hardware.
+        """
+        actions = self._actions_for(w, kind)
+        widget_id = w.id or ""
+        if not actions:
+            self.log(f"event: {widget_id or '(no id)'} ({kind}) — no actions")
+            return
+        for action in actions:
+            self._dispatch_action(action, widget_id, state)
+
+    def _actions_for(self, w: _proto.Widget, kind: str) -> list:
+        wk = w.WhichOneof("kind")
+        if kind == "click":
+            if wk == "button":
+                return list(w.button.on_click)
+            if wk == "image_button":
+                return list(w.image_button.on_click)
+        elif kind == "change":
+            if wk == "slider":
+                return list(w.slider.on_change)
+            if wk == "checkbox":
+                return list(w.checkbox.on_change)
+            if wk == "toggle":
+                return list(w.toggle.on_change)
+        return []
+
+    def _dispatch_action(self, action: _proto.Action, widget_id: str, state: dict) -> None:
+        kind = action.WhichOneof("kind")
+        if kind == "host":
+            host_code = int(action.host.code)
+            self._device.push_host_event(host_code, widget_id, **state)
+            extras = " ".join(f"{k}={v}" for k, v in state.items())
+            self.log(
+                f"host: code=0x{host_code:x} widget={widget_id!r}"
+                + (f" {extras}" if extras else "")
+            )
+        elif kind == "macro":
+            self.log(f"macro: widget={widget_id!r} steps={len(action.macro.steps)} (not emulated)")
+        elif kind == "device":
+            self._dispatch_device(action.device, widget_id)
+        else:
+            self.log(f"action: widget={widget_id!r} (unknown kind {kind!r})")
+
+    def _dispatch_device(self, action: _proto.ActionDevice, widget_id: str) -> None:
+        sub = action.WhichOneof("kind")
+        if sub != "switch_screen":
+            self.log(f"device: widget={widget_id!r} (unsupported {sub!r})")
+            return
+        sw = action.switch_screen
+        if sw.behavior == _proto.ActionSwitchScreen.BY_NAME:
+            target = sw.name
+        else:
+            names = self._device.list_screens()
+            current = self._device.active_screen_name
+            if not names:
+                self.log(f"switch: widget={widget_id!r} — no screens registered")
+                return
+            try:
+                idx = names.index(current) if current in names else 0
+            except ValueError:
+                idx = 0
+            step = 1 if sw.behavior == _proto.ActionSwitchScreen.NEXT else -1
+            target = names[(idx + step) % len(names)]
+        try:
+            # `_do_screen_load` updates the active screen and fires the
+            # callback that we wired in __init__ — the renderer reacts
+            # to that, so we don't need to call _render_screen here.
+            self._device._do_screen_load(target)
+            self.log(f"switch: → {target!r}")
+        except FileNotFoundError:
+            self.log(f"switch: target {target!r} not found")
+
+
+# ---------------------------------------------------------------------------
+# Convenience launcher
+# ---------------------------------------------------------------------------
+
+
+def run_sim_window(
+    *,
+    fs_root=None,
+    serial: str = "SIM0000",
+    size: tuple[int, int] = (480, 300),
+) -> int:
+    """Open a sim window backed by a fresh :class:`SimDevice` and run Qt.
+
+    Returns the ``QApplication`` exit code. Blocks until the window is
+    closed. Intended as the body of the ``touchy sim`` CLI subcommand;
+    application code that needs more control should construct
+    :class:`SimWindow` directly.
+    """
+    from .device import SimDevice
+    from .fs import SimFs, default_cache_root
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    fs = SimFs(fs_root or default_cache_root(), serial)
+    device = SimDevice(fs)
+    window = SimWindow(device, size=size)
+    window.show()
+
+    # Make Ctrl+C in the terminal cleanly close the Qt event loop
+    # instead of being swallowed (the C handler runs but Qt is parked
+    # in its native loop). A no-op periodic timer keeps Python ticking
+    # so the SIGINT handler gets a chance to run.
+    import signal
+
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    _tick = QtCore.QTimer()
+    _tick.start(200)
+    _tick.timeout.connect(lambda: None)
+
+    return app.exec()
+
+
+__all__ = ["SimWindow", "run_sim_window"]

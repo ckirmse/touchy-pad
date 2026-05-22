@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: System :: Hardware :: Hardware Drivers",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     # Wire protocol bindings — generated from /proto/touchy.proto and committed
     # under src/touchy_pad/_proto/.
@@ -33,6 +33,18 @@ dependencies = [
     # transparently converts uploaded images to LVGL's native `.bin` format
     # so the firmware only needs its always-on built-in image decoder.
     "pillow>=12.2.0,<13",
+]
+
+[project.optional-dependencies]
+# Optional Python device simulator with a PySide6 (Qt6) GUI window.
+# Install with: pip install 'touchy-pad[sim]'
+#
+# Used by `touchy sim` to render screens locally without USB hardware,
+# typically while iterating on screen layouts. Headless sim runs
+# (touchy --sim-headless) do NOT need this extra.
+sim = [
+    "PySide6>=6.6,<7",
+    "platformdirs>=4",
 ]
 
 [project.urls]
@@ -57,7 +69,7 @@ include = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = ">=3.11,<3.15"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8,<10"

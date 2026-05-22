@@ -106,7 +106,7 @@ class TouchyClient:
             data = bytes(data)
         from .api.lvgl_image import looks_like_supported_image, rewrite_to_bin_path, to_lvgl_bin
 
-        if looks_like_supported_image(data):
+        if looks_like_supported_image(data) and self._t.needs_image_conversion:
             data = to_lvgl_bin(data)
             # LVGL's bin decoder selects itself by extension, so the
             # on-device file has to be named *.bin even though the
