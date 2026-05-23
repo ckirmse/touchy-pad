@@ -100,10 +100,23 @@ jobs:
           idf.py -C firmware -DBOARD="${BOARD}" reconfigure
           just firmware-build
 
-      - name: Stage firmware binary
+      - name: Merge firmware into a single flashable binary
         env:
           BOARD: ${{ matrix.board }}
-        run: cp firmware/build/touchy_pad_v2.bin "${BOARD}.bin"
+        run: |
+          source "$HOME/esp/esp-idf/export.sh"
+          # Drive esptool directly so the merge step works even when the
+          # IDF venv has a pending version drift. flash_args already has
+          # bootloader/partition-table/app addr+file pairs in build/.
+          cd firmware/build
+          # Flatten flash_args (flags line + addr/file lines) into argv.
+          mapfile -t flash_args < flash_args
+          args=()
+          for line in "${flash_args[@]}"; do
+            read -ra words <<< "$line"
+            args+=("${words[@]}")
+          done
+          esptool --chip esp32s3 merge-bin -o "${GITHUB_WORKSPACE}/${BOARD}.bin" "${args[@]}"
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v7

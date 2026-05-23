@@ -14,7 +14,7 @@ touchy [--version] [--help] <command> [args…]
 
 | Command | Description |
 |---------|-------------|
-| `touchy version` | Print device protocol & firmware version. |
+| `touchy board-info` | Print board name, protocol version, and firmware version. |
 | `touchy events` | Stream `ActionHost` events from the device until Ctrl-C. |
 | `touchy file-reset` | Delete every file the host has uploaded to the device. |
 | `touchy file-save PATH FILE` | Upload FILE to the device at virtual path PATH. |

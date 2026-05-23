@@ -33,6 +33,12 @@ dependencies = [
     # transparently converts uploaded images to LVGL's native `.bin` format
     # so the firmware only needs its always-on built-in image decoder.
     "pillow>=12.2.0,<13",
+    # `touchy update` flashes firmware over USB via esptool's Python API,
+    # downloads release assets over HTTPS, and renders progress/status
+    # output with rich.
+    "esptool>=4.8,<6",
+    "requests>=2.32,<3",
+    "rich>=13.7,<15",
 ]
 
 [project.optional-dependencies]

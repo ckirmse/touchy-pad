@@ -24,7 +24,7 @@ A starter rule is shipped at [`../bin/99-touchy-pad.rules`](../bin/99-touchy-pad
 
 ```sh
 touchy --help              # list subcommands
-touchy version             # query device firmware/protocol version
+touchy board-info          # query device board, firmware, protocol version
 touchy screen-wake         # turn the backlight on
 touchy events              # live-tail events from the device
 ```

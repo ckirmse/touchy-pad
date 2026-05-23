@@ -244,6 +244,56 @@ flash: firmware-build
         --before default-reset --after hard-reset \
         --chip esp32s3 write-flash "${args[@]}"
 
+# Produce a single merged firmware binary (bootloader + partition table +
+# app, all at their flash offsets, padded with 0xFF) at
+# firmware/build/touchy_pad_merged.bin. This is what `touchy update`
+# downloads from a GitHub release and flashes to a fresh board at 0x0.
+merge-bin: firmware-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="touchy_pad_merged.bin"
+    # Drive esptool directly rather than `idf.py merge-bin` — the merge
+    # step doesn't need the full IDF venv, and sourcing export.sh is
+    # brittle (the devcontainer's IDF venv periodically gets a version
+    # mismatch that aborts activation). esptool itself just needs the
+    # addr+file pairs from flash_args, which firmware-build already wrote.
+    esptool_py="$(command -v esptool || command -v esptool.py)"
+    if [ -z "${esptool_py}" ]; then
+        echo "error: esptool not found on PATH" >&2
+        exit 1
+    fi
+    cd firmware/build
+    mapfile -t flash_args < flash_args
+    args=()
+    for line in "${flash_args[@]}"; do
+        read -ra words <<< "$line"
+        args+=("${words[@]}")
+    done
+    "${esptool_py}" --chip esp32s3 merge-bin -o "${out}" "${args[@]}"
+    echo "wrote firmware/build/${out}"
+
+# End-user flash flow: build → merge → flash the merged image at 0x0.
+# Mirrors what the `touchy update` CLI does after downloading a release
+# asset, so local hardware bring-up can exercise the exact same path.
+flash-merged: merge-bin
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port=""
+    for candidate in $(ls /host/dev/ttyACM* 2>/dev/null | sort); do
+        if [ -r "$candidate" ] && [ -w "$candidate" ]; then
+            port="$candidate"
+            break
+        fi
+    done
+    if [ -z "$port" ]; then
+        echo "error: no accessible ttyACM* device found under /host/dev/" >&2
+        exit 1
+    fi
+    echo "flashing merged image to $port"
+    esptool -p "$port" -b 460800 \
+        --before default-reset --after hard-reset \
+        --chip esp32s3 write-flash 0x0 firmware/build/touchy_pad_merged.bin
+
 
 # ---------------------------------------------------------------------------
 # Aggregate convenience targets

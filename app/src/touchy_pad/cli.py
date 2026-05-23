@@ -59,6 +59,16 @@ def _parse_size(ctx, param, value: str | None) -> tuple[int, int] | None:
     metavar="DIR",
     help="Sim pseudo-fs root (default: platformdirs user cache).",
 )
+@click.option(
+    "--port",
+    "port",
+    type=click.Path(dir_okay=False, path_type=str),
+    default=None,
+    metavar="PATH",
+    help="Serial port for esptool-based commands (e.g. `update`). "
+    "Ignored by commands that talk over the normal USB protocol, "
+    "which auto-discover the device by VID/PID.",
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -67,6 +77,7 @@ def cli(
     sim_size: tuple[int, int] | None,
     sim_serial: str,
     sim_dir: Path | None,
+    port: str | None,
 ) -> None:
     """Talk to a connected Touchy-Pad USB device."""
     ctx.ensure_object(dict)
@@ -78,6 +89,7 @@ def cli(
     ctx.obj["sim_size"] = sim_size or (480, 300)
     ctx.obj["sim_serial"] = sim_serial
     ctx.obj["sim_dir"] = sim_dir
+    ctx.obj["port"] = port
 
     if not sim_active:
         if ctx.invoked_subcommand is None:
@@ -222,17 +234,49 @@ def _open_pad():
     return touchy_open(transport=_make_transport())
 
 
-@cli.command()
-def version() -> None:
-    """Print device protocol & firmware version."""
+@cli.command("board-info")
+def board_info() -> None:
+    """Print board name, protocol version, and firmware version."""
+    from rich.console import Console
+    from rich.table import Table
+
     with _client() as c:
         v = c.sys_board_info_get()
-        click.echo(f"protocol: {v.protocol_version}")
-        click.echo(f"firmware: {v.firmware_version} ({v.firmware_version_str})")
+    table = Table(show_header=False, box=None)
+    table.add_row("board", v.board_name or "(unknown)")
+    table.add_row("protocol", str(v.protocol_version))
+    table.add_row("firmware", f"{v.firmware_version} ({v.firmware_version_str})")
+    Console().print(table)
 
 
-# Alias to match the spelling used in docs/design.md (Stage 12).
-cli.add_command(version, name="getversion")
+@cli.command("update")
+@click.option(
+    "--board",
+    "board",
+    default=None,
+    metavar="BOARD",
+    help="Board name to flash (e.g. waveshare_s3_lcd_7b). "
+    "Required when no running Touchy device is reachable.",
+)
+@click.option(
+    "--version",
+    "version",
+    default="latest",
+    show_default=True,
+    metavar="VERSION",
+    help="GitHub release tag to fetch (e.g. v0.2.0) or 'latest'.",
+)
+@click.pass_context
+def update_cmd(ctx: click.Context, board: str | None, version: str) -> None:
+    """Download a firmware release from GitHub and flash it over USB."""
+    from . import update as _update
+
+    _update.run_update(
+        board=board,
+        version=version,
+        port=ctx.obj.get("port"),
+        client_factory=_client,
+    )
 
 
 @cli.command("file-reset")

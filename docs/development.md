@@ -45,7 +45,7 @@ just app-install          # re-run poetry install (after pyproject.toml changes)
 just app-test             # regenerate proto bindings, then run pytest
 just app-lint             # ruff check src tests
 just app-build            # build wheel + sdist into app/dist/
-just app-run -- version   # poetry run touchy version (or any other subcommand)
+just app-run -- board-info   # poetry run touchy board-info (or any other subcommand)
 just build-proto          # regenerate Python + C protobuf bindings
 just firmware-build       # build ESP-IDF firmware
 just flash                # build + flash to a connected device
