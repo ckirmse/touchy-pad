@@ -19,7 +19,16 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 * Add credits for BSD licenced https://github.com/moononournation/Arduino_GFX/blob/master/src/display/Arduino_NV3041A.cpp
 * add AI statement
 * Make README not suck
-* Make streamcontroller support
+* Make a nice demo video
+* build in esp installer based on automated hw model name
+* Make streamcontroller support proof of concept
+  * make a little video
+  * explain plans wrt 3d printing and knobs on the screen
+  * request feedback/propose distribution
+* improve the file writing API so it starts with a name, then a series of writes, then a close - this way we can write large files without needing huge ram space.  The close can also do
+an atomic rename to protect from filesystem corruption
+* have the host provide the full path for file writes, so that it can specify drive letter (R: or F:)
+* make a psram based filesytem for lvgl images https://lvgl.io/docs/open/8.2/overview/file-system
 * !ensure no 10ms delay on loop polling
 * Pick a real USB VID/PID for our device with https://github.com/espressif/usb-pids, send them a PR
 * !fix multitouch gestures - the change to lvgl instead of polling broke them
@@ -29,6 +38,7 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 
 Main new features: Works with StreamController app to provide arbitrary user buttons
 
+* Stylus support for 'paintbrush mode'
 * Built-in [StreamController](https://streamcontroller.github.io/docs/latest/) support.  I'll need to improve their plugin api a bit and send them a PR first
 * Turn off "Expensive debugging flags!" in sdkconfig.defaults
 
