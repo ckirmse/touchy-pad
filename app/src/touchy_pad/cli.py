@@ -5,6 +5,7 @@ Run ``touchy --help`` for a list of subcommands.
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -12,6 +13,8 @@ import click
 
 from .client import TouchyClient, TouchyError
 from .transport import DeviceNotFoundError, Transport
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_size(ctx, param, value: str | None) -> tuple[int, int] | None:
@@ -128,11 +131,11 @@ def cli(
 
         from .sim.window import SimWindow
     except ImportError as e:
-        click.echo(
-            "error: PySide6 is required for the --sim GUI window "
+        logger.error(
+            "PySide6 is required for the --sim GUI window "
             "(install with `pip install 'touchy-pad[sim]'`), or pass "
-            f"--sim-headless to skip the window: {e}",
-            err=True,
+            "--sim-headless to skip the window: %s",
+            e,
         )
         sys.exit(2)
 
@@ -167,7 +170,7 @@ def _after_subcommand(ctx: click.Context, _result, **_kwargs) -> None:
     _tick = QtCore.QTimer()
     _tick.start(200)
     _tick.timeout.connect(lambda: None)
-    click.echo("sim window open \u2014 close it (or Ctrl-C) to exit.")
+    logger.info("sim window open \u2014 close it (or Ctrl-C) to exit.")
     app.exec()
 
 
@@ -223,7 +226,7 @@ def _client() -> TouchyClient:
     try:
         return TouchyClient.open()
     except DeviceNotFoundError as e:
-        click.echo(f"error: {e}", err=True)
+        logger.error("%s", e)
         sys.exit(2)
 
 
@@ -327,7 +330,7 @@ def writefiles(srcdir: Path) -> None:
                 continue
             rel = p.relative_to(srcdir).as_posix()
             c.file_save(f"F:host/{rel}", p.read_bytes())
-            click.echo(f"sent {rel} ({p.stat().st_size} bytes)")
+            logger.info("sent %s (%d bytes)", rel, p.stat().st_size)
 
 
 @cli.command()
@@ -346,9 +349,12 @@ def events() -> None:
                     state_str = f"checked={evt.checked}"
                 else:
                     state_str = ""
-                click.echo(
-                    f"event code={evt.code} host_code=0x{evt.host_code:x} "
-                    f"widget={evt.user_data!r}" + (f" {state_str}" if state_str else "")
+                logger.info(
+                    "event code=%d host_code=0x%x widget=%r%s",
+                    evt.code,
+                    evt.host_code,
+                    evt.user_data,
+                    f" {state_str}" if state_str else "",
                 )
         except KeyboardInterrupt:
             pass
@@ -437,27 +443,35 @@ def screens_demo(ctx: click.Context, listen: bool, as_json: bool) -> None:
     smiley = make_smiley_png()
 
     with _open_pad() as pad:
+        if pad.board_info is not None:
+            info = pad.board_info
+            logger.info(
+                "board %s  firmware %s  protocol %s",
+                info.board_name or "(unknown)",
+                info.firmware_version_str or str(info.firmware_version),
+                str(info.protocol_version),
+            )
         pad.file_save("F:host/images/smiley.png", smiley)
-        click.echo(f"sent F:host/images/smiley.png ({len(smiley)} bytes source)")
+        logger.info("sent F:host/images/smiley.png (%d bytes source)", len(smiley))
         for s in screens:
             pad.screen_save(s)
-            click.echo(f"sent F:host/screens/{s.name}.pb ({len(s.widgets)} widgets)")
+            logger.info("sent F:host/screens/%s.pb (%d widgets)", s.name, len(s.widgets))
         pad.screen_load("F:host/screens/home.pb")
-        click.echo("loaded screen 'home'")
+        logger.info("loaded screen 'home'")
 
         if listen:
 
             def on_ping(evt):
-                click.echo(f"[ping]   widget={evt.user_data!r}")
+                logger.info("[ping]   widget=%r", evt.user_data)
 
             def on_level(evt):
-                click.echo(f"[slider] widget={evt.user_data!r} value={evt.value}")
+                logger.info("[slider] widget=%r value=%s", evt.user_data, evt.value)
 
             def on_enable(evt):
-                click.echo(f"[check]  widget={evt.user_data!r} on={evt.checked}")
+                logger.info("[check]  widget=%r on=%s", evt.user_data, evt.checked)
 
             def on_smile(evt):
-                click.echo(f"[smile]  widget={evt.user_data!r}")
+                logger.info("[smile]  widget=%r", evt.user_data)
 
             pad.on_host_event(0x100, on_ping)
             pad.on_host_event(0x101, on_level)
@@ -469,11 +483,11 @@ def screens_demo(ctx: click.Context, listen: bool, as_json: bool) -> None:
                 # window interactive *and* parks the main thread
                 # — host events fire from the sim's worker thread
                 # and print straight to stdout from there.
-                click.echo(
-                    "listening for host events; close the sim window or press " "Ctrl-C to stop."
+                logger.info(
+                    "listening for host events; close the sim window or press Ctrl-C to stop."
                 )
             else:
-                click.echo("listening for host events (Ctrl-C to stop)...")
+                logger.info("listening for host events (Ctrl-C to stop)...")
                 try:
                     import threading
 
@@ -490,10 +504,18 @@ def reboot_bootloader() -> None:
 
 
 def main() -> None:
+    from rich.logging import RichHandler
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[RichHandler(show_path=False)],
+    )
     try:
         cli()
     except TouchyError as e:
-        click.echo(f"device error: {e}", err=True)
+        logger.error("device error: %s", e)
         sys.exit(1)
 
 

@@ -112,8 +112,10 @@ class Touchy:
         client: TouchyClient,
         *,
         start_event_thread: bool = True,
+        board_info=None,
     ) -> None:
         self._client = client
+        self.board_info = board_info
         self._host_handlers: dict[int, list[HostEventCallback]] = {}
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -333,7 +335,7 @@ def touchy_open(serial: str | None = None, *, transport: Transport | None = None
         client.close()
         raise IncompatibleFirmwareError(device_version, MINIMUM_FIRMWARE_VERSION)
 
-    return Touchy(client)
+    return Touchy(client, board_info=ver)
 
 
 # Public alias for star-imports.

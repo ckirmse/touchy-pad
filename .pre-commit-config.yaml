@@ -36,7 +36,7 @@ repos:
       - id: ruff-check
         name: ruff lint
         language: system
-        entry: sh -c 'cd app && poetry run ruff check src tests'
+        entry: sh -c 'cd app && poetry run ruff check src tests --fix'
         pass_filenames: false
         stages: [pre-push, pre-commit]
         types: [python]
