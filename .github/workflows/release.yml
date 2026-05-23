@@ -69,6 +69,7 @@ jobs:
             ~/.espressif
             ~/esp/esp-idf
           key: ${{ runner.os }}-esp-idf-${{ env.IDF_VERSION }}
+          save-always: true
 
       - name: Install libusb
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libusb-1.0-0
