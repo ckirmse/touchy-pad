@@ -168,7 +168,36 @@ def run_update(
 
 
 def _bootloader_visible() -> bool:
-    """Return True iff an ESP32-S3 ROM/serial-JTAG bootloader is on the bus."""
+    """Return True iff an ESP32-S3 ROM/serial-JTAG bootloader is on the bus.
+
+    Prefer a direct sysfs scan over ``usb.core.find()``: pyusb/libusb
+    enumeration is unreliable in the touchy-pad devcontainer (it tends
+    to miss devices that were hot-plugged after the libusb context was
+    created, even though they show up in /sys and /host/dev), which is
+    exactly the case we hit when the user enters bootloader mode by
+    holding BOOT and replugging mid-command. See the matching
+    ``_install_host_dev_fallback`` workaround in ``transport.py`` —
+    same root cause (the sandboxed /dev/bus/usb), different libusb code
+    path.
+
+    /sys/bus/usb/devices/*/idVendor and /idProduct are populated by the
+    kernel synchronously on every enumeration, so this sees the device
+    the moment it appears.
+    """
+    # 1. Authoritative: sysfs (works for hot-plugged devices).
+    try:
+        for entry in glob.glob("/sys/bus/usb/devices/*/idVendor"):
+            try:
+                vid = int(open(entry).read().strip(), 16)
+                pid = int(open(entry.replace("idVendor", "idProduct")).read().strip(), 16)
+            except (OSError, ValueError):
+                continue
+            if vid == ESP_BOOTLOADER_VID and pid == ESP_BOOTLOADER_PID:
+                return True
+    except OSError:
+        pass
+
+    # 2. Fallback for non-Linux hosts (macOS/Windows have no /sys).
     try:
         dev = usb.core.find(idVendor=ESP_BOOTLOADER_VID, idProduct=ESP_BOOTLOADER_PID)
     except Exception:
