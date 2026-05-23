@@ -45,10 +45,20 @@ class _Canvas(QtWidgets.QFrame):
         self.setStyleSheet("QFrame { background: #101010; }")
         self.setFrameShape(QtWidgets.QFrame.Box)
 
-    def add_layer(self, widget: QtWidgets.QWidget) -> None:
+    def add_layer(self, widget: QtWidgets.QWidget, *, transparent_to_mouse: bool = False) -> None:
         widget.setParent(self)
         widget.setGeometry(0, 0, self._w, self._h)
         widget.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+        # Overlay layers (top / bottom / sys) cover the whole canvas
+        # but only their concrete child widgets are interactive — the
+        # container itself must let mouse events fall through to the
+        # active layer below, otherwise empty cells of e.g. the top
+        # navigation grid swallow every click. Children with their
+        # own mouse handlers (buttons, sliders, ...) keep receiving
+        # events because WA_TransparentForMouseEvents does not
+        # propagate to child widgets.
+        if transparent_to_mouse:
+            widget.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
         widget.show()
         widget.raise_()
 
@@ -138,7 +148,11 @@ class SimWindow(QtWidgets.QMainWindow):
             except Exception:  # noqa: BLE001 — broken authoring shouldn't kill the window
                 _log.exception("sim: failed to render layer %r", attr)
                 continue
-            self._canvas.add_layer(qw)
+            # Only the active layer should be the click-target for its
+            # whole area; overlay layers (top / bottom / sys) must let
+            # gaps fall through so widgets on the active layer remain
+            # clickable.
+            self._canvas.add_layer(qw, transparent_to_mouse=attr != "active")
 
     # -- click / change dispatch ------------------------------------------
 

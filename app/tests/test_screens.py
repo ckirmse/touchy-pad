@@ -599,11 +599,11 @@ def test_build_demo_screens_returns_two_named_screens():
     screens = build_demo_screens()
     assert [s.name for s in screens] == ["home", "test"]
 
-    # Both screens have prev/next navigation in the persistent top layer.
+    # Both screens carry prev/next navigation in the active layer
+    # (matching the C++ firmware — see the `header()` helper).
     for s in screens:
-        assert s.top is not None
-        top_ids = [w.id for w in s.top.widgets]
-        assert "prev" in top_ids and "next" in top_ids
+        active_ids = [w.id for w in s.widgets]
+        assert "prev" in active_ids and "next" in active_ids
 
     # Home screen has the trackpad widget on the active layer.
     home_ids = [w.id for w in screens[0].widgets]
@@ -617,9 +617,8 @@ def test_build_demo_screens_returns_two_named_screens():
 def test_build_demo_screens_header_wires_switch_actions():
     """Header buttons emit ActionDevice(switch_screen=NEXT/PREVIOUS)."""
     home = build_demo_screens()[0]
-    assert home.top is not None
-    prev = next(w for w in home.top.widgets if w.id == "prev")
-    nxt = next(w for w in home.top.widgets if w.id == "next")
+    prev = next(w for w in home.widgets if w.id == "prev")
+    nxt = next(w for w in home.widgets if w.id == "next")
     for w, expected in [
         (prev, _proto.ActionSwitchScreen.Behavior.PREVIOUS),
         (nxt, _proto.ActionSwitchScreen.Behavior.NEXT),

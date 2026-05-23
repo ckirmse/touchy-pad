@@ -1171,23 +1171,18 @@ def build_demo_screens() -> list[Screen]:
     from . import macros as m
 
     def header(screen: Screen) -> None:
-        """Push the shared Prev/Next navigation strip onto the LVGL top
-        layer.
+        """Push the shared Prev/Next navigation strip into the active
+        layer's top row.
 
-        Stage 24.1 — the top layer persists across screen switches so
-        the navigation chrome survives without re-transmission. We use
-        the same 4×8 grid geometry as the active layer so the header
-        cells line up with the rest of the UI, and row 0 of the active
-        layer is left empty to make room. Both screens still re-emit
-        the header so a cold boot to either one shows the chrome.
+        The buttons live in the same grid as the rest of the screen
+        (row 0 is reserved for them) so the sim and the firmware
+        render them identically — keeping the navigation chrome in the
+        active layer matches what the C++ firmware does. If the C++
+        code ever moves the chrome to a persistent overlay (top /
+        bottom / sys), update this helper at the same time.
         """
-        screen.top = Layer(layout=grid(cols=4, rows=8, gap=8))
-        screen.add_top(
-            cell(button("prev", text="< Prev", on_click=prev_screen_action()), col=0, row=0)
-        )
-        screen.add_top(
-            cell(button("next", text="Next >", on_click=next_screen_action()), col=3, row=0)
-        )
+        screen += cell(button("prev", text="< Prev", on_click=prev_screen_action()), col=0, row=0)
+        screen += cell(button("next", text="Next >", on_click=next_screen_action()), col=3, row=0)
 
     # ── home: trackpad-only ───────────────────────────────────────────
     home = Screen("home", layout=grid(cols=4, rows=8, gap=8))
