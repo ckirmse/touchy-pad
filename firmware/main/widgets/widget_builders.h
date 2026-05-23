@@ -27,3 +27,12 @@ lv_obj_t *widget_build(lv_obj_t *parent, const touchy_Widget &w);
 // Recursively descends into nested layout-widget children. No-op if
 // `container` is not a layout widget. Caller must hold the LVGL lock.
 void widget_build_children(lv_obj_t *parent, const touchy_Widget &container);
+
+// Build (or rebuild) one LVGL layer from a decoded `touchy_Widget`.
+// When the root is a layout widget we configure `parent`'s layout
+// manager and instantiate its children directly into `parent`. When it
+// is a leaf widget it becomes a child of `parent`. For an empty root
+// (which_kind == 0) the call is a no-op.
+// `parent` is typically an lv_screen or one of LVGL's persistent layer
+// objects. Caller must hold the LVGL lock.
+void widget_build_layer(lv_obj_t *parent, const touchy_Widget &root);

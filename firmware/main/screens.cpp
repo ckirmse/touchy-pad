@@ -26,10 +26,8 @@
 #include "fs.h"
 #include "prefs.h"
 #include "protobuf.h"
-#include "screen_layout.h"
 #include "touchy.pb.h"
 #include "widget_builders.h"
-#include "widget_styles.h"
 #include "widgets.pb.h"
 
 #include "esp_log.h"
@@ -152,29 +150,11 @@ std::string g_current_path;
 // `lv_obj`. When the root is a leaf widget (rare, only useful for
 // "single full-screen widget" layers) we build it as a normal child of
 // `parent`.
-//
 // `parent` is the active screen object for `Screen.active`, or one of
 // LVGL's persistent layer objects (`lv_layer_top()` / `lv_layer_sys()`
 // / `lv_layer_bottom()`) for the other three. Caller must already hold
 // the LVGL lock.
-void build_layer(lv_obj_t *parent, const touchy_Widget &root)
-{
-    if (widget_is_layout(root)) {
-        apply_layout(parent, root);
-        widget_build_children(parent, root);
-        return;
-    }
-    if (root.which_kind == 0) {
-        // Proto3 default — empty widget. Nothing to build (caller has
-        // already cleaned the parent if needed).
-        return;
-    }
-    lv_obj_t *obj = widget_build(parent, root);
-    if (!obj) return;
-    apply_styles(obj, root);
-    apply_rect(obj, root, /*absolute_layout=*/true);
-    if (root.centered) lv_obj_center(obj);
-}
+// build_layer() has moved to widgets/widget_builders.cpp as widget_build_layer().
 
 // Render a freshly-decoded screen. Takes ownership of `holder` on
 // success (moves it into `g_active_screen`); on failure the holder is
@@ -200,7 +180,7 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
 
     // Active layer always present — populates the new lv_screen.
     if (S.has_active) {
-        build_layer(scr, S.active);
+        widget_build_layer(scr, S.active);
     }
 
     // Persistent LVGL layers (top / sys / bottom) are only touched when
@@ -211,7 +191,7 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
     auto rebuild_persistent = [](lv_obj_t *layer, const touchy_Widget &W,
                                  const char *log_tag) {
         lv_obj_clean(layer);
-        build_layer(layer, W);
+        widget_build_layer(layer, W);
         ESP_LOGI(TAG, "rebuilt %s layer", log_tag);
     };
     if (S.has_bottom) rebuild_persistent(lv_layer_bottom(), S.bottom, "bottom");

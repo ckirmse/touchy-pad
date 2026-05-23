@@ -438,3 +438,21 @@ lv_obj_t *widget_build(lv_obj_t *parent, const touchy_Widget &w)
         return nullptr;
     }
 }
+
+void widget_build_layer(lv_obj_t *parent, const touchy_Widget &root)
+{
+    if (widget_is_layout(root)) {
+        apply_layout(parent, root);
+        widget_build_children(parent, root);
+        return;
+    }
+    if (root.which_kind == 0) {
+        // Proto3 default — empty widget.
+        return;
+    }
+    lv_obj_t *obj = widget_build(parent, root);
+    if (!obj) return;
+    apply_styles(obj, root);
+    apply_rect(obj, root, /*absolute_layout=*/true);
+    if (root.centered) lv_obj_center(obj);
+}
