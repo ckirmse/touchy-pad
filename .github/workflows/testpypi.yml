@@ -1,0 +1,60 @@
+name: Publish to TestPyPI (dry run)
+
+# Manual dry-run only — publishes to TestPyPI without touching PyPI or GitHub Releases.
+# Use this to verify the package builds and uploads correctly before a real release.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up shared Python/Poetry/just/proto tooling
+        uses: ./.github/actions/setup-python-poetry-just-proto
+
+      - name: Install dependencies
+        working-directory: app
+        run: poetry install --no-interaction
+
+      - name: Ruff lint
+        working-directory: app
+        run: poetry run ruff check src tests
+
+      - name: Pytest
+        working-directory: app
+        run: poetry run pytest
+
+      - name: Build wheel + sdist
+        working-directory: app
+        run: poetry build
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-package-distributions
+          path: app/dist/
+
+  publish-to-testpypi:
+    name: Publish to TestPyPI
+    needs: [build]
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/touchy-pad
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          print-hash: true
