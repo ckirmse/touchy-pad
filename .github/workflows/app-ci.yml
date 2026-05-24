@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest] # mac-os doesn't work yet macos-latest
     runs-on: ${{ matrix.os }}
     env:
       IDF_VERSION: "v6.0.1"
@@ -99,7 +99,7 @@ jobs:
       fail-fast: false
       matrix:
         board: [jc4827w543, waveshare_s3_lcd_7b]
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest] # mac-os doesn't work yet macos-latest
     runs-on: ${{ matrix.os }}
     env:
       IDF_VERSION: "v6.0.1"
