@@ -1,6 +1,7 @@
 """CLI entry point for `streamdeck-probe`."""
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from pathlib import Path
@@ -73,6 +74,16 @@ def main(
     sim_size: tuple[int, int],
 ) -> None:
     """Enumerate any attached StreamDeck devices and record their behavior."""
+    # Enable DEBUG logging for touchy_pad modules so we can see
+    # file_save / screen_load / etc. operations during the probe run.
+    # These logs go to stderr alongside the probe's own text output.
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="[%(levelname)s] %(name)s: %(message)s",
+        stream=sys.stderr,
+    )
+    logging.getLogger("touchy_pad").setLevel(logging.DEBUG)
+
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d-%H%M%S")
     log = ProbeLogger(out_dir / f"probe-{ts}.jsonl", out_dir / f"probe-{ts}.txt")
