@@ -7,9 +7,13 @@ license = "GPL-3.0-or-later"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 dependencies = [
-    # The real StreamDeck library we're probing.
-    # (PyPI publishes 0.1.x; the project is a maintained fork of python-elgato-streamdeck.)
-    "streamcontroller-streamdeck>=0.1.5,<1",
+    # We probe StreamDecks *through* the touchy-pad facade
+    # (`touchy_pad.touchydeck.install()` monkey-patches
+    # `StreamDeck.DeviceManager.enumerate` to also expose TouchyDecks).
+    # The upstream `streamcontroller-streamdeck` library is pulled in
+    # transitively via the [streamdeck] extra below — no direct dep
+    # here, by design, so the probe always exercises our wrapper.
+    #
     # Used to synthesize per-key test tiles before calling set_key_image().
     "pillow>=10",
     # CLI framework.

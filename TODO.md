@@ -16,6 +16,7 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 * !Make platformio shell
 * !Make python helper app (share code with my streamdeck project)
 * !make a CLAUDE.md file
+* test reverse engineer tool with latest sim firmware, make sure it is storing images in ram
 * Add credits for BSD licenced https://github.com/moononournation/Arduino_GFX/blob/master/src/display/Arduino_NV3041A.cpp
 * add AI statement
 * Make README not suck
@@ -31,13 +32,16 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 * !fix multitouch gestures - the change to lvgl instead of polling broke them
 * determine USB security issues (might need to set a secure key for future API operations - to prevent untrusted users from changing macro behavior)
 
-## For release Alpha 2
+## For release first public Alpha 2
 
 Main new features: Works with StreamController app to provide arbitrary user buttons
 
 * Stylus support for 'paintbrush mode'
-* Built-in [StreamController](https://streamcontroller.github.io/docs/latest/) support.  I'll need to improve their plugin api a bit and send them a PR first
+* Implement multitouch hid to support multitouch native apps
+* Built-in [StreamController](https://streamcontroller.github.io/docs/latest/) support.  Probably via the mock device proof of concept.
 * Turn off "Expensive debugging flags!" in sdkconfig.defaults
+* Support a few more board types
+* implement the streamdeck background graphic API
 
 ## For release Alpha 3
 

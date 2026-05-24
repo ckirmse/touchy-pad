@@ -1,13 +1,19 @@
 # streamdeck-probe
 
-A reverse-engineering tool that drives a real Elgato StreamDeck through the
+A reverse-engineering tool that drives StreamDeck devices through the
+**touchy-pad** facade (`touchy_pad.touchydeck`) — which wraps the upstream
 [`streamcontroller-streamdeck`](https://pypi.org/project/streamcontroller-streamdeck/)
-library and records every observable behavior to disk. The captured logs feed
-into Touchy-Pad **Stage 50.2** (TouchyDeck: a Touchy-Pad device that emulates
-the StreamDeck API so apps like StreamController can drive our cheap hardware).
+library and additionally exposes our own TouchyDecks via the same
+`DeviceManager().enumerate()` surface. Every observable behavior is recorded
+to disk.
+
+The captured logs feed into Touchy-Pad **Stage 50.2** (TouchyDeck: a Touchy-Pad
+device that emulates the StreamDeck API so apps like StreamController can drive
+our cheap hardware).
 
 This is a deliberately separate Poetry project — it pulls in the real StreamDeck
-library, which we don't want as a dependency of the main `touchy-pad` package.
+library (transitively, via `touchy-pad[streamdeck]`), which we don't want as a
+direct dependency of the main `touchy-pad` package.
 
 ## What it does
 
