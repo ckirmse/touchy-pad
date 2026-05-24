@@ -90,11 +90,16 @@ class SimDevice:
         self,
         fs: SimFs,
         on_screen_change: Callable[[_proto.Screen | None], None] | None = None,
+        *,
+        display_size: tuple[int, int] = (480, 300),
     ) -> None:
         self._fs = fs
         self._lock = threading.RLock()
         self._events: Queue[_proto.LvEvent] = Queue()
         self._on_screen_change = on_screen_change
+        # Reported back via SysBoardInfoResponse.display_{width,height}.
+        # Host adapters (e.g. TouchyDeck) size their UI from this.
+        self._display_size = (int(display_size[0]), int(display_size[1]))
 
         #: Active write transactions: handle → (path, accumulated bytes).
         #: Only one in flight at a time, matching firmware constraints,
@@ -218,6 +223,8 @@ class SimDevice:
                 firmware_version=_SIM_FW_VERSION,
                 firmware_version_str=_SIM_FW_VERSION_STR,
                 board_name="sim",
+                display_width=self._display_size[0],
+                display_height=self._display_size[1],
             ),
         )
 

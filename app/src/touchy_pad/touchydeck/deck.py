@@ -122,19 +122,28 @@ class TouchyDeck(StreamDeck):  # type: ignore[misc,valid-type]
     thread and push the initial empty key grid, then drive it like any
     other StreamDeck (``set_key_callback``, ``set_key_image``, etc.).
 
-    The grid geometry defaults to 5 cols × 3 rows (15 keys, matching the
-    original Elgato StreamDeck) but is overridable via the
-    ``cols`` / ``rows`` ctor kwargs so future Touchy-Pad form factors
-    (or odd layouts) can advertise different shapes.
+    Grid geometry is derived from the device's reported display size
+    (``SysBoardInfoResponse.display_{width,height}``): we lay out as
+    many StreamDeck-classic-sized 72×72 px keys as physically fit,
+    with a 4 px gap between them. Callers may override with explicit
+    ``cols`` / ``rows`` ctor kwargs (used by tests and by users who
+    want a smaller-than-maximal grid).
     """
 
+    # StreamDeck-classic native key pixel size. Real Elgato hardware
+    # also draws 72×72; matching that means the same icon assets and
+    # font metrics work on both, and PIL’s default 6 px bitmap font
+    # stays legible (it doesn’t survive smooth-downscaling).
+    STREAMDECK_KEY_PIXELS = 72
+    STREAMDECK_KEY_GAP = 4
+
     # -- StreamDeck class constants (overridden per-instance in __init__) --
-    KEY_COUNT = 15
-    KEY_COLS = 5
+    KEY_COUNT = 18
+    KEY_COLS = 6
     KEY_ROWS = 3
     TOUCH_KEY_COUNT = 0
-    KEY_PIXEL_WIDTH = 128
-    KEY_PIXEL_HEIGHT = 128
+    KEY_PIXEL_WIDTH = 72
+    KEY_PIXEL_HEIGHT = 72
     KEY_IMAGE_FORMAT = "PNG"
     KEY_FLIP = (False, False)
     KEY_ROTATION = 0
@@ -146,9 +155,8 @@ class TouchyDeck(StreamDeck):  # type: ignore[misc,valid-type]
         self,
         client: TouchyClient,
         *,
-        cols: int = 5,
-        rows: int = 3,
-        key_pixel_size: int = 128,
+        cols: int | None = None,
+        rows: int | None = None,
         serial: str | None = None,
     ) -> None:
         if _IMPORT_ERROR is not None:  # pragma: no cover - environmental
@@ -156,6 +164,19 @@ class TouchyDeck(StreamDeck):  # type: ignore[misc,valid-type]
                 "streamcontroller-streamdeck is not installed; "
                 "install touchy-pad[streamdeck] to use TouchyDeck"
             ) from _IMPORT_ERROR
+
+        # When cols/rows weren't pinned by the caller, query the device
+        # for its panel resolution and lay out as many native-size keys
+        # as fit. Doing this *before* super().__init__() means the base
+        # class sees the right KEY_COUNT when it builds its caches.
+        if cols is None or rows is None:
+            info = client.sys_board_info_get()
+            auto_cols, auto_rows = self._auto_grid(info.display_width, info.display_height)
+            if cols is None:
+                cols = auto_cols
+            if rows is None:
+                rows = auto_rows
+
         if cols < 1 or rows < 1:
             raise ValueError("TouchyDeck cols and rows must be >= 1")
 
@@ -165,8 +186,8 @@ class TouchyDeck(StreamDeck):  # type: ignore[misc,valid-type]
         self.KEY_COLS = cols
         self.KEY_ROWS = rows
         self.KEY_COUNT = cols * rows
-        self.KEY_PIXEL_WIDTH = key_pixel_size
-        self.KEY_PIXEL_HEIGHT = key_pixel_size
+        self.KEY_PIXEL_WIDTH = self.STREAMDECK_KEY_PIXELS
+        self.KEY_PIXEL_HEIGHT = self.STREAMDECK_KEY_PIXELS
 
         self._client = client
         self._serial = serial or f"touchy-{id(client):x}"
@@ -185,6 +206,21 @@ class TouchyDeck(StreamDeck):  # type: ignore[misc,valid-type]
         super().__init__(_FakeTransportDevice(client, self._serial))
 
     # -- helpers ----------------------------------------------------------
+
+    @classmethod
+    def _auto_grid(cls, display_w: int, display_h: int) -> tuple[int, int]:
+        """How many native-72px keys fit in ``display_w x display_h`` px.
+
+        Layout assumes a uniform ``STREAMDECK_KEY_GAP`` between cells
+        and at the panel edges, so the usable budget is
+        ``display - gap`` and the pitch per cell is ``key + gap``. We
+        always return at least 1x1 so callers never see a degenerate
+        zero-key deck (the firmware always reports a real panel size).
+        """
+        pitch = cls.STREAMDECK_KEY_PIXELS + cls.STREAMDECK_KEY_GAP
+        cols = max(1, (max(0, display_w) - cls.STREAMDECK_KEY_GAP) // pitch)
+        rows = max(1, (max(0, display_h) - cls.STREAMDECK_KEY_GAP) // pitch)
+        return int(cols), int(rows)
 
     def _rpc(self, fn: Callable[..., Any], *args: Any, **kw: Any) -> Any:
         """Serialise an RPC against the base class' update_lock.

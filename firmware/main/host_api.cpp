@@ -5,11 +5,13 @@
 #include "host_api.h"
 
 #include "backlight.h"
+#include "display.h"
 #include "fs.h"
 #include "protobuf.h"
 #include "screens.h"
 #include "touchy.pb.h"
 #include "usb_hid.h"
+#include "lvgl.h"
 #include "pb_decode.h"
 #include "pb_encode.h"
 
@@ -160,6 +162,14 @@ static void fill_board_info(touchy_Response *resp)
     v->firmware_version_str[sizeof(v->firmware_version_str) - 1] = '\0';
     strncpy(v->board_name, TOUCHY_BOARD_NAME, sizeof(v->board_name) - 1);
     v->board_name[sizeof(v->board_name) - 1] = '\0';
+
+    // Active display panel resolution. Read from the default LVGL
+    // display so we automatically pick up whatever the board driver
+    // registered (no per-board #ifdef here). Zero means no display is
+    // currently registered — host adapters treat that as unknown.
+    lv_display_t *disp = lv_display_get_default();
+    v->display_width  = disp ? (uint32_t)lv_display_get_horizontal_resolution(disp) : 0;
+    v->display_height = disp ? (uint32_t)lv_display_get_vertical_resolution(disp)   : 0;
 }
 
 static void dispatch(const touchy_Command *cmd, touchy_Response *resp)

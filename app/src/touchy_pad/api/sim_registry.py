@@ -39,6 +39,7 @@ def create_sim_device(
     *,
     serial: str = "SIM0000",
     fs_root: Path | None = None,
+    display_size: tuple[int, int] = (480, 300),
 ) -> SimDeviceTransport:
     """Spin up (or return the existing) in-process sim device.
 
@@ -64,6 +65,7 @@ def create_sim_device(
             serial=serial,
             fs_root=fs_root,
             headless=headless,
+            display_size=display_size,
         )
         _SIM_SERIAL = serial
         _LOG.info("create_sim_device: sim transport up (serial=%s)", serial)

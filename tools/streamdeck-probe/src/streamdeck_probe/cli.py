@@ -62,7 +62,12 @@ from .probe import probe_deck
     type=(int, int),
     default=(480, 300),
     show_default=True,
-    help="With --sim (GUI mode): SimWindow size in pixels (W H).",
+    help=(
+        "With --sim: simulated display panel size in pixels (W H). Also "
+        "drives the SimWindow size in GUI mode, and \u2014 because TouchyDeck "
+        "lays out as many native 72x72 px keys as fit \u2014 determines the "
+        "advertised StreamDeck grid dimensions."
+    ),
 )
 def main(
     out_dir: Path,
@@ -133,7 +138,10 @@ def main(
         # window itself has to be built by the host app (the registry
         # owns the transport, not the UI). We do that below for GUI
         # mode.
-        sim_transport = create_sim_device(headless=not sim_gui)
+        sim_transport = create_sim_device(
+            headless=not sim_gui,
+            display_size=tuple(sim_size),
+        )
         log.log(
             "info",
             "sim_ready",

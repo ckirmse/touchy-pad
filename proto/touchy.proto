@@ -169,6 +169,13 @@ message SysBoardInfoResponse {
     uint32 firmware_version = 2;    // monotonically-increasing build number
     string firmware_version_str = 3; // human-readable "1.2.3" or git hash
     string board_name = 4;           // CMake BOARD name, e.g. "jc4827w543"; "sim" in simulator
+    // Active display panel resolution in pixels. Used by host-side
+    // adapters that need to lay out a UI sized for the device (e.g.
+    // TouchyDeck picks its StreamDeck-emulation grid dimensions from
+    // these so each key is drawn at native 72x72 px). For the
+    // simulator these report the configured sim canvas size.
+    uint32 display_width  = 5;
+    uint32 display_height = 6;
 }
 
 // Reply to FileOpenWriteCmd. Carries the handle the host must echo

@@ -64,6 +64,7 @@ class SimDeviceTransport(Transport):
         fs_root: Path | None = None,
         headless: bool = True,
         on_screen_change: Callable[[_proto.Screen | None], None] | None = None,
+        display_size: tuple[int, int] = (480, 300),
     ) -> None:
         # ``headless`` is retained for API symmetry but currently only
         # affects whether the transport will *expect* a GUI to attach;
@@ -74,7 +75,11 @@ class SimDeviceTransport(Transport):
         del headless  # informational only for now
         self._serial = serial
         self._fs = SimFs(fs_root or default_cache_root(), serial)
-        self._device = SimDevice(self._fs, on_screen_change=on_screen_change)
+        self._device = SimDevice(
+            self._fs,
+            on_screen_change=on_screen_change,
+            display_size=display_size,
+        )
 
         self._cmd_q: Queue[bytes | None] = Queue()
         self._resp_q: Queue[bytes] = Queue()

@@ -115,6 +115,7 @@ def cli(
         headless=not sim_gui,
         serial=sim_serial,
         fs_root=sim_dir,
+        display_size=tuple(ctx.obj["sim_size"]),
     )
     ctx.obj["sim_transport"] = transport
     # Closed after the result callback's app.exec() returns (or

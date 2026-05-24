@@ -76,6 +76,9 @@ streamdeck-probe --help
 | `--no-interactive`      | off     | Skip the press-key prompt; non-interactive runs.  |
 | `--brightness-pause MS` | `300`   | Delay between brightness changes (lets you see).  |
 | `--press-timeout SEC`   | `60`    | Max time to wait for the press-test phase.        |
+| `--sim`                 | off     | Spin up the in-process Touchy-Pad simulator and probe it as a `TouchyDeck`. |
+| `--sim-headless`        | off     | With `--sim`: skip the PySide6 SimWindow (CI / smoke tests). |
+| `--sim-size W H`        | `480 300` | With `--sim`: simulated panel size in pixels. TouchyDeck packs as many native 72×72 px keys as fit, so this also picks the advertised StreamDeck grid (e.g. `480 272` → 6×3, `1024 600` → 13×7). |
 
 ## Output schema (`*.jsonl`)
 

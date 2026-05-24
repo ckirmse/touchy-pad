@@ -59,14 +59,51 @@ def test_build_screen_emits_image_buttons_with_dual_edges() -> None:
 
 
 def test_touchydeck_constructs_with_default_geometry() -> None:
+    # Default sim canvas is 480x300; with native 72×72 keys and a 4 px
+    # gap that fits 6 cols x 3 rows = 18 keys (the JC4827W543 form
+    # factor).
     with make_tempdir_transport() as t, TouchyClient(t) as c:
-        deck = TouchyDeck(c, cols=5, rows=3)
-        assert deck.KEY_COUNT == 15
-        assert deck.KEY_COLS == 5
+        deck = TouchyDeck(c)
+        assert deck.KEY_PIXEL_WIDTH == 72
+        assert deck.KEY_PIXEL_HEIGHT == 72
+        assert deck.KEY_COLS == 6
         assert deck.KEY_ROWS == 3
+        assert deck.KEY_COUNT == 18
         assert deck.deck_type().startswith("Touchy")
         assert deck.id() == deck.get_serial_number()
         assert deck.connected()
+
+
+@pytest.mark.parametrize(
+    "display_size,expected",
+    [
+        # JC4827W543
+        ((480, 272), (6, 3)),
+        # Default sim canvas
+        ((480, 300), (6, 3)),
+        # Waveshare ESP32-S3 Touch LCD 7B
+        ((1024, 600), (13, 7)),
+        # Tiny edge case — must still produce at least 1x1.
+        ((10, 10), (1, 1)),
+    ],
+)
+def test_touchydeck_auto_grid_matches_display(
+    display_size: tuple[int, int],
+    expected: tuple[int, int],
+) -> None:
+    with make_tempdir_transport(display_size=display_size) as t, TouchyClient(t) as c:
+        deck = TouchyDeck(c)
+        assert (deck.KEY_COLS, deck.KEY_ROWS) == expected
+        assert deck.KEY_COUNT == expected[0] * expected[1]
+        assert deck.KEY_PIXEL_WIDTH == 72
+
+
+def test_touchydeck_explicit_cols_rows_override_auto_grid() -> None:
+    with make_tempdir_transport(display_size=(1024, 600)) as t, TouchyClient(t) as c:
+        deck = TouchyDeck(c, cols=5, rows=3)
+        assert deck.KEY_COLS == 5
+        assert deck.KEY_ROWS == 3
+        assert deck.KEY_COUNT == 15
 
 
 def test_touchydeck_reset_pushes_screen() -> None:
