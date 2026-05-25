@@ -36,3 +36,26 @@ void widget_build_children(lv_obj_t *parent, const touchy_Widget &container);
 // `parent` is typically an lv_screen or one of LVGL's persistent layer
 // objects. Caller must hold the LVGL lock.
 void widget_build_layer(lv_obj_t *parent, const touchy_Widget &root);
+
+// ---------------------------------------------------------------------------
+// Stage 54 — WidgetRef indirection.
+//
+// When a screen's widget tree contains a `Widget.widget_ref` node, the
+// builder reads the referenced file (`{drive}:host/widgets/<name>.pb`)
+// at build time and splices the decoded widget inline. The decoded
+// holders must outlive the LVGL tree (their heap arrays back action
+// slots, action steps, etc.), so the builder parks them in a
+// "pending" vector while building and the screen loader commits them
+// alongside the new active screen.
+//
+// Workflow (called by screens.cpp::load_decoded with LVGL lock held):
+//   widget_refs_reset_pending();   // before any widget_build_layer call
+//   ...widget_build_layer(...) calls accumulate refs into pending...
+//   widget_refs_commit();          // after old screen is freed,
+//                                  // alongside `g_active_screen` swap.
+// On failure, simply call `widget_refs_reset_pending()` again — the
+// pending vector is destroyed and nothing is exposed.
+// ---------------------------------------------------------------------------
+
+void widget_refs_reset_pending();
+void widget_refs_commit();

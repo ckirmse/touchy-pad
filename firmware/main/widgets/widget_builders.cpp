@@ -12,8 +12,10 @@
 
 #include "fps_widget.h"
 #include "force_render_widget.h"
+#include "fs/fs.h"
 #include "image_mmap.h"
 #include "log_line.h"
+#include "protobuf.h"
 #include "screen_layout.h"     // apply_layout / apply_rect / apply_grid_cell / widget_is_layout
 #include "screens.h"           // screens_get_touch()
 #include "trackpad_widget.h"
@@ -25,10 +27,102 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <new>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 static const char *TAG = "screens.builders";
+
+namespace {
+
+// ---------------------------------------------------------------------------
+// Stage 54 — WidgetRef indirection state.
+// ---------------------------------------------------------------------------
+
+using WidgetMsg = PbMessage<touchy_Widget>;
+
+// Decoded refs picked up by the *current* build pass; committed into
+// `g_active_refs` once the new screen has fully replaced the old.
+// Held by unique_ptr so each `touchy_Widget` keeps a stable address —
+// `widget_build` only stores `const touchy_Widget &` and any pointers
+// into heap arrays must remain valid for the lifetime of the LVGL tree.
+std::vector<std::unique_ptr<WidgetMsg>> g_pending_refs;
+
+// Decoded refs backing the currently-displayed screen. Their memory is
+// pointed at by action slots, action steps, etc. Released only after
+// the next successful screen build replaces them.
+std::vector<std::unique_ptr<WidgetMsg>> g_active_refs;
+
+// Paths currently being expanded — guards against ref cycles within a
+// single resolve_widget_ref() chain.
+std::unordered_set<std::string> g_ref_expansion;
+
+// Resolve `w` to the widget that should actually be built: returns &w
+// for non-ref widgets, or a pointer into a freshly-decoded WidgetMsg
+// parked in `g_pending_refs` for refs. Returns nullptr on error
+// (empty path, read failure, decode failure, or cycle detected) —
+// callers should skip the widget in that case.
+const touchy_Widget *resolve_widget_ref(const touchy_Widget &w)
+{
+    if (w.which_kind != touchy_Widget_widget_ref_tag) return &w;
+
+    const char *path = w.kind.widget_ref.path;
+    if (!path || path[0] == '\0') {
+        ESP_LOGW(TAG, "widget_ref with empty path — skipping");
+        return nullptr;
+    }
+    std::string key(path);
+    if (g_ref_expansion.count(key)) {
+        ESP_LOGE(TAG, "widget_ref cycle detected at '%s' — skipping", path);
+        return nullptr;
+    }
+
+    Fs *fs = nullptr;
+    std::string rest;
+    fs = fs_resolve(key, &rest);
+    if (!fs) {
+        ESP_LOGE(TAG, "widget_ref: cannot resolve drive on '%s'", path);
+        return nullptr;
+    }
+    size_t len = 0;
+    uint8_t *raw = fs->readBinary(rest, &len);
+    if (!raw) {
+        ESP_LOGE(TAG, "widget_ref: cannot read '%s'", path);
+        return nullptr;
+    }
+
+    auto holder = std::unique_ptr<WidgetMsg>(
+        new (std::nothrow) WidgetMsg(touchy_Widget_fields));
+    if (!holder) {
+        delete[] raw;
+        ESP_LOGE(TAG, "widget_ref: OOM decoding '%s'", path);
+        return nullptr;
+    }
+    bool ok = holder->decode(raw, len);
+    delete[] raw;
+    if (!ok) {
+        ESP_LOGE(TAG, "widget_ref: pb_decode failed for '%s'", path);
+        return nullptr;
+    }
+
+    // Recurse to support a ref pointing at another ref (rare but
+    // legal); guard via the expansion stack.
+    g_ref_expansion.insert(key);
+    const touchy_Widget *resolved = resolve_widget_ref(**holder);
+    g_ref_expansion.erase(key);
+    if (!resolved) return nullptr;
+
+    // We must keep `holder` alive even if `resolved` points into a
+    // *deeper* ref's holder (its own entry was already pushed by the
+    // recursive call). Always push so the chain of refs lives as long
+    // as the resulting LVGL subtree.
+    g_pending_refs.push_back(std::move(holder));
+    return resolved;
+}
+
+}  // namespace (anonymous, continued below)
 
 namespace {
 
@@ -460,16 +554,17 @@ void widget_build_children(lv_obj_t *parent, const touchy_Widget &container)
     const bool grid_layout = container.which_kind == touchy_Widget_layout_grid_tag;
     const bool absolute_layout = container.which_kind == touchy_Widget_layout_absolute_tag;
     for (pb_size_t i = 0; i < L->children_count; i++) {
-        const touchy_Widget &w = L->children[i];
-        lv_obj_t *obj = widget_build(parent, w);
+        const touchy_Widget *w = resolve_widget_ref(L->children[i]);
+        if (!w) continue;
+        lv_obj_t *obj = widget_build(parent, *w);
         if (!obj) continue;
-        apply_styles(obj, w);
+        apply_styles(obj, *w);
         if (grid_layout) {
-            apply_grid_cell(obj, w);
+            apply_grid_cell(obj, *w);
         } else {
-            apply_rect(obj, w, absolute_layout);
+            apply_rect(obj, *w, absolute_layout);
         }
-        if (w.centered) lv_obj_center(obj);
+        if (w->centered) lv_obj_center(obj);
     }
 }
 
@@ -500,8 +595,11 @@ lv_obj_t *widget_build(lv_obj_t *parent, const touchy_Widget &w)
     }
 }
 
-void widget_build_layer(lv_obj_t *parent, const touchy_Widget &root)
+void widget_build_layer(lv_obj_t *parent, const touchy_Widget &root_in)
 {
+    const touchy_Widget *root_p = resolve_widget_ref(root_in);
+    if (!root_p) return;
+    const touchy_Widget &root = *root_p;
     if (widget_is_layout(root)) {
         apply_layout(parent, root);
         widget_build_children(parent, root);
@@ -516,4 +614,21 @@ void widget_build_layer(lv_obj_t *parent, const touchy_Widget &root)
     apply_styles(obj, root);
     apply_rect(obj, root, /*absolute_layout=*/true);
     if (root.centered) lv_obj_center(obj);
+}
+
+// ---------------------------------------------------------------------------
+// Stage 54 — public WidgetRef holder lifecycle.
+// ---------------------------------------------------------------------------
+
+void widget_refs_reset_pending()
+{
+    g_pending_refs.clear();
+    g_ref_expansion.clear();
+}
+
+void widget_refs_commit()
+{
+    g_active_refs = std::move(g_pending_refs);
+    g_pending_refs.clear();
+    g_ref_expansion.clear();
 }

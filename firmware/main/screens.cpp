@@ -166,6 +166,10 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
 
     lvgl_port_lock(0);
 
+    // Stage 54 — clear any WidgetRef holders left over from a previous
+    // failed build before we start decoding refs for this screen.
+    widget_refs_reset_pending();
+
     lv_obj_t *scr = lv_obj_create(NULL);
     if (!scr) {
         lvgl_port_unlock();
@@ -219,6 +223,10 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
 
     g_active_screen = std::move(holder);
     g_current_path = log_name ? log_name : "";
+    // Stage 54 — old screen is gone; promote the pending WidgetRef
+    // holders alongside the new active screen so their heap arrays
+    // remain alive for action-slot pointers in the new LVGL tree.
+    widget_refs_commit();
     lvgl_port_unlock();
 
     // Persist last-loaded so a reboot restores it. The built-in fallback

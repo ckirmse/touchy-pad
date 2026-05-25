@@ -126,6 +126,7 @@ from .screens import (
     toggle,
     trackpad,
     transition,
+    widget_ref,
 )
 from .sim_registry import (
     create_sim_device,
@@ -179,6 +180,7 @@ __all__ = [
     "image_button",
     "arc",
     "spacer",
+    "widget_ref",
     "trackpad",
     "ripple_animation",
     "log_line",

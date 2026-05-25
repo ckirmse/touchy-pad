@@ -557,6 +557,22 @@ message Fps {
 message ForceRender {
 }
 
+// Stage 54 — indirection: a `Widget` whose contents live in a
+// separate `.pb` file on the device filesystem. The device reads the
+// file, decodes a `Widget` message out of it, and splices the result
+// into the parent layout in place of this ref. Conventionally the
+// host writes referenced widgets to `X:host/widgets/<name>.pb` where
+// `X` is a valid drive letter (`F:` = LittleFS, `R:` = RamFs).
+//
+// This is purely an authoring / future-redraw convenience for Stage
+// 55; semantically a `WidgetRef` is equivalent to inlining the
+// decoded `Widget` at the same position.
+message WidgetRef {
+    // Drive-prefixed path to the serialized `Widget` (e.g.
+    // `"R:host/widgets/key0.pb"`). Empty paths are skipped with a WARN.
+    string path = 1;
+}
+
 // A single widget inside a `Layout`. `id` is an opaque host-chosen string
 // that follows the widget into events; the device stores it via
 // `lv_obj_set_user_data` and copies it into the `user_data` field of
@@ -602,6 +618,11 @@ message Widget {
         LayoutAbsolute layout_absolute = 30;
         LayoutFlex     layout_flex     = 31;
         LayoutGrid     layout_grid     = 32;
+
+        // Stage 54 — indirection: the actual widget lives in a
+        // separate `.pb` file on the device filesystem. See
+        // `WidgetRef` above.
+        WidgetRef widget_ref = 33;
     }
 }
 
@@ -629,7 +650,7 @@ message Screen {
     // from the device filesystem so the host re-uploads a fresh copy.
     enum Version {
         VERSION_UNKNOWN = 0;   // proto3 default — any file without a version field
-        CURRENT         = 13;  // current wire format
+        CURRENT         = 14;  // Stage 54: added Widget.widget_ref
     }
 
     // Must equal `CURRENT`; the firmware deletes and ignores files that

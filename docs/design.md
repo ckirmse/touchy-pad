@@ -740,16 +740,54 @@ Implementation notes:
 * `cf="RGB565"` and `cf="RGB565A8"` are still accepted as explicit
   overrides for callers that want deterministic output.
 
-## Stage 54: Allow optionally storing Widget data in files
+## Stage 54: Allow optionally storing Widget data in files (DONE)
 
-Add the ability for Widgets (including Screens) to come from device filesystem files rather than just 'in-band' inside their containing object. This will allow us to eventually minimize redraws/updating only parts of layouts as we wish. 
+Added a `WidgetRef { string path = 1; }` message in `proto/widgets.proto`
+and a new `widget_ref = 33` variant in `Widget.kind`. A widget tree
+node carrying a ref is read from the device filesystem at screen-load
+time and the decoded widget is spliced inline in place of the ref.
+`Screen.Version.CURRENT` bumped 13 → 14; backwards-compat intentionally
+not preserved (firmware deletes mismatched `.pb` files as before).
 
-To do this:
+Host changes:
 
-* Add a new message called WidgetRef.  It should have a filepath inside it of where the foo.pb serialized Widget protobuf lives on the filesystems.
-* Host can optionally use the various file write operations to write Widget files as needed (quite analogous to how Screens were written - try to refactor to share code).  By convention they should be written by the host always to "X:host/widgets/NAME.pb" where X is a valid filesystem letter.
-* Extend Widget.kind message so it can contain a WidgetRef as one of its variants.
-btw I don't care about backwards compatibility, just bump the Screen protobuf version number.  Update c++, python code and docs.
+* New DSL helper `widget_ref(path: str)` in
+  `touchy_pad.api.screens` — emits a `Widget(widget_ref=...)`. The
+  helper rejects empty paths and refuses to accept `id`/`rect`/`cell`/
+  `style` kwargs (those belong to the *referenced* widget).
+* `Touchy.widget_save(name, widget, *, drive="F")` writes the bare
+  `Widget` to `{drive}:host/widgets/{name}.pb`. Convention: `F:` for
+  persistent flash, `R:` for the volatile PSRAM ramdisk.
+* `widget_save` deliberately mirrors the existing `screen_save` path
+  shape rather than sharing a wrapper — `Screen` carries a version
+  field that we validate, `Widget` does not.
+
+Firmware changes (`firmware/main/widgets/widget_builders.{h,cpp}` +
+`screens.cpp`):
+
+* `resolve_widget_ref()` reads `{drive}:host/widgets/<name>.pb` via
+  `Fs::readBinary`, decodes a `PbMessage<touchy_Widget>` into a
+  newly-constructed holder, and returns the inner `touchy_Widget *`.
+  Decoded holders are parked in a per-build pending vector. Cycles
+  (e.g. `a.pb → b.pb → a.pb`) are caught via an `unordered_set` of
+  in-progress paths and logged at `ESP_LOGE` before short-circuiting.
+* `widget_build_children` and `widget_build_layer` resolve refs at
+  the dispatch boundary, so the *inner* widget's `rect`/`style`/`cell`
+  attributes are the ones applied (and the outer `widget_ref` Widget
+  carries no styling on the wire — see DSL guard above).
+* `screens.cpp::load_decoded()` calls `widget_refs_reset_pending()`
+  before building and `widget_refs_commit()` immediately after the
+  old LVGL screen is freed — same ordering as the active-screen swap
+  so old action-slot pointers remain valid until their owning
+  widgets are deleted.
+
+Open follow-ups deferred to Stage 55:
+
+* Refs are resolved once at screen-load time. Rewriting a referenced
+  widget file via host upload does **not** trigger a redraw — the new
+  bytes only take effect on the next `Screen_load`. Stage 55's
+  `screen_update_as_needed(path)` proposal addresses this and will
+  let widget files act as live-update slots.
 
 ## Stage 55: minimize redraws
 
@@ -760,6 +798,10 @@ Change this to:
 * any time a file is written by the host (at file close time, after the file has been 'comitted').  Call a new screen_update_as_needed(filepath_of_changed_file) function (approximate name, pick something better).  Redraw ONLY any lvgl widgets that are directly or indirectly based on that file.
 
 (I suspect that the best way to do this will be by sharing code with screen_load(), recursively going through the current screen and (in the case of screen_load) drawing everything.  But if we are in an update_as_needed check each widget to see if the filename matches before bothering to redraw that widget (or its children) - but tell me what you think is best lvgl practice)
+
+Though be thoughtful about threads.  If file operations are happening in our USB message thread, you might need to instead bump the gui thread to do the redraws it might need to do.
+
+You'll also need to make the python simulator smarter about doing these redraws (though I don't care about performance in that case).  also the simulator needs to cope with widget files/widget ref like in stage 54
 
 ## Stage 80: development environment improvements
 * Support running a sim on the linux host?

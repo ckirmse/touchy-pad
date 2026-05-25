@@ -59,6 +59,7 @@ __all__ = [
     "image_button",
     "arc",
     "spacer",
+    "widget_ref",
     "trackpad",
     "ripple_animation",
     "log_line",
@@ -799,6 +800,40 @@ def spacer(
     """Invisible placeholder. Useful for padding inside flex/grid layouts."""
     w = _widget(id, rect=rect, style=style)
     w.spacer.SetInParent()
+    return w
+
+
+def widget_ref(
+    path: str,
+    *,
+    id: str = "",
+    rect: _proto.Rect | None = None,
+    cell: _proto.GridCell | None = None,
+    style: _proto.Style | Iterable[_proto.Style] | None = None,
+) -> _proto.Widget:
+    """Stage 54 — embed a `Widget` stored in a separate ``.pb`` file.
+
+    *path* is the drive-prefixed device path to a serialized
+    :class:`touchy.Widget` (e.g. ``"R:host/widgets/key0.pb"``). At
+    screen-build time the firmware reads, decodes, and splices the
+    referenced widget into the parent layout in place of this ref —
+    semantically equivalent to inlining the widget here.
+
+    *path* is the only piece of data carried on the wire; the *id*,
+    *rect* / *cell*, and *style* arguments are intentionally **not**
+    serialized: they belong to the referenced widget itself. They are
+    accepted for symmetry with other DSL helpers but produce a
+    ``ValueError`` if used.
+    """
+    if not path:
+        raise ValueError("widget_ref requires a non-empty path")
+    if id or rect is not None or cell is not None or style is not None:
+        raise ValueError(
+            "widget_ref does not accept id/rect/cell/style — those belong "
+            "to the referenced widget itself"
+        )
+    w = _proto.Widget()
+    w.widget_ref.path = path
     return w
 
 

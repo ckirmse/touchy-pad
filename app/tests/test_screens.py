@@ -43,6 +43,7 @@ from touchy_pad.api import (
     toggle,
     trackpad,
     transition,
+    widget_ref,
 )
 
 
@@ -627,3 +628,37 @@ def test_build_demo_screens_header_wires_switch_actions():
         act = w.button.on_click[0]
         assert act.WhichOneof("kind") == "device"
         assert act.device.switch_screen.behavior == expected
+
+
+def test_widget_ref_round_trip():
+    """Stage 54 — `widget_ref()` produces a Widget with the path encoded."""
+    w = widget_ref("R:host/widgets/key0.pb")
+    assert w.WhichOneof("kind") == "widget_ref"
+    assert w.widget_ref.path == "R:host/widgets/key0.pb"
+
+    # Embed in a row inside a screen and ensure it survives serialization.
+    Screen(
+        "refs",
+        layout=row(),
+        widgets=[widget_ref("R:host/widgets/key0.pb"), button("inline")],
+    )
+    msg = _proto.Screen()
+    msg.ParseFromString(Screen._registry[0].to_bytes())
+    assert msg.version == _proto.Screen.Version.CURRENT
+    children = msg.active.layout_flex.layout.children
+    assert len(children) == 2
+    assert children[0].WhichOneof("kind") == "widget_ref"
+    assert children[0].widget_ref.path == "R:host/widgets/key0.pb"
+    assert children[1].WhichOneof("kind") == "button"
+
+
+def test_widget_ref_rejects_empty_path():
+    with pytest.raises(ValueError):
+        widget_ref("")
+
+
+def test_widget_ref_rejects_inline_styling():
+    with pytest.raises(ValueError):
+        widget_ref("F:host/widgets/a.pb", id="x")
+    with pytest.raises(ValueError):
+        widget_ref("F:host/widgets/a.pb", rect=rect(0, 0, 10, 10))

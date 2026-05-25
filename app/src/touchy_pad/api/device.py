@@ -276,6 +276,36 @@ class Touchy:
             return msg
         raise TypeError(f"screen_save: unsupported screen type: {type(screen).__name__}")
 
+    def widget_save(
+        self,
+        name: str,
+        widget: _proto.Widget,
+        *,
+        drive: str = "F",
+    ) -> str:
+        """Upload a standalone :class:`Widget` (Stage 54).
+
+        Writes the serialized widget to
+        ``{drive}:host/widgets/{name}.pb`` so a screen elsewhere may
+        reference it via ``widget_ref("{drive}:host/widgets/{name}.pb")``.
+
+        *drive* defaults to ``"F"`` (persistent flash); pass ``"R"`` for
+        the volatile PSRAM ramdisk.
+        """
+        if not name:
+            raise ValueError("widget_save: name must be non-empty")
+        if drive not in ("F", "R"):
+            raise ValueError(f"widget_save: drive must be 'F' or 'R', got {drive!r}")
+        if not isinstance(widget, _proto.Widget):
+            raise TypeError(
+                f"widget_save: widget must be touchy_pad.api.protobuf.Widget, "
+                f"got {type(widget).__name__}"
+            )
+        path = f"{drive}:host/widgets/{name}.pb"
+        logger.debug("widget_save: %s", path)
+        self._client.file_save(path, widget.SerializeToString())
+        return path
+
     # -- event dispatch ----------------------------------------------------
 
     def on_host_event(self, code: int, callback: HostEventCallback) -> None:

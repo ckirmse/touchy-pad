@@ -28,6 +28,15 @@ post-process it:
 
 * `host/screens/*.pb` — decoded as a `touchy.Screen` protobuf (see
   [Stage 15](../docs/why-not-xml.md)) and cached for `Screen_Load`.
+* `host/widgets/*.pb` — a serialized standalone `touchy.Widget`
+  (Stage 54). Referenced by `Widget.widget_ref { string path = 1; }`
+  in a screen's widget tree; the firmware reads + decodes the file
+  when the referring screen is loaded and splices the decoded widget
+  inline at that position. Refs may live on either drive
+  (`F:host/widgets/foo.pb` for persistence, `R:host/widgets/foo.pb`
+  for volatile slots). Resolution happens at `Screen_Load` time only
+  — overwriting a widget file does **not** trigger a redraw today
+  (deferred to Stage 55).
 * anything else — written verbatim; reachable via an LVGL drive letter
   so image/font loaders can resolve it on demand. See the
   [Filesystems](#filesystems-stage-51) section below for the path
