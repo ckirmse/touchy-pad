@@ -1,77 +1,111 @@
 # touchy-pad — AI Agent Guide
 
-## Project overview
-Open-source multitouch USB touchpad with a built-in customizable screen (ESP32-S3 based).
-Supports touchpad mode (USB HID mouse/multitouch) and a configurable button-matrix/macro mode.
-Optional haptics via TI DRV2605L. Optional Stream-controller compatible API.
+Open-source multitouch USB touchpad / button matrix with a built-in
+customisable LCD (ESP32-S3, jc4827w543 or waveshare_s3_lcd_7b boards).
+The host-side companion is a Python package (`touchy-pad`) that ships a
+CLI (`touchy`), a high-level API, a Tkinter/PySide6 device simulator, and
+a StreamDeck-compatibility shim (`TouchyDeck`).
 
-## Key locations
+`CLAUDE.md` is a symlink to this file — keep them in sync via the symlink.
+
+## Repo layout
 | Path | Purpose |
 |------|---------|
-| `firmware/` | PlatformIO C++ firmware (the only build artifact in this repo) |
-| `firmware/src/main.cpp` | Application entry point |
-| `firmware/platformio.ini` | Board, environment, port settings |
-| `docs/design.md` | Development stage spec — **read this before adding features** |
-| `TODO.md` | Outstanding work items |
-| `README.md` | Hardware options and library links |
+| `firmware/main/` | ESP-IDF C++ firmware (CMake, **not** PlatformIO) |
+| `firmware/main/main.cpp` | Entry point — keep thin; subsystems live in their own `.cpp/.h` |
+| `firmware/boards/<board>/` | Per-board pinout / display / touch drivers |
+| `proto/` | Shared protobuf schemas (`touchy.proto`, `widgets.proto`, `preferences.proto`) + nanopb `.options` files |
+| `app/src/touchy_pad/` | Python package — `cli.py`, `client.py`, `transport.py`, `api/`, `sim/`, `touchydeck/`, `_proto/` |
+| `app/tests/` | pytest suite (host-side only; firmware has no unit tests) |
+| `tools/StreamController/` | git submodule, branch `pr-touchypad`, with `touchy_bootstrap.py` shim |
+| `tools/streamdeck-probe/` | Stage 50.1 reverse-engineering tool |
+| `docs/design.md` | **Authoritative stage history — read before starting new work** |
+| `docs/host-api.md` | USB endpoint + protocol spec |
+| `Justfile` | All build/test/run tasks — prefer `just <recipe>` over raw commands |
+| `VERSION` | Single-source version (read by Python + CMake) |
 
-## Target hardware
-**Primary target:** Waveshare ESP32-S3-Touch-LCD-7  
-- Docs: https://docs.waveshare.com/ESP32-S3-Touch-LCD-7  
-- Wiki: https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-7B  
-- PlatformIO board: `4d_systems_esp32s3_gen4_r8n16` (current placeholder; update when switching to Waveshare)
+## Implementation status
+All stages 0–24.4, 50.2, and 51 are **done**. Latest active wire-format:
+`Screen.Version.CURRENT == 5`. Highlights worth remembering:
 
-## Build system — PlatformIO
-All firmware work uses PlatformIO (not Arduino IDE, not CMake).
+- USB device is a composite class: CDC-ACM + HID (mouse + keyboard via
+  report IDs 1/2) + vendor-class bulk pair (command/response) + interrupt-IN
+  mailbox endpoint (0x85) that just signals "events available".
+- Host ↔ device wire protocol = length-prefixed nanopb frames over the
+  bulk pair. See `firmware/main/host_api.cpp` and
+  `app/src/touchy_pad/transport.py`.
+- nanopb uses `FT_POINTER` (heap) for `repeated` widget/action/step
+  fields and the `FileWrite` payload. RAII via `PbMessage<T>` in
+  `firmware/main/protobuf.h`.
+- Filesystem paths are drive-prefixed: `F:host/...` = LittleFS (persistent
+  flash), `R:host/...` = PSRAM ramdisk (transient, e.g. image assets).
+- Stage 21 (Python CLI for layouts) is implemented as `touchy screens push`,
+  consuming the `touchy_pad.api.screens` DSL (`button`, `slider`, `toggle`,
+  `image_button`, `trackpad`, `log_line`, layout helpers `row`/`col`/`grid`).
+- Stage 30 simulator lives in `app/src/touchy_pad/sim/` (Tkinter/PySide6).
+  Invoke with `touchy --sim ...` (or `--sim-headless` for CI).
+- Stage 50.2 StreamDeck shim is `touchy_pad.touchydeck.TouchyDeck`;
+  `touchy_pad.touchydeck.install()` monkey-patches
+  `StreamDeck.DeviceManager.enumerate`. **Must be called explicitly** —
+  no import side-effects. See `tools/StreamController/touchy_bootstrap.py`.
+
+## Build & test
+Everything goes through Just; never run raw `idf.py` / `poetry` /
+`protoc` unless a recipe is clearly missing:
 
 ```bash
-# Build
-cd firmware && pio run -e 4d_systems_esp32s3_gen4_r8n16
-
-# Upload + monitor (device on /dev/ttyACM0)
-pio run --target upload --target monitor -e 4d_systems_esp32s3_gen4_r8n16
-
-# Serial monitor only
-pio device monitor --port /dev/ttyACM0
+just init              # one-time devcontainer setup
+just build-proto       # regenerate Python + C nanopb bindings
+just app-test          # pytest (proto bindings auto-rebuilt)
+just app-lint          # ruff format + lint
+just app-run -- ...    # invoke the `touchy` CLI inside Poetry
+just firmware-build    # ESP-IDF build for the current board
+just flash             # build + flash
+just streamcontroller-run [--sim | --sim-headless]
 ```
 
-To pin the serial port permanently, set in `platformio.ini`:
-```ini
-upload_port = /dev/ttyACM0
-monitor_port = /dev/ttyACM0
-```
-(Currently commented out — uncomment when device is attached.)
+CI: `.github/workflows/app-ci.yml` runs `build-app` on
+ubuntu/windows/macos. **Windows has no libusb** — any code path that
+touches `usb.core.find()` must guard against `NoBackendError`
+(not just `ImportError`). See `app/src/touchy_pad/api/device.py` and
+`app/src/touchy_pad/touchydeck/discovery.py` for the pattern.
 
-## Key libraries to use
-| Purpose | Library |
-|---------|---------|
-| LCD + LVGL on Waveshare board | `iamfaraz/Waveshare_ST7262_LVGL` |
-| GUI / rendering | LVGL (via the above wrapper) |
-| USB HID mouse | `arduino-libraries/Mouse` |
-| BLE mouse (alternative) | `leollo98/ESP32 BLE Mouse With Precision Scroll` |
-| Haptics | TI DRV2605L (Adafruit library) |
-| Host config protocol | nanopb (protobuf for embedded) |
-
-## Development stage status (from docs/design.md)
-- **Stage 0** — stub app builds and runs (prints "hello world" over serial). **Target: implement next.**
-- **Stage 1** — "hello world" on the LCD via LVGL.
-- **Stage 10** — USB HID mouse device.
-- **Stage 11** — Multitouch gestures (tap=click, drag=move/scroll).
-- **Stage 20** — USB HID keyboard + `lv_buttonmatrix` button grid.
-- **Stage 21** — Host-configurable layouts via protobuf over USB + Python CLI/library.
-- **Stage 30** — Linux host simulator + GDB plugin debugging.
-
-Always check which stage is currently implemented before adding code. Update `docs/design.md` after completing a stage.
+## Justfile gotchas (learned the hard way)
+- All recipe bodies use `#!/usr/bin/env bash` shebangs and must use
+  **relative paths** — `justfile_directory()` produces `D:\a\...` on
+  Windows, which bash interprets `\a` as `a`.
+- Use `${SYS_PYTHON:-/usr/bin/python3}` inside recipes (read at runtime),
+  not `{{sys_python}}` (expanded by Just at parse time).
+- macOS BSD `paste` needs the explicit `-` stdin marker:
+  `... | paste -sd: -`.
 
 ## Coding conventions
-- Language: **C++**, Arduino-ish API via PlatformIO framework.
-- Use LVGL primitives for all display output (no direct framebuffer writes).
-- Keep `main.cpp` thin; add new subsystems as separate `.cpp`/`.h` files in `firmware/src/`.
-- No external build scripts; everything goes through `platformio.ini`.
+- **Device:** C++ via ESP-IDF (no Arduino), LVGL primitives only (no
+  direct framebuffer writes). New subsystems → own `.cpp/.h` pair in
+  `firmware/main/`. Long-running work → its own FreeRTOS task.
+- **Host:** Python 3.11+, Poetry, ruff (format + lint), pytest. Public
+  API lives under `touchy_pad.api`; the high-level entry is
+  `touchy_pad.api.touchy_open()`.
+- **Logging:** use `logging.getLogger(__name__)`. High-frequency RPC
+  trace lines go on a child logger (e.g. `touchy_pad.client.rpc`) so
+  callers can silence them independently. Python stdlib has no TRACE
+  level — prefer child loggers over custom levels.
+- **NotImplementedError in subclass-required methods:** prefer logging
+  ERROR + returning a sensible default over raising, so optional
+  StreamDeck features don't crash StreamController introspection.
 
-## Architecture notes
-- The board exposes a USB port that should enumerate as **both** a HID mouse and HID keyboard (composite device).
-- Touchpad multitouch data comes from the GT911 touch controller over I²C.
-- Haptics are on a separate I²C bus via DRV2605L.
-- A reserved row of on-screen buttons (top or bottom, user-selectable) acts as a physical/virtual control strip separate from the touchpad area.
-- A lasercut/3D-printed overlay template physically delineates those buttons from the touchpad region.
+## Hardware
+- Display + touch panel ride a shared I²C-ish interface (board-specific);
+  see `firmware/boards/<board>/`. GT911 multitouch on jc4827w543.
+- Optional haptics: DRV2605L on a separate I²C bus (not yet wired).
+- USB-OTG controller exposes one IN/OUT bulk pair + one interrupt-IN
+  endpoint for the vendor interface (no second IN for events — hence the
+  mailbox-poll design).
+
+## Workflow rules
+- **Never auto-commit or push.** Make changes; let the user commit.
+- `docs/design.md` is the source of truth for "what stage are we on" —
+  update it when you finish a stage.
+- The git submodule at `tools/StreamController` tracks branch
+  `pr-touchypad`; `just streamcontroller-run` does
+  `git submodule update --init --remote` first.

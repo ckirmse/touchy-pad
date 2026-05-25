@@ -22,6 +22,8 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 * Make README not suck, mention goals, simulator, api, TouchyDeck, next steps
 * Make a nice demo video
 * !build in esp installer based on automated hw model name
+* fix touchqscroll handle
+* Update the default screen JSON
 * Make nice easy install instructions
 * Make streamcontroller support proof of concept
   * test current POC
@@ -37,6 +39,8 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 
 Main new features: Works with StreamController app to provide arbitrary user buttons
 
+* add a widget handle concept so host can say to just redraw one particular widget (only need to implement for screens/layouts/image)
+* make screen sleep default timeout
 * Add support for F:widgets/foo.pb widget files.  This would allow TouchyDeck to own a R:widgets/deck.pb.  Which could be nested into a F: screen.  So that dynamic StreamDeck emulated stuff could be updated independently of the configurable screens the user has selected.  Probably should add a way for the host to see dimensions of arbitary widgets in screens/walk the screen list? 
 * Stylus support for 'paintbrush mode'
 * Implement multitouch hid to support multitouch native apps
@@ -49,6 +53,10 @@ Main new features: Works with StreamController app to provide arbitrary user but
 
 Main new features? Much easier scripting than through streamcontroller - allow arbitrary python snippets for button presses/slider moves etc...  Dynamic data displays from host to Touchypad (server stats, ZMK modes, whatever user wants to show)
 
+* support turn, back, forward, up gestures natively
 * tactile precut sticker/3d printable case for screen overlay?
 * figure out best way to mount haptics for best effect
 * Increase CPU, FLASH and RAM speeds to the max.  currently the firmware picks slow/safe defaults
+* Haptics
+* Use my auto-populated per-app button standard page generator - Default to use the material design icons
+* Possibly no need for the full stream-controller app, just go straight from per app yaml to an optional python helper app (use to set icons/shortcuts etc).

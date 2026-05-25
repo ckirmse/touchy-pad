@@ -5,17 +5,6 @@
 * Primiarily use C++ as the programming lanuage
 * Use C++ classes as needed for new big systems
 
-# Target hardware
-
-* The initially targeted hardware is https://docs.waveshare.com/ESP32-S3-Touch-LCD-7, eventually many other similar boards will be supported.  For more information on this board see https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-7B
-
-* jc4827w543
-The JC4827W543 (often sold under names like Guition or Sunton) is an ESP32-S3 board paired with a 4.3" 480x272 RGB display (using an NV3041A or ST3401A controller) and usually a GT911 capacitive touch chip.
-A word of caution on this specific board: Make absolutely sure you initialize the backlight pin (usually GPIO 2) to HIGH in your setup() loop immediately. Many people think their LVGL implementation is broken, but they just forgot to turn the backlight LED on.
-for working example code see https://github.com/thelastoutpostworkshop/JC4827W543_radio_lvgl/blob/main/JC4827W543_radio_lvgl.ino
-lvgl conf https://github.com/lsdlsd88/JC4827W543/tree/main/1-Demo/Demo_Arduino/3_3-3_TFT-LVGL-Widgets 
-for detailed hw docs https://github.com/profi-max/JC4827W543_4.3inch_ESP32S3_board
-
 # Development stages
 
 Development will proceeed in a series of stages.  Currently none of these stages are implemented, after implementing each stage update this document as appropriate.
@@ -700,3 +689,23 @@ an atomic rename to protect from filesystem corruption. until closed the filenam
 ## Stage 80: development environment improvements
 * Support running a sim on the linux host?
 * Use https://lvgl.io/docs/open/debugging/gdb_plugin to faciltiate debugging
+
+# Old/Existing projects
+
+In the very early days of this project I looked into these ideas/implementations:
+
+FreeTouchDeck - code seems a bit yucky and limited to just a button array, possibly not reuse...
+* Does the button portion already?  semi abandoned?  https://github.com/DustinWatts/FreeTouchDeck https://hackaday.io/project/175827/instructions 
+* Newer platformio version of that project: https://github.com/dejavu1987/FreeTouchDeck 
+* This old abandoned helper app: https://github.com/DustinWatts/FreeTouchDeck-Helper 
+
+BLE mouse platform IO lib
+https://registry.platformio.org/libraries/hijelhub/HijelHID_BLEMouse
+Or this more bare BLE lib that works more like the USB mouse lib:
+https://registry.platformio.org/libraries/leollo98/ESP32%20BLE%20Mouse%20With%20Precision%20Scroll
+
+USB mouse library - probably use this for first test then extend it as needed to become a real touchpad lib.
+https://registry.platformio.org/libraries/arduino-libraries/Mouse
+
+Also this gamepad lib
+https://github.com/lemmingDev/ESP32-BLE-Gamepad
