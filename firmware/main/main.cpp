@@ -34,7 +34,7 @@ extern "C" void app_main(void)
     usb_hid_init();
 
     // Give enough time for user to open a debug serial port to our board
-    vTaskDelay(pdMS_TO_TICKS(5000));
+    //vTaskDelay(pdMS_TO_TICKS(5000));
 
     // Mount the on-device filesystems (stage 51). host_api command handlers
     // expect both F: (littlefs) and R: (psram) to be ready, and the LVGL
