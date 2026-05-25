@@ -15,6 +15,8 @@ Two flavours are available:
 
 Both flavours run entirely in your shell — no flashing, no USB.
 
+![sim touchpad](images/sim-home.png).
+![sim demo](images/sim-test.png).
 ## Install
 
 The GUI window pulls in PySide6 (Qt 6), so it lives in an optional
@@ -31,7 +33,7 @@ pip install 'touchy-pad[sim]'
 On Debian / Ubuntu you'll also need a handful of native libraries that
 PySide6 dlopens at startup. They're already installed in the project's
 devcontainer (see [.devcontainer/Containerfile](../.devcontainer/Containerfile));
-elsewhere:
+but if you want to do things by hand:
 
 ```bash
 sudo apt-get install -y \

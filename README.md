@@ -1,5 +1,8 @@
 # Touchy-pad
 
+![cyd](docs/images/jc4827w543.jpg)
+
+
 If you have python installed and a [suitable device](docs/hardware.md), you can have this running on your hardware in less than a minute:
 ```bash
 pip install touchy-pad
@@ -10,18 +13,23 @@ More installation instructions [here](docs/installing.md).
 ## Current features
 
 * A "premium feel" open-source multitouch USB touchpad with built in customizable screen (for use with Mac/Linux/Windows/Android).  Even if you don't want to run our sister app.
-* Works with cheap ESP32 based display boards ($15-$30USD depending on features) - no soldering required, just connect USB, run the installer and go.
-* When used as a touchpad providea a cute water droplet touch/grab/turn/gesture visualization
-* Allows simple key/mouse shortcut/macros without need for leaving the stream-controller app running.  Generated entirely natively as USB events from our device.
+* Works with cheap ESP32 based display boards ($15-$30 USD depending on features) - no soldering required, just connect USB, run the installer and go.
+* When used as a touchpad provides a pretty water droplet touch/grab/turn/gesture visualization.
+* Allows simple key/mouse shortcut/macros without need for leaving the (optional) stream-controller app running.  Generated entirely natively as USB events from our device.
 * Automated installer provides 'one-click' install for boards you purchased from wherever.
 * Linux, Mac-OS and Windows hosts are supported (in theory - currently only tested with Linux, please open a [github issue](https://github.com/geeksville/touchy-pad/issues) if you see problems on your machine)
+
+## Features coming soon
+
+* Provides a [Stream-controller](https://streamcontroller.github.io/docs/latest/) compatible API so that a graphical button array can be selected instead of touchpad.  
+* Support for more devices (including little tiny 3 or 4" displays - suitable for building into custom keyboards or PC cases)
 
 ## For developers
 
 This project is intended to be 'open' to make it easy for host side code to manage little widgets/behaviors on these great little devices.  No embedded development experience needed.
 
 * A toolkit/API so that other projects can easily put custom widgets/screens on these little devices (with python or some other host-side language).  Customizable screen layouts (define with JSON or a python API), bind controls to built-in keyboard/mouse macros or host side python behaviors.  A full set of widgets are available (based on [LVGL](https://lvgl.io/)).
-* There is a full python simulator of the device code - so you can test and develop a fair amount code without having to reflash your device.
+* There is a full [python simulator](docs/simulator.md) of the device code - so you can test and develop a fair amount code without having to reflash your device.
 * This project is young and more details will be here soon - hopefully...  If you have questions just open a [github issue](https://github.com/geeksville/touchy-pad/issues) where we can chat.
 
 If you'd like to see a demo of what you can do run:
@@ -29,17 +37,13 @@ If you'd like to see a demo of what you can do run:
 touchy screen demo --listen
 ```
 
-## Features coming soon
-
-* Provides a [Stream-controller](https://streamcontroller.github.io/docs/latest/) compatible API so that a graphical button array can be selected instead of touchpad.  
-* Support for more devices (including little tiny 3 or 4" displays - suitable for building into custom keyboards or PC cases)
-
 ## Eventual features
 
-* For fun I kinda wanna put a CYD with this software into a custom [Steam Machine](docs/images/steam.png).
+* For fun I kinda wanna put a CYD with this software into a custom [Steam Machine front-plate](docs/images/steam.png).
 * Stylus recognition (on suitable device), for brush effects etc...
 * Multitouch is currently supported entirely in the device (by emulating appropriate USB HID actions), but for some art applications we should also expose a multitouch HID endpoint
-* A lasercut or 3d printed template to allow those critical buttons to have physical 'feel' separating them from the touchpad/other buttons.
+* A nice 3d printed case for the popular displays.
+* A lasercut or 3d printed template to allow those critical buttons to have physical 'feel' separating them from the touchpad/other buttons.  
 * If haptic hardware installed haptically render taps/clicks/buttons feels. (Leaves screen mechanically isolated from case (for better haptics))
 * Add optional mouse left/right/middle click buttons anywhere in the screen layout
 * Add an expand/shrink touchpad hotkey (possibly by using existing screen abstraction)

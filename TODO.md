@@ -17,16 +17,16 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 * !Make python helper app (share code with my streamdeck project)
 * !make a CLAUDE.md file
 * !test reverse engineer tool with latest sim firmware, make sure it is storing images in ram
-* Add credits for BSD licenced https://github.com/moononournation/Arduino_GFX/blob/master/src/display/Arduino_NV3041A.cpp
-* a!dd AI statement
-* Make README not suck, mention goals, simulator, api, TouchyDeck, next steps
-* Make a nice demo video
-* !build in esp installer based on automated hw model name
+* !Add credits for BSD licenced https://github.com/moononournation/Arduino_GFX/blob/master/src/display/Arduino_NV3041A.cpp
+* !add AI statement
+* !Make README not suck, mention goals, simulator, api, TouchyDeck, next steps
 * fix touchqscroll handle
+* Make a nice demo video 
+* !build in esp installer based on automated hw model name
 * Update the default screen JSON
 * Make nice easy install instructions
 * Make streamcontroller support proof of concept
-  * test current POC
+  * !test current POC
   * make a little video
   * explain plans wrt 3d printing and knobs on the screen
   * request feedback/propose distribution
