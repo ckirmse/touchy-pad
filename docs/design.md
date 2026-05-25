@@ -720,9 +720,25 @@ Implementation notes:
   while the LVGL widget tree still references the aliased pointer.
   Today the host doesn't do that mid-session.
 
-## Stage 53: prefer native formats
+## Stage 53: prefer native formats (DONE)
 
 In our python function that generates LVGL image files (in native format), highly prefer RGB565 as the output format.  Only fall back to an alpha channel supporting format if the source image file includes alpha channel data.  If you must do such fallback print a WARN log message to the python log.
+
+Implementation notes:
+
+* `touchy_pad.api.lvgl_image.to_lvgl_bin()` now defaults to `cf=None`
+  ("auto"): it inspects the source image's alpha channel and emits
+  RGB565 whenever every pixel is fully opaque, falling back to
+  RGB565A8 only when at least one pixel has `alpha < 255`.
+* "Has an alpha channel" is interpreted strictly — many editors save
+  opaque artwork as PNG-RGBA, and we don't want to penalise those
+  with the slow path. We check the actual min-alpha via
+  `Image.getextrema()`.
+* On fallback the converter logs a single `logging.WARNING` on the
+  `touchy_pad.api.lvgl_image` logger so callers can see exactly which
+  asset missed the Stage 52 mmap fast path.
+* `cf="RGB565"` and `cf="RGB565A8"` are still accepted as explicit
+  overrides for callers that want deterministic output.
 
 ## Stage 54: Allow optionally storing Widget data in files
 

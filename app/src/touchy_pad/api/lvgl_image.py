@@ -7,10 +7,13 @@ JPEG decoders on the device, the host package transparently converts
 any uploaded image (BMP / PNG / JPEG / GIF / WEBP — anything Pillow can
 decode) into the LVGL native ``.bin`` format before sending it.
 
-Output color format is **RGB565A8** by default: the firmware is built
-with ``CONFIG_LV_COLOR_DEPTH_16`` and RGB565A8 is the most compact
-LVGL-9 format that still carries an 8-bit alpha channel — exactly what
-press-state image-buttons want for transparent edges.
+Output color format is **RGB565** by default (since Stage 53): the
+firmware is built with ``CONFIG_LV_COLOR_DEPTH_16`` and RGB565 matches
+the display's native format exactly, which lets the device take the
+Stage 52 zero-copy mmap fast path on ``R:`` uploads. The converter
+auto-falls back to **RGB565A8** only when the source image actually
+contains non-opaque alpha — in which case it emits a single WARN log
+line so callers can tell why the slow path was taken.
 
 References
 ----------
@@ -26,6 +29,7 @@ References
 from __future__ import annotations
 
 import io
+import logging
 import struct
 from pathlib import Path
 
@@ -36,6 +40,9 @@ __all__ = [
     "rewrite_to_bin_path",
     "to_lvgl_bin",
 ]
+
+
+_log = logging.getLogger(__name__)
 
 
 # LVGL 9 binary magic (first byte of the header). See
@@ -154,14 +161,57 @@ def _to_rgb565a8(image) -> tuple[int, int, bytes]:
     return w, h, bytes(rgb_plane) + bytes(a_plane)
 
 
-def to_lvgl_bin(source: bytes | str | Path, *, cf: str = "RGB565A8") -> bytes:
+def _to_rgb565(image) -> tuple[int, int, bytes]:
+    """Encode a PIL image as a bare RGB565 pixel block (no alpha).
+
+    Returns ``(width, height, pixel_bytes)`` where ``pixel_bytes`` is
+    one RGB565 little-endian word per pixel, row-major.
+    """
+    rgb = image.convert("RGB")
+    w, h = rgb.size
+    pixels = rgb.tobytes()  # RGB888, row-major
+    out = bytearray(w * h * 2)
+    for i in range(w * h):
+        r = pixels[i * 3 + 0]
+        g = pixels[i * 3 + 1]
+        b = pixels[i * 3 + 2]
+        word = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+        out[i * 2 + 0] = word & 0xFF
+        out[i * 2 + 1] = (word >> 8) & 0xFF
+    return w, h, bytes(out)
+
+
+def _has_non_opaque_alpha(image) -> bool:
+    """Return True if *image* actually carries per-pixel transparency.
+
+    A PIL image can be in mode ``RGBA``/``LA``/``PA`` without ever
+    using its alpha channel (e.g. a PNG saved by an editor that
+    always emits RGBA even for opaque artwork). We treat such images
+    as opaque so they can take the RGB565 fast path on-device. Only
+    images with at least one pixel where ``alpha < 255`` count as
+    needing the RGB565A8 fallback.
+
+    Images without any alpha channel (``RGB``, ``L``, palette-without-
+    transparency, …) trivially return False.
+    """
+    if image.mode in {"RGBA", "LA", "PA"} or (image.mode == "P" and "transparency" in image.info):
+        alpha = image.convert("RGBA").split()[-1]
+        return alpha.getextrema()[0] < 255
+    return False
+
+
+def to_lvgl_bin(source: bytes | str | Path, *, cf: str | None = None) -> bytes:
     """Convert *source* (image bytes or a path) to an LVGL ``.bin`` blob.
 
-    *cf* selects the output color format. Currently only ``"RGB565A8"``
-    is implemented — it is the right default for the firmware's
-    16-bpp LVGL build and supports an 8-bit alpha channel. Future
-    formats (e.g. ``"RGB565"`` for opaque images, ``"ARGB8888"``) can
-    be added without changing the API.
+    *cf* selects the output color format. Supported values:
+
+    * ``None`` (default) — auto-pick: emit ``RGB565`` for opaque
+      images (fastest on-device, mmap-eligible) and fall back to
+      ``RGB565A8`` only when the source actually contains non-opaque
+      alpha. The fallback emits a ``logging.WARNING`` so callers can
+      see when an asset misses the Stage 52 mmap fast path.
+    * ``"RGB565"`` — force opaque RGB565 (alpha is dropped).
+    * ``"RGB565A8"`` — force RGB565 + A8 plane.
 
     Requires Pillow at runtime; raises :class:`ImportError` with a
     helpful hint otherwise.
@@ -183,11 +233,29 @@ def to_lvgl_bin(source: bytes | str | Path, *, cf: str = "RGB565A8") -> bytes:
 
     img.load()  # force decoding now so the BytesIO can be GC'd
 
-    if cf.upper() != "RGB565A8":
-        raise NotImplementedError(f"output color format not supported yet: {cf}")
+    chosen = (cf or "").upper()
+    if chosen == "":
+        # Auto-pick: prefer RGB565; fall back to RGB565A8 on real alpha.
+        if _has_non_opaque_alpha(img):
+            _log.warning(
+                "image has non-opaque alpha (%dx%d, mode=%s); falling back "
+                "to RGB565A8 — this asset will miss the on-device mmap "
+                "fast path",
+                img.width,
+                img.height,
+                img.mode,
+            )
+            chosen = "RGB565A8"
+        else:
+            chosen = "RGB565"
 
-    w, h, pixels = _to_rgb565a8(img)
-    # RGB565A8 stride convention in LVGL: stride covers the RGB565 plane
-    # only (2 bytes/pixel). The A8 plane is implicitly the same width.
-    stride = w * 2
-    return _build_header(_CF_RGB565A8, w, h, stride) + pixels
+    if chosen == "RGB565":
+        w, h, pixels = _to_rgb565(img)
+        return _build_header(_CF_RGB565, w, h, w * 2) + pixels
+    if chosen == "RGB565A8":
+        w, h, pixels = _to_rgb565a8(img)
+        # RGB565A8 stride convention in LVGL: stride covers the RGB565
+        # plane only (2 bytes/pixel). The A8 plane is implicitly the
+        # same width.
+        return _build_header(_CF_RGB565A8, w, h, w * 2) + pixels
+    raise NotImplementedError(f"output color format not supported yet: {cf}")

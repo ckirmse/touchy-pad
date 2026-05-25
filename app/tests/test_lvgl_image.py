@@ -83,3 +83,42 @@ def test_rewrite_to_bin_path_passes_through_unknown_extensions():
     assert rewrite_to_bin_path("screens/home.pb") == "screens/home.pb"
     assert rewrite_to_bin_path("images/foo.bin") == "images/foo.bin"
     assert rewrite_to_bin_path("notes.txt") == "notes.txt"
+
+
+def test_to_lvgl_bin_auto_picks_rgb565_for_opaque_png(caplog):
+    w, h = 4, 3
+    # Fully opaque (alpha=255) — Stage 53 should auto-pick RGB565.
+    with caplog.at_level("WARNING", logger="touchy_pad.api.lvgl_image"):
+        data = to_lvgl_bin(_png_bytes(w, h, color=(0, 255, 0, 255)))
+    assert len(data) == 12 + w * h * 2
+    magic, cf, _flags, dw, dh, stride, _resv = struct.unpack("<BBHHHHH", data[:12])
+    assert magic == LVGL_BIN_MAGIC
+    assert cf == 0x12  # RGB565
+    assert (dw, dh) == (w, h)
+    assert stride == w * 2
+    # Pure green in RGB565 is 0x07E0 (little-endian).
+    pixels = data[12:]
+    for i in range(w * h):
+        word = pixels[i * 2] | (pixels[i * 2 + 1] << 8)
+        assert word == 0x07E0
+    # No WARN should fire on the opaque fast path.
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+
+def test_to_lvgl_bin_auto_falls_back_to_rgb565a8_on_real_alpha(caplog):
+    # Non-opaque alpha → must use RGB565A8 and emit a WARN.
+    with caplog.at_level("WARNING", logger="touchy_pad.api.lvgl_image"):
+        data = to_lvgl_bin(_png_bytes(2, 2, color=(255, 0, 0, 128)))
+    cf = struct.unpack("<BBHHHHH", data[:12])[1]
+    assert cf == 0x14  # RGB565A8
+    warns = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warns) == 1
+    assert "non-opaque alpha" in warns[0].getMessage()
+
+
+def test_to_lvgl_bin_explicit_cf_overrides_auto():
+    raw = _png_bytes(2, 2, color=(255, 0, 0, 255))  # opaque
+    forced = to_lvgl_bin(raw, cf="RGB565A8")
+    assert struct.unpack("<BBHHHHH", forced[:12])[1] == 0x14
+    auto = to_lvgl_bin(raw)
+    assert struct.unpack("<BBHHHHH", auto[:12])[1] == 0x12

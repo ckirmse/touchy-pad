@@ -86,9 +86,13 @@ firmware's `lv_fs_drv` for `R:` makes RAM-resident files visible to
 LVGL through the same path the host uses.
 
 Image format: on the wire and on disk the firmware only understands
-LVGL's native `.bin` container (a 12-byte header + raw pixel planes —
-RGB565A8 by default). Hosts do **not** need to know this. The Python
-package (`touchy_pad.client.TouchyClient.file_save`) auto-detects any
+LVGL's native `.bin` container (a 12-byte header + raw pixel planes).
+The default output format is **RGB565** (matching the 16bpp display
+build), with an automatic fallback to **RGB565A8** when the source
+image actually contains non-opaque pixels — the host emits a single
+`WARNING` on `touchy_pad.api.lvgl_image` to flag the slow path.
+Hosts do **not** need to know any of this. The Python package
+(`touchy_pad.client.TouchyClient.file_save`) auto-detects any
 Pillow-readable image (BMP, PNG, JPEG, GIF, WebP) by its magic bytes,
 converts it to LVGL `.bin`, **and rewrites the destination path's
 extension to `.bin`** before transmitting. So
