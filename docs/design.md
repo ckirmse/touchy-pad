@@ -686,6 +686,65 @@ an atomic rename to protect from filesystem corruption. until closed the filenam
 * The max block size for a FileWrite should be picked to fit in a USB bulk transfer (4KB?)
 * The current screen preferences string should include the full path to the file instead of just the screen name.  The device protocol screen_load command should also provide full paths.
 
+## Stage 52: mmap image files when possible (DONE)
+
+* Extend our fs.h interface so that there is a get_memory_ptr(path, size_t *lenout) operation that can be applied to our two filesystem classes.  This new method will be a bit like mmap wrt use.  The flash filesystem will always return NULL to indicate not supported.  But the ram filesystem will return the base address of the bytes that make up that file.
+* Extend our Image widget image load code:
+  * try to use our Fs classes to get an in-memory base pointer for our image file.  If we can get such a ptr and the file format EXACTLY matches our display format (for our current displays that is probably RGB565 but you should ask lvgl) build up an lv_image_dsc_t based on the file header and a ptr to the rest of the bytes.  This will avoid most of the 'file copy overhead for images'
+  * For any other case (image wasn't from R: or the file format was not an exact match), print a WARN log message to the device log saying why the image couldn't be direct mapped.  Then just use the standard file read API that is already working.
+
+Implementation notes:
+
+* `Fs::peek()` (already used by `lv_fs_drv`) was promoted to a virtual
+  method on the `Fs` base, defaulting to `nullptr` (FlashFs has no
+  in-memory representation). `RamFs::peek()` returns the existing
+  PSRAM-resident pointer + length, so we reuse one entry point instead
+  of inventing a parallel `get_memory_ptr` API.
+* New helper `try_mmap_image()` in `firmware/main/widgets/image_mmap.cpp`
+  walks the wire path through `fs_peek()`, validates that the on-disk
+  `lv_image_header_t.cf` matches `LV_COLOR_FORMAT_NATIVE` (currently
+  `RGB565` for the 16bpp display build), and populates an
+  `lv_image_dsc_t` whose `data` pointer aliases directly into RamFs.
+  On any mismatch it returns a short human-readable reason and the
+  caller logs an `ESP_LOGW`.
+* `apply_image_attrs` (plain image widget) and `build_image_button`
+  (released + pressed assets) both try the fast path first and fall
+  back to the file-read decoder via `lv_image_set_src(img, "F:host/…")`.
+  Heap-allocated `lv_image_dsc_t`s are owned by the widget and released
+  via `LV_EVENT_DELETE` callbacks.
+* The LVGL `lv_image_header_t` layout is sniffed directly from the
+  bundled `lvgl__lvgl` component; if LVGL is ever bumped, both the host
+  encoder and this helper get updated in lockstep so layouts stay
+  consistent.
+* Defers a known hazard to Stage 55: overwriting an in-use Ram file
+  while the LVGL widget tree still references the aliased pointer.
+  Today the host doesn't do that mid-session.
+
+## Stage 53: prefer native formats
+
+In our python function that generates LVGL image files (in native format), highly prefer RGB565 as the output format.  Only fall back to an alpha channel supporting format if the source image file includes alpha channel data.  If you must do such fallback print a WARN log message to the python log.
+
+## Stage 54: Allow optionally storing Widget data in files
+
+Add the ability for Widgets (including Screens) to come from device filesystem files rather than just 'in-band' inside their containing object. This will allow us to eventually minimize redraws/updating only parts of layouts as we wish. 
+
+To do this:
+
+* Add a new message called WidgetRef.  It should have a filepath inside it of where the foo.pb serialized Widget protobuf lives on the filesystems.
+* Host can optionally use the various file write operations to write Widget files as needed (quite analogous to how Screens were written - try to refactor to share code).  By convention they should be written by the host always to "X:host/widgets/NAME.pb" where X is a valid filesystem letter.
+* Extend Widget.kind message so it can contain a WidgetRef as one of its variants.
+btw I don't care about backwards compatibility, just bump the Screen protobuf version number.  Update c++, python code and docs.
+
+## Stage 55: minimize redraws
+
+The current implementation is very expensive if we change image file contents or widget file contents.  The only way we can force those new contents to redraw is by calling Screen_load() which redraws everything.
+
+Change this to:
+
+* any time a file is written by the host (at file close time, after the file has been 'comitted').  Call a new screen_update_as_needed(filepath_of_changed_file) function (approximate name, pick something better).  Redraw ONLY any lvgl widgets that are directly or indirectly based on that file.
+
+(I suspect that the best way to do this will be by sharing code with screen_load(), recursively going through the current screen and (in the case of screen_load) drawing everything.  But if we are in an update_as_needed check each widget to see if the filename matches before bothering to redraw that widget (or its children) - but tell me what you think is best lvgl practice)
+
 ## Stage 80: development environment improvements
 * Support running a sim on the linux host?
 * Use https://lvgl.io/docs/open/debugging/gdb_plugin to faciltiate debugging

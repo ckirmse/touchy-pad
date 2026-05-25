@@ -50,6 +50,27 @@ public:
     // the file size in bytes. Returns nullptr on error.
     virtual uint8_t *readBinary(const std::string &path, size_t *len_out) = 0;
 
+    // Stage 52 — mmap-style zero-copy read.
+    //
+    // If this filesystem can serve `path`'s bytes in place (i.e. they
+    // are already contiguous in CPU-addressable RAM), returns a
+    // borrowed pointer to those bytes and sets *len_out to the file
+    // size. Returns nullptr if the file doesn't exist or the FS can't
+    // expose a stable in-memory pointer (the default — FlashFs has to
+    // copy out of LittleFS).
+    //
+    // The returned pointer is owned by the filesystem and stays valid
+    // for the lifetime of the file in the FS. Stage 55 will introduce
+    // proper invalidation when a file is overwritten while a widget
+    // still references it; for now callers must assume the file is
+    // not overwritten while they hold the pointer.
+    virtual const uint8_t *peek(const std::string &path, size_t *len_out) const
+    {
+        (void)path;
+        if (len_out) *len_out = 0;
+        return nullptr;
+    }
+
     // Delete a single file. Returns true if the file was removed (or
     // didn't exist). Does not remove directories.
     virtual bool remove(const std::string &path) = 0;
@@ -117,6 +138,12 @@ Fs *fs_for_drive(char letter);
 // path. Returns nullptr (and leaves *rest_out untouched) if the path
 // lacks a drive prefix or the drive is unknown.
 Fs *fs_resolve(const std::string &full, std::string *rest_out);
+
+// Stage 52 — drive-routed wrapper around Fs::peek.
+// Parses the drive prefix on `full_path` and forwards to the owning
+// filesystem. Returns nullptr if the path can't be routed or the FS
+// can't serve the file in place.
+const uint8_t *fs_peek(const std::string &full_path, size_t *len_out);
 
 // ---------------------------------------------------------------------------
 // Cross-FS write-transaction registry.

@@ -86,6 +86,17 @@ Fs *fs_resolve(const std::string &full, std::string *rest_out)
     return fs;
 }
 
+const uint8_t *fs_peek(const std::string &full_path, size_t *len_out)
+{
+    std::string rest;
+    Fs *fs = fs_resolve(full_path, &rest);
+    if (!fs) {
+        if (len_out) *len_out = 0;
+        return nullptr;
+    }
+    return fs->peek(rest, len_out);
+}
+
 // ---------------------------------------------------------------------------
 // Cross-FS write-transaction registry. Tracks which Fs owns the
 // current handle so subsequent FileWrite/FileClose commands can be

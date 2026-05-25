@@ -12,6 +12,7 @@
 
 #include "fps_widget.h"
 #include "force_render_widget.h"
+#include "image_mmap.h"
 #include "log_line.h"
 #include "screen_layout.h"     // apply_layout / apply_rect / apply_grid_cell / widget_is_layout
 #include "screens.h"           // screens_get_touch()
@@ -147,11 +148,38 @@ std::string to_lvgl_path(const char *wire)
     return std::string(wire);
 }
 
+// LV_EVENT_DELETE handler that frees a heap-allocated `lv_image_dsc_t`
+// owned by an image / image-button widget. The dsc's `data` field
+// aliases into RamFs storage and must NOT be freed here.
+void image_dsc_delete_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_DELETE) return;
+    delete static_cast<lv_image_dsc_t *>(lv_event_get_user_data(e));
+}
+
 void apply_image_attrs(lv_obj_t *img, const touchy_Image &im)
 {
     if (im.asset[0] != '\0') {
-        std::string lv_path = to_lvgl_path(im.asset);
-        lv_image_set_src(img, lv_path.c_str());
+        // Stage 52 fast path: if the asset lives on a mmappable FS
+        // (R:) and its on-disk pixel format matches the display
+        // native, alias the bytes directly via an lv_image_dsc_t —
+        // no decode/copy. The dsc is heap-allocated and freed on the
+        // widget's LV_EVENT_DELETE.
+        auto *dsc = new (std::nothrow) lv_image_dsc_t{};
+        const char *why = nullptr;
+        if (dsc && try_mmap_image(im.asset, dsc, &why)) {
+            lv_image_set_src(img, dsc);
+            lv_obj_add_event_cb(img, image_dsc_delete_cb,
+                                LV_EVENT_DELETE, dsc);
+        } else {
+            if (dsc) delete dsc;
+            if (why && *why) {
+                ESP_LOGW(TAG, "image %s: mmap declined (%s); using file read",
+                         im.asset, why);
+            }
+            std::string lv_path = to_lvgl_path(im.asset);
+            lv_image_set_src(img, lv_path.c_str());
+        }
     }
     if (im.has_scale) lv_image_set_scale(img, (uint16_t)im.scale);
     if (im.has_rotation) lv_image_set_rotation(img, im.rotation);
@@ -195,16 +223,19 @@ lv_obj_t *build_image(lv_obj_t *parent, const touchy_Widget &w)
 // to the child image.
 
 // User-data for the press/release src-swap handler. `img_child` is the
-// inner lv_image owned by the button. Each state owns a heap-allocated
-// LVGL path string (e.g. "F:/host/foo.bin") plus optional scale /
-// rotation overrides. Strings and the struct itself are freed in
-// image_button_state_delete_cb when the button is destroyed.
+// inner lv_image owned by the button. Each state owns either a
+// heap-allocated LVGL path string (`path`, used by the standard file
+// decode path) or — if the Stage 52 mmap fast path succeeded — a
+// heap-allocated `lv_image_dsc_t` that aliases the image bytes in
+// RamFs (`dsc`). Exactly one of the two pointers is non-null when the
+// state is configured. Both are freed in image_button_state_delete_cb.
 struct ImageButtonSrc {
-    char *path;          // strdup'd; nullptr if state isn't configured
-    bool has_scale;
-    uint16_t scale;
-    bool has_rotation;
-    int32_t rotation;
+    char            *path;        // strdup'd; nullptr if state isn't configured or mmap'd
+    lv_image_dsc_t  *dsc;         // heap; nullptr unless mmap fast path took over
+    bool      has_scale;
+    uint16_t  scale;
+    bool      has_rotation;
+    int32_t   rotation;
 };
 struct ImageButtonState {
     lv_obj_t *img_child;
@@ -219,7 +250,42 @@ void image_button_state_delete_cb(lv_event_t *e)
     if (!st) return;
     free(st->released.path);
     free(st->pressed.path);
+    delete st->released.dsc;
+    delete st->pressed.dsc;
     delete st;
+}
+
+// Populate `dst` from a `touchy.Image` field. Mirrors the choice
+// `apply_image_attrs` makes for plain images: try the Stage 52 mmap
+// fast path first, otherwise fall back to a strdup'd LVGL path.
+void image_button_src_init(ImageButtonSrc &dst, const touchy_Image &im)
+{
+    dst = {};
+    if (im.asset[0] == '\0') return;
+    dst.has_scale    = im.has_scale;
+    dst.scale        = (uint16_t)im.scale;
+    dst.has_rotation = im.has_rotation;
+    dst.rotation     = im.rotation;
+
+    auto *dsc = new (std::nothrow) lv_image_dsc_t{};
+    const char *why = nullptr;
+    if (dsc && try_mmap_image(im.asset, dsc, &why)) {
+        dst.dsc = dsc;
+        return;
+    }
+    delete dsc;
+    if (why && *why) {
+        ESP_LOGW(TAG, "image_button %s: mmap declined (%s); using file read",
+                 im.asset, why);
+    }
+    std::string lv_path = to_lvgl_path(im.asset);
+    dst.path = strdup(lv_path.c_str());
+}
+
+// True iff this state has any image-source override (mmap or path).
+bool image_button_src_configured(const ImageButtonSrc &s)
+{
+    return s.path != nullptr || s.dsc != nullptr;
 }
 
 // Apply the chosen state's src + scale + rotation to the inner image.
@@ -230,7 +296,8 @@ void image_button_apply(lv_obj_t *img,
                         const ImageButtonSrc &state,
                         const ImageButtonSrc &fallback)
 {
-    if (state.path) lv_image_set_src(img, state.path);
+    if (state.dsc)       lv_image_set_src(img, state.dsc);
+    else if (state.path) lv_image_set_src(img, state.path);
     if (state.has_scale)         lv_image_set_scale(img, state.scale);
     else if (fallback.has_scale) lv_image_set_scale(img, fallback.scale);
     if (state.has_rotation)         lv_image_set_rotation(img, state.rotation);
@@ -240,7 +307,7 @@ void image_button_apply(lv_obj_t *img,
 void image_button_press_release_cb(lv_event_t *e)
 {
     auto *st = static_cast<ImageButtonState *>(lv_event_get_user_data(e));
-    if (!st || !st->pressed.path || !st->img_child) return;
+    if (!st || !image_button_src_configured(st->pressed) || !st->img_child) return;
     lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_PRESSED) {
         image_button_apply(st->img_child, st->pressed, st->released);
@@ -266,23 +333,17 @@ lv_obj_t *build_image_button(lv_obj_t *parent, const touchy_Widget &w)
     if (!st) return btn;
     st->img_child = img;
 
-    std::string released_path = to_lvgl_path(released.asset);
-    st->released = {strdup(released_path.c_str()),
-                    released.has_scale,    (uint16_t)released.scale,
-                    released.has_rotation, released.rotation};
+    image_button_src_init(st->released, released);
     if (ib.has_pressed && ib.pressed.asset[0] != '\0') {
-        std::string pressed_path = to_lvgl_path(ib.pressed.asset);
-        st->pressed = {strdup(pressed_path.c_str()),
-                       ib.pressed.has_scale,    (uint16_t)ib.pressed.scale,
-                       ib.pressed.has_rotation, ib.pressed.rotation};
+        image_button_src_init(st->pressed, ib.pressed);
     }
     ESP_LOGI(TAG, "build_image_button id='%s' released='%s' has_pressed=%d",
-             w.id, released_path.c_str(), (int)ib.has_pressed);
+             w.id, released.asset, (int)ib.has_pressed);
 
     // Apply released-state attrs immediately.
     image_button_apply(img, st->released, st->released);
 
-    if (st->pressed.path) {
+    if (image_button_src_configured(st->pressed)) {
         // Listen on the button (which owns the press state machine);
         // the handler updates the inner image's src/scale/rotation.
         lv_obj_add_event_cb(btn, image_button_press_release_cb,

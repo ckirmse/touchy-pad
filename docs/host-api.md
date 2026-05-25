@@ -106,6 +106,17 @@ internally it splits `data` into 4 KiB chunks, drives the
 sequence, and aborts with `File_Close(commit=False)` if anything
 raises. Callers see one atomic operation.
 
+Performance tip: when an image is stored on the PSRAM ramdisk (`R:`)
+**and** its pixel format matches the display's native color format
+(RGB565 for the current 16bpp build), the firmware aliases the image
+bytes directly into LVGL via an `lv_image_dsc_t` — skipping the file
+read/decode path entirely. Hot icons that swap frequently (e.g.
+StreamDeck-style key art) should therefore be uploaded to `R:` to
+unlock this zero-copy fast path. Mismatched formats and assets on
+`F:` still work; they just go through the standard file decoder and
+the device logs a single `ESP_LOGW` line explaining why mmap was
+declined.
+
 ### Command responses
 
 * Response(code) - 0 = okay, anything is some TBD error

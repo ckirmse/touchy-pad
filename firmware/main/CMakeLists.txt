@@ -22,6 +22,7 @@ idf_component_register(
         "widgets/widget_actions.cpp"
         "widgets/widget_builders.cpp"
         "widgets/widget_styles.cpp"
+        "widgets/image_mmap.cpp"
         "widgets/fps_widget.cpp"
         "widgets/force_render_widget.cpp"
         "macros.cpp"

@@ -22,17 +22,13 @@ public:
     void registerLvglDriver();
 
     uint8_t *readBinary(const std::string &path, size_t *len_out) override;
+    const uint8_t *peek(const std::string &path, size_t *len_out) const override;
     bool     remove(const std::string &path) override;
     bool     removeTree(const std::string &path) override;
     bool     list(const std::string &dirname, const ListCb &cb) override;
     uint32_t openWrite(const std::string &path) override;
     bool     appendWrite(uint32_t handle, const uint8_t *data, size_t len) override;
     bool     closeWrite(uint32_t handle, bool commit) override;
-
-    // Direct read of an existing file's bytes — used by the LVGL FS
-    // driver to avoid a copy. Returns the in-place pointer (still
-    // owned by RamFs) plus its length, or nullptr if not present.
-    const uint8_t *peek(const std::string &path, size_t *len_out) const;
 
 private:
     RamFs() = default;
