@@ -91,7 +91,7 @@
 	// Restores per-workspace state that doesn't live in the image: the
 	// app/ Poetry venv (Poetry stores venvs in ~/.cache/pypoetry, which
 	// is wiped on rebuild). See `just container-init`.
-	"postCreateCommand": "just container-init",
+	"postCreateCommand": "just init",
 	// X11 forwarding: use the host display directly via the mounted /tmp/.X11-unix sockets.
 	// XAUTHORITY points to the mounted host auth file (kept up to date by fix-xauth.sh on the host).
 	// DISPLAY :0 is the host display; VSCode may override with its own tunnel but Qt needs the real one.

@@ -10,37 +10,34 @@ default:
 # Developer setup
 # ---------------------------------------------------------------------------
 
-# One-time devcontainer bootstrap, invoked from devcontainer.json's
-# postCreateCommand. Restores per-workspace state that doesn't live in the
-# container image (notably the app/ Poetry venv, since Poetry stores its
-# venvs under ~/.cache/pypoetry which is wiped on container rebuilds).
-container-init:
+# Set up the dev environment: install all Poetry venvs, wire git hooks.
+# Run once after cloning or after a devcontainer rebuild — safe to re-run.
+# Also invoked automatically by devcontainer.json's postCreateCommand.
+init:
     #!/usr/bin/env bash
     set -euo pipefail
-    # The ESP-IDF activate script (sourced from .bashrc/.zshrc) leaves us
-    # inside its own Python venv and prepends cross-toolchain paths. Poetry
-    # would otherwise install into that venv and native builds would pick
-    # up the cross 'ld'. Strip both before running poetry.
+    # The ESP-IDF activate script prepends cross-toolchain paths and activates
+    # its own venv. Strip both so Poetry creates its venvs in the right place
+    # and native meson/pip builds find the host linker instead of xtensa-ld.
     unset VIRTUAL_ENV
     export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd:)"
-    cd app && poetry install --no-interaction --extras sim
-    echo "✓ container-init complete"
-
-# Set up a fresh clone: install Python deps and register git hooks.
-# Run once after cloning; safe to re-run at any time.
-init:
-    cd app && poetry install
-    cd app && poetry run pre-commit install
-    cd app && poetry run pre-commit install --hook-type pre-push
-    @echo "✓ Dev environment ready. Run 'just build-proto' to generate bindings."
+    cd {{justfile_directory()}}/app && poetry install --no-interaction --extras sim
+    # streamdeck-probe: Poetry 2.x ignores [tool.poetry.dependencies] path deps
+    # when a [project] table is present, so force-install the editable touchy-pad
+    # link via pip after the normal poetry install.
+    cd {{justfile_directory()}}/tools/streamdeck-probe && poetry install --no-interaction
+    poetry run pip install -q -e {{justfile_directory()}}/app[sim]
+    cd {{justfile_directory()}}/app && poetry run pre-commit install
+    poetry run pre-commit install --hook-type pre-push
+    echo "✓ Dev environment ready. Run 'just build-proto' to generate bindings."
 
 # Where generated proto outputs land.
 #  - Python output is dropped directly into the host package so `poetry build`
 #    picks it up automatically.
 #  - C output goes into firmware/main/proto/ so it lives inside the component
 #    tree; CMake finds it via a local relative path. Both are gitignored.
-py_proto_dst := "app/src/touchy_pad/_proto"
-c_proto_dst  := "firmware/main/proto"
+py_proto_dst := justfile_directory() + "/app/src/touchy_pad/_proto"
+c_proto_dst  := justfile_directory() + "/firmware/main/proto"
 
 # The system Python (NOT the ESP-IDF venv). The ESP-IDF activate script
 # overrides `python3` on PATH inside this devcontainer, but the host-side
@@ -61,12 +58,12 @@ sys_python := env("SYS_PYTHON", "/usr/bin/python3")
 # emulate it with `[ src -nt dst ]`.
 # ---------------------------------------------------------------------------
 
-touchy_proto     := "proto/touchy.proto"
-touchy_opts      := "proto/touchy.options"
-widgets_proto    := "proto/widgets.proto"
-widgets_opts     := "proto/widgets.options"
-prefs_proto      := "proto/preferences.proto"
-prefs_opts       := "proto/preferences.options"
+touchy_proto     := justfile_directory() + "/proto/touchy.proto"
+touchy_opts      := justfile_directory() + "/proto/touchy.options"
+widgets_proto    := justfile_directory() + "/proto/widgets.proto"
+widgets_opts     := justfile_directory() + "/proto/widgets.options"
+prefs_proto      := justfile_directory() + "/proto/preferences.proto"
+prefs_opts       := justfile_directory() + "/proto/preferences.options"
 py_touchy_out    := py_proto_dst + "/touchy_pb2.py"
 py_widgets_out   := py_proto_dst + "/widgets_pb2.py"
 py_prefs_out     := py_proto_dst + "/preferences_pb2.py"
@@ -99,7 +96,7 @@ build-proto-py:
     fi
     mkdir -p {{py_proto_dst}}
     {{sys_python}} -m grpc_tools.protoc \
-        -Iproto \
+        -I{{justfile_directory()}}/proto \
         --python_out={{py_proto_dst}} \
         {{touchy_proto}} {{widgets_proto}} {{prefs_proto}}
     echo "wrote {{py_touchy_out}} {{py_widgets_out}} {{py_prefs_out}}"
@@ -128,8 +125,8 @@ build-proto-c:
     # nanopb's generator wants to run from a directory that contains the
     # .proto file so its --proto_path defaults line up.
     mkdir -p {{c_proto_dst}}
-    cd proto && {{sys_python}} -m nanopb.generator.nanopb_generator \
-        --output-dir=../{{c_proto_dst}} \
+    cd {{justfile_directory()}}/proto && {{sys_python}} -m nanopb.generator.nanopb_generator \
+        --output-dir={{c_proto_dst}} \
         touchy.proto widgets.proto preferences.proto
     echo "wrote {{c_touchy_out}} {{c_widgets_out}} {{c_prefs_out}}"
 
@@ -137,8 +134,8 @@ build-proto-c:
 # screen, shown when no host-uploaded screens are present) into a C++
 # header carrying its serialised protobuf bytes. Depends on
 # build-proto-py because the embed script needs touchy_pb2.
-default_screen_json := "proto/default_screen.json"
-default_screen_out  := "firmware/main/default_screen_pb.h"
+default_screen_json := justfile_directory() + "/proto/default_screen.json"
+default_screen_out  := justfile_directory() + "/firmware/main/default_screen_pb.h"
 build-default-screen: build-proto-py
     #!/usr/bin/env bash
     set -euo pipefail
@@ -150,7 +147,7 @@ build-default-screen: build-proto-py
         echo "build-default-screen: up to date"
         exit 0
     fi
-    {{sys_python}} proto/embed_screen_json.py \
+    {{sys_python}} {{justfile_directory()}}/proto/embed_screen_json.py \
         {{default_screen_json}} {{default_screen_out}} default_screen_pb
 
 # ---------------------------------------------------------------------------
@@ -161,30 +158,30 @@ build-default-screen: build-proto-py
 
 # Install dependencies into the Poetry-managed venv.
 app-install:
-    cd app && poetry install --no-interaction
+    cd {{justfile_directory()}}/app && poetry install --no-interaction
 
 # Run the test suite. Ensures the generated proto module is present first.
 app-test: build-proto-py
-    cd app && poetry run pytest
+    cd {{justfile_directory()}}/app && poetry run pytest
 
 # Run the linter.
 app-lint: build-proto-py
-    cd app && poetry lock && poetry run ruff format src tests
+    cd {{justfile_directory()}}/app && poetry lock && poetry run ruff format src tests
 
 # Build the public-API HTML docs into docs/python-api/ (commit-friendly).
 # Requires the optional `docs` Poetry group: `poetry install --with docs`.
 build-docs: build-proto-py
-    cd app && poetry run mkdocs build --site-dir ../docs/python-api
+    cd {{justfile_directory()}}/app && poetry run mkdocs build --site-dir {{justfile_directory()}}/docs/python-api
 
 # Build wheel + sdist into app/dist/. Regenerates proto first so the
 # wheel always contains an up-to-date touchy_pb2.py.
 app-build: build-proto-py
-    cd app && poetry build
+    cd {{justfile_directory()}}/app && poetry build
 
 # Run the touchy CLI inside the Poetry venv. Forward extra args:
 #   just app-run -- version
 app-run *ARGS: build-proto-py
-    cd app && poetry run touchy {{ARGS}}
+    cd {{justfile_directory()}}/app && poetry run touchy {{ARGS}}
 
 # ---------------------------------------------------------------------------
 # Versioning
@@ -247,7 +244,7 @@ flash: firmware-build
     # which breaks inside an already-activated Python environment.
     # cd into build so the relative binary paths in flash_args resolve.
     esptool_py="esptool"
-    cd firmware/build
+    cd {{justfile_directory()}}/firmware/build
     mapfile -t flash_args < flash_args
     # flash_args has two lines: flags line, then addr:file pairs per line.
     # Flatten them into a single array of words.
@@ -278,7 +275,7 @@ merge-bin: firmware-build
         echo "error: esptool not found on PATH" >&2
         exit 1
     fi
-    cd firmware/build
+    cd {{justfile_directory()}}/firmware/build
     mapfile -t flash_args < flash_args
     args=()
     for line in "${flash_args[@]}"; do
@@ -286,7 +283,7 @@ merge-bin: firmware-build
         args+=("${words[@]}")
     done
     "${esptool_py}" --chip esp32s3 merge-bin -o "${out}" "${args[@]}"
-    echo "wrote firmware/build/${out}"
+    echo "wrote {{justfile_directory()}}/firmware/build/${out}"
 
 # End-user flash flow: build → merge → flash the merged image at 0x0.
 # Mirrors what the `touchy update` CLI does after downloading a release
@@ -308,7 +305,7 @@ flash-merged: merge-bin
     echo "flashing merged image to $port"
     esptool -p "$port" -b 460800 \
         --before default-reset --after hard-reset \
-        --chip esp32s3 write-flash 0x0 firmware/build/touchy_pad_merged.bin
+        --chip esp32s3 write-flash 0x0 {{justfile_directory()}}/firmware/build/touchy_pad_merged.bin
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +316,7 @@ flash-merged: merge-bin
 build-all: firmware-build app-build
 
 test-interactive: 
-    cd app && poetry run touchy screens demo --listen
+    cd {{justfile_directory()}}/app && poetry run touchy screens demo --listen
 
 # Lint + test everything (currently just the host app).
 test: app-lint app-test
@@ -329,9 +326,17 @@ test: app-lint app-test
 # ---------------------------------------------------------------------------
 
 # Run streamdeck-probe via its Poetry venv. Extra args are forwarded:
-#   just streamdeck-probe -- --sim --sim-headless
+#   just streamdeck-probe --sim --sim-headless
 streamdeck-probe *ARGS:
-    cd tools/streamdeck-probe && poetry run streamdeck-probe {{ARGS}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    unset VIRTUAL_ENV
+    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd:)"
+    # Ensure the editable touchy-pad link is present (Poetry 2.x drops path
+    # deps from [tool.poetry.dependencies] when a [project] table exists).
+    cd {{justfile_directory()}}/tools/streamdeck-probe
+    poetry run pip install -q -e {{justfile_directory()}}/app[sim]
+    poetry run streamdeck-probe {{ARGS}}
 
 # ---------------------------------------------------------------------------
 # StreamController
@@ -373,5 +378,5 @@ clean:
     rm -f {{py_proto_dst}}/touchy_pb2.py {{py_proto_dst}}/touchy_pb2.pyi
     rm -f {{py_proto_dst}}/widgets_pb2.py {{py_proto_dst}}/widgets_pb2.pyi
     rm -rf {{c_proto_dst}}
-    rm -f firmware/main/default_screen_pb.h
-    rm -rf app/dist app/build app/src/*.egg-info
+    rm -f {{default_screen_out}}
+    rm -rf {{justfile_directory()}}/app/dist {{justfile_directory()}}/app/build {{justfile_directory()}}/app/src/*.egg-info
