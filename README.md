@@ -25,7 +25,7 @@ More installation instructions [here](docs/installing.md).
 * Support for more devices (including little tiny 3 or 4" displays - suitable for building into custom keyboards or PC cases)
 
 I made this little video for the streamcontroller devs showing the current proof-of-concept:
-![streamcontroller vid](docs/videos/streamcontroller.mp4)
+[![Watch the video](https://img.youtube.com/vi/U-vNR_TbUDM/maxresdefault.jpg)](https://youtu.be/U-vNR_TbUDM)
 
 ## For developers
 
