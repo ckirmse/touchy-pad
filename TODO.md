@@ -37,6 +37,7 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 
 Main new features: Works with StreamController app to provide arbitrary user buttons
 
+* [ ] investigate [opendeck](docs/opendeck.md) and possibly do a plugin for that instead-of or in-addition-to StreamController.
 * [ ] add some of the example JSON to the API docs
 * [ ] add a widget handle concept so host can say to just redraw one particular widget (only need to implement for screens/layouts/image)
 * [ ] make screen sleep default timeout
