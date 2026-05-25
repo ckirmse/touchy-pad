@@ -20,7 +20,7 @@ init:
     # its own venv. Strip both so Poetry creates its venvs in the right place
     # and native meson/pip builds find the host linker instead of xtensa-ld.
     unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd:)"
+    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
     # Force Poetry to create its own isolated venvs rather than reusing any
     # active virtualenv (which might be the ESP-IDF venv from our .zshrc).
     export POETRY_VIRTUALENVS_CREATE=true
@@ -188,7 +188,7 @@ app-install:
     #!/usr/bin/env bash
     set -euo pipefail
     unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd:)"
+    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
     export POETRY_VIRTUALENVS_CREATE=true
     export POETRY_VIRTUALENVS_IN_PROJECT=false
     cd {{justfile_directory()}}/app && poetry install --no-interaction
@@ -198,7 +198,7 @@ app-test: build-proto-py
     #!/usr/bin/env bash
     set -euo pipefail
     unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd:)"
+    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
     export POETRY_VIRTUALENVS_CREATE=true
     export POETRY_VIRTUALENVS_IN_PROJECT=false
     cd {{justfile_directory()}}/app && poetry run pytest
@@ -208,7 +208,7 @@ app-lint: build-proto-py
     #!/usr/bin/env bash
     set -euo pipefail
     unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd:)"
+    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
     export POETRY_VIRTUALENVS_CREATE=true
     export POETRY_VIRTUALENVS_IN_PROJECT=false
     cd {{justfile_directory()}}/app && poetry lock && poetry run ruff format src tests
@@ -219,7 +219,7 @@ build-docs: build-proto-py
     #!/usr/bin/env bash
     set -euo pipefail
     unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd:)"
+    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
     export POETRY_VIRTUALENVS_CREATE=true
     export POETRY_VIRTUALENVS_IN_PROJECT=false
     cd {{justfile_directory()}}/app && poetry run mkdocs build --site-dir {{justfile_directory()}}/docs/python-api
@@ -230,7 +230,7 @@ app-build: build-proto-py
     #!/usr/bin/env bash
     set -euo pipefail
     unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd:)"
+    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
     export POETRY_VIRTUALENVS_CREATE=true
     export POETRY_VIRTUALENVS_IN_PROJECT=false
     cd {{justfile_directory()}}/app && poetry build
@@ -241,7 +241,7 @@ app-run *ARGS: build-proto-py
     #!/usr/bin/env bash
     set -euo pipefail
     unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd:)"
+    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
     export POETRY_VIRTUALENVS_CREATE=true
     export POETRY_VIRTUALENVS_IN_PROJECT=false
     cd {{justfile_directory()}}/app && poetry run touchy {{ARGS}}
@@ -382,7 +382,7 @@ test-interactive:
     #!/usr/bin/env bash
     set -euo pipefail
     unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd:)"
+    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
     export POETRY_VIRTUALENVS_CREATE=true
     export POETRY_VIRTUALENVS_IN_PROJECT=false
     cd {{justfile_directory()}}/app && poetry run touchy screens demo --listen
@@ -400,7 +400,7 @@ streamdeck-probe *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
     unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd:)"
+    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
     # Ensure the editable touchy-pad link is present (Poetry 2.x drops path
     # deps from [tool.poetry.dependencies] when a [project] table exists).
     cd {{justfile_directory()}}/tools/streamdeck-probe
