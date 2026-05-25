@@ -18,14 +18,14 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 * [x] Add credits for BSD licensed https://github.com/moononournation/Arduino_GFX/blob/master/src/display/Arduino_NV3041A.cpp
 * [x] add AI statement
 * [x] Make README not suck, mention goals, simulator, api, TouchyDeck, next steps
-* [ ] fix touchqscroll handle
-* [ ] Make a nice demo video
+* [x] fix touchqscroll handle
+* [x] Make a nice demo video
 * [x] build in esp installer based on automated hw model name
-* [ ] Update the default screen JSON
-* [ ] Make nice easy install instructions
+* [x] Update the default screen JSON
+* [x] Make nice easy install instructions
 * [ ] Make StreamController support proof of concept
   * [x] test current POC
-  * [ ] make a little video
+  * [x] make a little video
   * [ ] explain plans w.r.t. 3d printing and knobs on the screen
   * [ ] request feedback/propose distribution
 * [x] ensure no 10ms delay on loop polling

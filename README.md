@@ -2,6 +2,8 @@
 
 ![cyd](docs/images/jc4827w543.jpg)
 
+To see (and hear) a video demo click this:
+[![Watch the video](https://img.youtube.com/vi/-RXaUL3E1Vk/hqdefault.jpg)](https://youtu.be/-RXaUL3E1Vk)
 
 If you have Python installed and a [suitable device](docs/hardware.md), you can have this running on your hardware in less than a minute:
 ```bash
