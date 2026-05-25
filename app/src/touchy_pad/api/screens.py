@@ -1198,6 +1198,7 @@ def build_demo_screens() -> list[Screen]:
             left_touch_color=0x00BFFF,
             right_touch_color=0xFFA500,
             middle_touch_color=0xFF44FF,
+            scrollbar_color=0xADD8E6,
             touch_ripple=ripple_animation(
                 start_opa=180,
                 max_radius=45,
