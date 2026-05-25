@@ -43,9 +43,9 @@ Main new features: Works with StreamController app to provide arbitrary user but
 * [ ] add some of the example JSON to the API docs
 * [ ] add a widget handle concept so host can say to just redraw one particular widget (only need to implement for screens/layouts/image)
 * [ ] make screen sleep default timeout
-* [ ] Add support for F:widgets/foo.pb widget files.  This would allow TouchyDeck to own a R:widgets/deck.pb.  Which could be nested into a F: screen.  So that dynamic StreamDeck emulated stuff could be updated independently of the configurable screens the user has selected.  Probably should add a way for the host to see dimensions of arbitrary widgets in screens/walk the screen list?
+* [x] Add support for F:widgets/foo.pb widget files.  This would allow TouchyDeck to own a R:widgets/deck.pb.  Which could be nested into a F: screen.  So that dynamic StreamDeck emulated stuff could be updated independently of the configurable screens the user has selected.  Probably should add a way for the host to see dimensions of arbitrary widgets in screens/walk the screen list?
 * [ ] Built-in [StreamController](https://streamcontroller.github.io/docs/latest/) support.  Probably via the mock device proof of concept.
-* [ ] Turn off "Expensive debugging flags!" in sdkconfig.defaults
+* [x] Turn off "Expensive debugging flags!" in sdkconfig.defaults
 * [ ] Support a few more board types
 * [ ] implement the StreamDeck background graphic API
 

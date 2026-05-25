@@ -568,10 +568,8 @@ message ForceRender {
 // into the parent layout in place of this ref. Conventionally the
 // host writes referenced widgets to `X:host/widgets/<name>.pb` where
 // `X` is a valid drive letter (`F:` = LittleFS, `R:` = RamFs).
-//
-// This is purely an authoring / future-redraw convenience for Stage
-// 55; semantically a `WidgetRef` is equivalent to inlining the
-// decoded `Widget` at the same position.
+// Wiget pb files can be updated by the host and the device will auto
+// redraw just that portion of the screen.
 message WidgetRef {
     // Drive-prefixed path to the serialized `Widget` (e.g.
     // `"R:host/widgets/key0.pb"`). Empty paths are skipped with a WARN.
