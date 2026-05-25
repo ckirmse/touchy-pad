@@ -2324,4 +2324,4 @@ streamdeck = ["streamcontroller-streamdeck"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.15"
-content-hash = "30b258050c1c6a8d067552ae7442bed5c1f261fa35921ab03455547ebf919558"
+content-hash = "f14e512860bb1c0905d4ebbf1f80e6a6f7da9fa35d81c0e8f63fe456b21268d1"
