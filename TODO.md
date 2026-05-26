@@ -23,7 +23,7 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 * [x] build in esp installer based on automated hw model name
 * [x] Update the default screen JSON
 * [x] Make nice easy install instructions
-* [ ] Make StreamController support proof of concept
+* [x] Make StreamController support proof of concept
   * [x] test current POC
   * [x] make a little video
   * [ ] explain plans w.r.t. 3d printing and knobs on the screen
