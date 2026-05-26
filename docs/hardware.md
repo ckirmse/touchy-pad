@@ -11,6 +11,17 @@ Currently the following two boards are supported
 CYD "Cheap Yellow Display" boards such as jc4827w543 (costs just $15 USD!)
 The JC4827W543 (often sold under names like Guition or Sunton) is an ESP32-S3 board paired with a 4.3" 480x272 RGB display (using an NV3041A or ST3401A controller) and usually a GT911 capacitive touch chip. For detailed hw docs see [here](https://github.com/profi-max/JC4827W543_4.3inch_ESP32S3_board).
 
+### NV3041A QSPI clock ceiling
+
+The NV3041A datasheet quotes ~40 MHz QSPI but on this particular board the
+practical maximum is **32 MHz** — anything above that produces visible
+corruption / dropped pixels. `BOARD_LCD_QSPI_CLK_HZ` in
+[firmware/boards/jc4827w543/board/board_pins.h](../firmware/boards/jc4827w543/board/board_pins.h)
+is set accordingly. At 32 MHz QSPI the raw wire bandwidth is ~16 MB/s,
+which caps a full-frame RGB565 redraw (480×272×2 ≈ 261 KB) at roughly
+~60 FPS regardless of how the host-side code is structured. Don't raise
+`BOARD_LCD_QSPI_CLK_HZ` without re-validating on real hardware.
+
 ## Waveshare 7 inch
 
 ![waveshare](images/waveshare-7.jpg)
