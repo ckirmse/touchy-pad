@@ -16,15 +16,7 @@ default:
 init:
     #!/usr/bin/env bash
     set -euo pipefail
-    # The ESP-IDF activate script prepends cross-toolchain paths and activates
-    # its own venv. Strip both so Poetry creates its venvs in the right place
-    # and native meson/pip builds find the host linker instead of xtensa-ld.
     unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
-    # Force Poetry to create its own isolated venvs rather than reusing any
-    # active virtualenv (which might be the ESP-IDF venv from our .zshrc).
-    export POETRY_VIRTUALENVS_CREATE=true
-    export POETRY_VIRTUALENVS_IN_PROJECT=false
     _repo="$(pwd)"
     cd app && poetry install --no-interaction --extras sim
     # streamdeck-probe: Poetry 2.x ignores [tool.poetry.dependencies] path deps
@@ -196,66 +188,32 @@ build-default-screen: build-proto-py
 
 # Install dependencies into the Poetry-managed venv.
 app-install:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
-    export POETRY_VIRTUALENVS_CREATE=true
-    export POETRY_VIRTUALENVS_IN_PROJECT=false
-    cd app && poetry install --no-interaction
+    env -u VIRTUAL_ENV poetry install --no-interaction --directory app
 
 # Run the test suite. Ensures the generated proto module is present first.
 app-test: build-proto-py
-    #!/usr/bin/env bash
-    set -euo pipefail
-    unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
-    export POETRY_VIRTUALENVS_CREATE=true
-    export POETRY_VIRTUALENVS_IN_PROJECT=false
-    cd app && poetry run pytest
+    env -u VIRTUAL_ENV poetry run --directory app pytest
 
 # Run the linter.
 app-lint: build-proto-py
-    #!/usr/bin/env bash
-    set -euo pipefail
-    unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
-    export POETRY_VIRTUALENVS_CREATE=true
-    export POETRY_VIRTUALENVS_IN_PROJECT=false
-    cd app && poetry lock && poetry run ruff format src tests && poetry run ruff check --fix src tests
+    env -u VIRTUAL_ENV poetry run --directory app ruff format src/touchy_pad tests
+    cd app && env -u VIRTUAL_ENV poetry lock
+    env -u VIRTUAL_ENV poetry run --directory app ruff check --fix src/touchy_pad tests
 
 # Build the public-API HTML docs into docs/python-api/ (commit-friendly).
 # Requires the optional `docs` Poetry group: `poetry install --with docs`.
 build-docs: build-proto-py
-    #!/usr/bin/env bash
-    set -euo pipefail
-    unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
-    export POETRY_VIRTUALENVS_CREATE=true
-    export POETRY_VIRTUALENVS_IN_PROJECT=false
-    cd app && poetry run mkdocs build --site-dir ../docs/python-api
+    env -u VIRTUAL_ENV poetry run --directory app mkdocs build --site-dir ../docs/python-api
 
 # Build wheel + sdist into app/dist/. Regenerates proto first so the
 # wheel always contains an up-to-date touchy_pb2.py.
 app-build: build-proto-py
-    #!/usr/bin/env bash
-    set -euo pipefail
-    unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
-    export POETRY_VIRTUALENVS_CREATE=true
-    export POETRY_VIRTUALENVS_IN_PROJECT=false
-    cd app && poetry build
+    cd app && env -u VIRTUAL_ENV poetry build
 
 # Run the touchy CLI inside the Poetry venv. Forward extra args:
 #   just app-run -- version
 app-run *ARGS: build-proto-py
-    #!/usr/bin/env bash
-    set -euo pipefail
-    unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
-    export POETRY_VIRTUALENVS_CREATE=true
-    export POETRY_VIRTUALENVS_IN_PROJECT=false
-    cd app && poetry run touchy {{ARGS}}
+    env -u VIRTUAL_ENV poetry run --directory app touchy {{ARGS}}
 
 # ---------------------------------------------------------------------------
 # Rust library + demo (rust/) — pure-Rust async client.
@@ -367,7 +325,11 @@ bump-version VERSION="":
 # Build the firmware. Regenerates C proto bindings first so the firmware
 # always compiles against the latest schema.
 firmware-build: build-proto-c build-default-screen
-    cmake --build firmware/build
+    #!/usr/bin/env bash
+    # The IDF activate script detects sourcing via ${0##*/}; when Just runs a
+    # recipe the temp-script name doesn't match "bash", so sourcing would fail.
+    # Run a fresh bash -c so $0 is "bash" and is_sourced() returns true.
+    exec bash -c 'source ~/.espressif/tools/activate_idf_v6.0.1.sh && cmake --build firmware/build'
 
 flash: firmware-build
     #!/usr/bin/env bash
@@ -457,17 +419,11 @@ flash-merged: merge-bin
 # Aggregate convenience targets
 # ---------------------------------------------------------------------------
 
-# Build firmware + Python wheel (proto bindings regenerated as needed).
-build-all: firmware-build app-build
+# Build everything
+build-all: firmware-build app-build rust-build
 
-test-interactive: 
-    #!/usr/bin/env bash
-    set -euo pipefail
-    unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
-    export POETRY_VIRTUALENVS_CREATE=true
-    export POETRY_VIRTUALENVS_IN_PROJECT=false
-    cd app && poetry run touchy screens demo --listen
+test-interactive:
+    env -u VIRTUAL_ENV poetry run --directory app touchy screens demo --listen
 
 # Lint + test everything (currently just the host app).
 test: app-lint app-test
@@ -481,8 +437,6 @@ test: app-lint app-test
 streamdeck-probe *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
-    unset VIRTUAL_ENV
-    export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | paste -sd: -)"
     # Ensure the editable touchy-pad link is present (Poetry 2.x drops path
     # deps from [tool.poetry.dependencies] when a [project] table exists).
     cd tools/streamdeck-probe
@@ -518,24 +472,21 @@ streamcontroller-run *ARGS:
     # Ensure the StreamController submodule is initialized and updated
     # to the latest pr-touchypad branch.
     git submodule update --init --remote tools/StreamController
-    # Strip ALL ESP-IDF cross-toolchains from PATH so the native ld is found.
-    CLEAN_PATH=$(echo "$PATH" | tr ':' '\n' | grep -v '\.espressif' | tr '\n' ':')
-    CLEAN_PATH="${CLEAN_PATH%:}"
     if [ ! -f "{{sc_pip}}" ]; then
         echo "Creating StreamController venv…"
-        PATH="$CLEAN_PATH" python3 -m venv {{sc_venv}}
+        python3 -m venv {{sc_venv}}
     fi
     stamp="{{sc_venv}}/.requirements_installed"
     if [ ! -f "$stamp" ] || [ "{{sc_dir}}/requirements.txt" -nt "$stamp" ]; then
         echo "Installing StreamController requirements…"
-        PATH="$CLEAN_PATH" {{sc_pip}} install --upgrade pip
-        PATH="$CLEAN_PATH" {{sc_pip}} install -r {{sc_dir}}/requirements.txt
+        {{sc_pip}} install --upgrade pip
+        {{sc_pip}} install -r {{sc_dir}}/requirements.txt
         touch "$stamp"
     fi
     # Always (re-)install the local app/ in editable mode so the live source
     # tree is used instead of whatever PyPI version requirements.txt pulled in.
     # Include the [sim] extra so PySide6 is available when --sim is passed.
-    PATH="$CLEAN_PATH" {{sc_pip}} install -q -e {{justfile_directory()}}/app[sim]
+    {{sc_pip}} install -q -e {{justfile_directory()}}/app[sim]
     # Parse our own flags out of ARGS so the rest can be forwarded to main.py.
     export TOUCHY_SIM=0
     export TOUCHY_SIM_HEADLESS=0
