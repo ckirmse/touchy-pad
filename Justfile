@@ -341,6 +341,12 @@ firmware-reconfigure:
 flash: firmware-build
     #!/usr/bin/env bash
     set -euo pipefail
+    # Activate IDF env if not already done (needed for esptool on PATH).
+    # The activate script checks ${0##*/}=="bash"; Just's temp-script name fails
+    # that check, so re-exec this script under a plain bash that sources it first.
+    if [ -z "${IDF_PATH:-}" ]; then
+        exec bash -c 'source ~/.espressif/tools/activate_idf_v6.0.1.sh && exec bash "$1"' -- "$0"
+    fi
     # Pick the first readable+writable ttyACM* under /host/dev/
     port=""
     for candidate in $(ls /host/dev/ttyACM* 2>/dev/null | sort); do
@@ -354,9 +360,6 @@ flash: firmware-build
         exit 1
     fi
     echo "flashing to $port"
-    # Use esptool directly from the ESP-IDF venv — avoids sourcing export.sh,
-    # which breaks inside an already-activated Python environment.
-    # cd into build so the relative binary paths in flash_args resolve.
     esptool_py="esptool"
     cd {{justfile_directory()}}/firmware/build
     mapfile -t flash_args < flash_args
@@ -378,12 +381,10 @@ flash: firmware-build
 merge-bin: firmware-build
     #!/usr/bin/env bash
     set -euo pipefail
+    if [ -z "${IDF_PATH:-}" ]; then
+        exec bash -c 'source ~/.espressif/tools/activate_idf_v6.0.1.sh && exec bash "$1"' -- "$0"
+    fi
     out="touchy_pad_merged.bin"
-    # Drive esptool directly rather than `idf.py merge-bin` — the merge
-    # step doesn't need the full IDF venv, and sourcing export.sh is
-    # brittle (the devcontainer's IDF venv periodically gets a version
-    # mismatch that aborts activation). esptool itself just needs the
-    # addr+file pairs from flash_args, which firmware-build already wrote.
     esptool_py="$(command -v esptool || command -v esptool.py)"
     if [ -z "${esptool_py}" ]; then
         echo "error: esptool not found on PATH" >&2
@@ -405,6 +406,9 @@ merge-bin: firmware-build
 flash-merged: merge-bin
     #!/usr/bin/env bash
     set -euo pipefail
+    if [ -z "${IDF_PATH:-}" ]; then
+        exec bash -c 'source ~/.espressif/tools/activate_idf_v6.0.1.sh && exec bash "$1"' -- "$0"
+    fi
     port=""
     for candidate in $(ls /host/dev/ttyACM* 2>/dev/null | sort); do
         if [ -r "$candidate" ] && [ -w "$candidate" ]; then
