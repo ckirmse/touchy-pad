@@ -79,8 +79,8 @@ should add a real brightness command.
 
 ```
 LV_EVENT_PRESSED      (1)  →  device_plugin::key_down(device, key)
-LV_EVENT_RELEASED     (8)  →  device_plugin::key_up  (device, key)
-LV_EVENT_PRESS_LOST   (7)  →  device_plugin::key_up  (device, key)
+LV_EVENT_RELEASED     (11)  →  device_plugin::key_up  (device, key)
+LV_EVENT_PRESS_LOST   (3)  →  device_plugin::key_up  (device, key)
 ```
 
 Anything else is dropped. `key` is recovered from the `host_code` via

@@ -24,6 +24,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6 import QtWidgets  # noqa: E402
 from PySide6.QtWidgets import QCheckBox, QPushButton, QSlider  # noqa: E402
 
+from touchy_pad import _proto  # noqa: E402
 from touchy_pad.api.images import make_smiley_png  # noqa: E402
 from touchy_pad.api.screens import build_demo  # noqa: E402
 from touchy_pad.sim.device import SimDevice  # noqa: E402
@@ -161,7 +162,13 @@ def test_button_press_release_edges_dispatch(qapp, tmp_path) -> None:
     evts = _drain(dev._events)
     codes = sorted(e.code for e in evts if e.host_code == 0xABC)
     # Qt's QAbstractButton.click() emits pressed → released → clicked.
-    assert codes == [1, 7, 8], codes
+    assert codes == sorted(
+        [
+            _proto.LV_EVENT_PRESSED,
+            _proto.LV_EVENT_RELEASED,
+            _proto.LV_EVENT_CLICKED,
+        ]
+    ), codes
     for e in evts:
         if e.host_code == 0xABC:
             assert e.user_data == "pad"

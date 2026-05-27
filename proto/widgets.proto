@@ -36,6 +36,100 @@ message Rect {
     int32 h = 4;
 }
 
+// LVGL event codes — mirrors lv_event_code_t from
+// firmware/managed_components/lvgl__lvgl/src/misc/lv_event.h.
+//
+// LvEvent.code is always one of these values; host-side code (Python,
+// Rust) should compare against this enum rather than hardcoded integers.
+// The numeric values are fixed by LVGL and must track the firmware's
+// LVGL version.
+enum LvEventCode {
+    // Catch-all sentinel — never forwarded as a real event.
+    LV_EVENT_ALL = 0;
+
+    // ---- Input device events ----
+    LV_EVENT_PRESSED             =  1;  // touch/click starts
+    LV_EVENT_PRESSING            =  2;  // held (sent continuously)
+    LV_EVENT_PRESS_LOST          =  3;  // pressed but finger slid off
+    LV_EVENT_SHORT_CLICKED       =  4;  // short tap, not scrolled
+    LV_EVENT_SINGLE_CLICKED      =  5;
+    LV_EVENT_DOUBLE_CLICKED      =  6;
+    LV_EVENT_TRIPLE_CLICKED      =  7;
+    LV_EVENT_LONG_PRESSED        =  8;  // held ≥ long_press_time
+    LV_EVENT_LONG_PRESSED_REPEAT =  9;
+    LV_EVENT_CLICKED             = 10;  // released after non-scroll press
+    LV_EVENT_RELEASED            = 11;  // always sent on release
+
+    // ---- Scroll / gesture ----
+    LV_EVENT_SCROLL_BEGIN        = 12;
+    LV_EVENT_SCROLL_THROW_BEGIN  = 13;
+    LV_EVENT_SCROLL_END          = 14;
+    LV_EVENT_SCROLL              = 15;
+    LV_EVENT_GESTURE             = 16;
+    LV_EVENT_KEY                 = 17;
+    LV_EVENT_ROTARY              = 18;
+
+    // ---- Focus ----
+    LV_EVENT_FOCUSED             = 19;
+    LV_EVENT_DEFOCUSED           = 20;
+    LV_EVENT_LEAVE               = 21;
+    LV_EVENT_HIT_TEST            = 22;
+    LV_EVENT_INDEV_RESET         = 23;
+    LV_EVENT_HOVER_OVER          = 24;
+    LV_EVENT_HOVER_LEAVE         = 25;
+
+    // ---- Drawing (not forwarded to host in normal operation) ----
+    LV_EVENT_COVER_CHECK         = 26;
+    LV_EVENT_REFR_EXT_DRAW_SIZE  = 27;
+    LV_EVENT_DRAW_MAIN_BEGIN     = 28;
+    LV_EVENT_DRAW_MAIN           = 29;
+    LV_EVENT_DRAW_MAIN_END       = 30;
+    LV_EVENT_DRAW_POST_BEGIN     = 31;
+    LV_EVENT_DRAW_POST           = 32;
+    LV_EVENT_DRAW_POST_END       = 33;
+    LV_EVENT_DRAW_TASK_ADDED     = 34;
+
+    // ---- Special / state ----
+    LV_EVENT_VALUE_CHANGED       = 35;  // slider, switch, checkbox changed
+    LV_EVENT_INSERT              = 36;
+    LV_EVENT_REFRESH             = 37;
+    LV_EVENT_READY               = 38;
+    LV_EVENT_CANCEL              = 39;
+    LV_EVENT_STATE_CHANGED       = 40;
+
+    // ---- Object lifecycle ----
+    LV_EVENT_CREATE              = 41;
+    LV_EVENT_DELETE              = 42;
+    LV_EVENT_CHILD_CHANGED       = 43;
+    LV_EVENT_CHILD_CREATED       = 44;
+    LV_EVENT_CHILD_DELETED       = 45;
+    LV_EVENT_SCREEN_UNLOAD_START = 46;
+    LV_EVENT_SCREEN_LOAD_START   = 47;
+    LV_EVENT_SCREEN_LOADED       = 48;
+    LV_EVENT_SCREEN_UNLOADED     = 49;
+    LV_EVENT_SIZE_CHANGED        = 50;
+    LV_EVENT_STYLE_CHANGED       = 51;
+    LV_EVENT_LAYOUT_CHANGED      = 52;
+    LV_EVENT_GET_SELF_SIZE       = 53;
+
+    // ---- Display / render pipeline ----
+    LV_EVENT_INVALIDATE_AREA          = 54;
+    LV_EVENT_RESOLUTION_CHANGED       = 55;
+    LV_EVENT_COLOR_FORMAT_CHANGED     = 56;
+    LV_EVENT_REFR_REQUEST             = 57;
+    LV_EVENT_REFR_START               = 58;
+    LV_EVENT_REFR_READY               = 59;
+    LV_EVENT_RENDER_START             = 60;
+    LV_EVENT_RENDER_READY             = 61;
+    LV_EVENT_FLUSH_START              = 62;
+    LV_EVENT_FLUSH_FINISH             = 63;
+    LV_EVENT_FLUSH_WAIT_START         = 64;
+    LV_EVENT_FLUSH_WAIT_FINISH        = 65;
+    LV_EVENT_UPDATE_LAYOUT_COMPLETED  = 66;
+    LV_EVENT_VSYNC                    = 67;
+    LV_EVENT_VSYNC_REQUEST            = 68;
+}
+
 // LVGL style selector bits. A `Style.for_state` value is the bitwise OR
 // of any combination of these constants, and is passed verbatim to
 // `lv_obj_add_style(obj, st, selector)` on the device.
@@ -412,7 +506,9 @@ message Button {
     // StreamDeck plugins, MIDI note-on / note-off). LV_EVENT_PRESS_LOST
     // also triggers `on_release` so callers always see a matching
     // press/release pair. The host distinguishes which edge fired by
-    // looking at `LvEvent.code` (1=PRESSED, 8=RELEASED, 7=CLICKED).
+    // checking `LvEvent.code` against `LvEventCode` enum values:
+    // LV_EVENT_PRESSED=1, LV_EVENT_CLICKED=10, LV_EVENT_RELEASED=11,
+    // LV_EVENT_PRESS_LOST=3.
     repeated Action on_press   = 3;  // see widgets.options for max count
     repeated Action on_release = 4;  // see widgets.options for max count
 }

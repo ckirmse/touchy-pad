@@ -11,7 +11,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use touchy_pad::Touchy;
-use touchy_pad::proto::{Action, ActionHost, Image, ImageButton, Layout, LayoutAbsolute, Rect, Screen, Widget, action, lv_event, widget};
+use touchy_pad::proto::{Action, ActionHost, Image, ImageButton, Layout, LayoutAbsolute, Rect, Screen, Widget, action, lv_event, widget, LvEventCode};
 
 #[derive(Parser, Debug)]
 #[command(name = "touchy-demo", about = "Demo CLI for the touchy-pad Rust API")]
@@ -75,7 +75,7 @@ async fn upload_demo(pad: &Touchy) -> Result<()> {
 		log::info!("uploaded {bin_path}");
 
 		let img = Image { path: bin_path, ..Default::default() };
-		let click = Action {
+		let action = Action {
 			kind: Some(action::Kind::Host(ActionHost { code: i as u32 })),
 		};
 		children.push(Widget {
@@ -88,7 +88,8 @@ async fn upload_demo(pad: &Touchy) -> Result<()> {
 			})),
 			kind: Some(widget::Kind::ImageButton(ImageButton {
 				released: Some(img),
-				on_click: vec![click],
+				on_press: vec![action.clone()],
+				on_release: vec![action],
 				..Default::default()
 			})),
 			..Default::default()
@@ -131,7 +132,10 @@ async fn cmd_listen() -> Result<()> {
 			Some(lv_event::State::Checked(c)) => format!("checked={c}"),
 			None => "-".to_string(),
 		};
-		println!("event: code={} user_data={:?} host_code={} state={}", evt.code, evt.user_data, evt.host_code, state);
+		let code_name = LvEventCode::try_from(evt.code as i32)
+			.map(|c| format!("{c:?}"))
+			.unwrap_or_else(|_| format!("{}", evt.code));
+		println!("event: code={code_name} user_data={:?} host_code={} state={}", evt.user_data, evt.host_code, state);
 	}
 	Ok(())
 }

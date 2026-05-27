@@ -51,6 +51,7 @@ from .widgets_pb2 import (  # noqa: F401  (re-exported)
     LayoutFlex,
     LayoutGrid,
     LogLine,
+    LvEventCode,
     LvState,
     MacroStep,
     MouseMove,
@@ -84,3 +85,16 @@ TEXT_ALIGN_AUTO = TextAlign.Value("TEXT_ALIGN_AUTO")
 TEXT_ALIGN_LEFT = TextAlign.Value("TEXT_ALIGN_LEFT")
 TEXT_ALIGN_CENTER = TextAlign.Value("TEXT_ALIGN_CENTER")
 TEXT_ALIGN_RIGHT = TextAlign.Value("TEXT_ALIGN_RIGHT")
+
+# Flat aliases for the most-used ``LvEventCode`` values so callers can write
+# ``_proto.LV_EVENT_PRESSED`` without poking into the descriptor.
+LV_EVENT_ALL = LvEventCode.Value("LV_EVENT_ALL")
+LV_EVENT_PRESSED = LvEventCode.Value("LV_EVENT_PRESSED")
+LV_EVENT_PRESSING = LvEventCode.Value("LV_EVENT_PRESSING")
+LV_EVENT_PRESS_LOST = LvEventCode.Value("LV_EVENT_PRESS_LOST")
+LV_EVENT_SHORT_CLICKED = LvEventCode.Value("LV_EVENT_SHORT_CLICKED")
+LV_EVENT_LONG_PRESSED = LvEventCode.Value("LV_EVENT_LONG_PRESSED")
+LV_EVENT_CLICKED = LvEventCode.Value("LV_EVENT_CLICKED")
+LV_EVENT_RELEASED = LvEventCode.Value("LV_EVENT_RELEASED")
+LV_EVENT_VALUE_CHANGED = LvEventCode.Value("LV_EVENT_VALUE_CHANGED")
+LV_EVENT_STATE_CHANGED = LvEventCode.Value("LV_EVENT_STATE_CHANGED")

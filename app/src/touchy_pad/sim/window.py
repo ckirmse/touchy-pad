@@ -260,12 +260,13 @@ class SimWindow(QtWidgets.QMainWindow):
     # Mapping from our internal kind-strings to the LVGL `lv_event_code_t`
     # value the firmware would forward in `LvEvent.code`. Used when
     # pushing host events from the sim so connected clients see the same
-    # codes they'd see on real hardware.
+    # codes they'd see on real hardware. Values come from the `LvEventCode`
+    # enum in widgets.proto (which mirrors lv_event.h).
     _LV_CODE_BY_KIND = {
-        "press": 1,  # LV_EVENT_PRESSED
-        "click": 7,  # LV_EVENT_CLICKED
-        "release": 8,  # LV_EVENT_RELEASED
-        "change": 28,  # LV_EVENT_VALUE_CHANGED
+        "press": _proto.LV_EVENT_PRESSED,
+        "click": _proto.LV_EVENT_CLICKED,
+        "release": _proto.LV_EVENT_RELEASED,
+        "change": _proto.LV_EVENT_VALUE_CHANGED,
     }
 
     def _dispatch_action(

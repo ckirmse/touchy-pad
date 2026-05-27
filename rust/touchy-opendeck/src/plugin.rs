@@ -14,8 +14,8 @@
 //!    LVGL's `.bin` format), and debounce a `screen_load` so a profile
 //!    switch's burst of N keys only redraws once.
 //! 4. Touch events flow back as `LvEvent`s; we translate
-//!    `code == 1 (PRESSED)` to `key_down` and `code == 8 (RELEASED)`
-//!    / `7 (PRESS_LOST)` to `key_up`.
+//!    `code == LV_EVENT_PRESSED` to `key_down` and `LV_EVENT_RELEASED`
+//!    / `LV_EVENT_PRESS_LOST` to `key_up`.
 //! 5. When the watcher notices the device is gone, [`TouchyPlugin::detach`]
 //!    drops the context and tells OpenDeck via `unregister_device`.
 
@@ -33,18 +33,16 @@ use openaction::device_plugin;
 use openaction::global_events::{GlobalEventHandler, SetBrightnessEvent, SetImageEvent};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
+use touchy_pad::proto::LvEventCode;
 use touchy_pad::Touchy;
 use touchy_pad::proto::lv_event;
 use touchy_pad::transport_usb::{UsbTransport, enumerate, usb_vid_pid};
 
 use crate::layout;
 
-/// LVGL ``LV_EVENT_PRESSED`` — emitted at the start of a touch.
-const LV_EVENT_PRESSED: u32 = 1;
-/// LVGL ``LV_EVENT_PRESS_LOST`` — finger slid off or USB stalled.
-const LV_EVENT_PRESS_LOST: u32 = 7;
-/// LVGL ``LV_EVENT_RELEASED`` — the press completed normally.
-const LV_EVENT_RELEASED: u32 = 8;
+const LV_EVENT_PRESSED: u32    = LvEventCode::LvEventPressed as u32;
+const LV_EVENT_PRESS_LOST: u32 = LvEventCode::LvEventPressLost as u32;
+const LV_EVENT_RELEASED: u32   = LvEventCode::LvEventReleased as u32;
 
 /// Nominal key size in pixels used to compute the grid from the device's
 /// reported `display_width` / `display_height`. 96 px gives 5 × 3 on the
