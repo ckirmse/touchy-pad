@@ -270,12 +270,13 @@ _rust-sync-version:
     set -euo pipefail
     ver=$(head -1 VERSION | tr -d '[:space:]')
     # perl -i works identically on Linux and macOS (no BSD sed -i '' dance needed).
-    perl -i -pe "s/^version = \"[^\"]+\"/version = \"$ver\"/" rust/Cargo.toml
+    PERL_BADLANG=0 perl -i -pe "s/^version = \"[^\"]+\"/version = \"$ver\"/" rust/Cargo.toml
     echo "rust workspace version → $ver"
 
 # Build the Rust workspace (library + demo binary).
 rust-build: _rust-sync-version
     cd rust && cargo build --workspace
+    cd rust/touchy-pad && cargo publish --dry-run --allow-dirty
 
 # Run the Rust test suite.
 rust-test:

@@ -2,6 +2,7 @@
 name = "touchy-pad"
 description = "Host-side API for the Touchy-Pad open-source USB multitouch pad / button-matrix device."
 readme = "../README.md"
+include = ["src/**", "build.rs", "proto/*.proto"]
 keywords = ["touchpad", "streamdeck", "lvgl", "esp32", "usb"]
 categories = ["hardware-support", "api-bindings"]
 version.workspace = true
