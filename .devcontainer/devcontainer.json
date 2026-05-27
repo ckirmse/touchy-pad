@@ -85,7 +85,11 @@
 	"features": {
 		// add git
 		"ghcr.io/devcontainers/features/git:1": {},
-		"ghcr.io/devcontainers/features/rust:1": {},
+		// Rust is installed via rustup directly in the Containerfile (see
+		// the `curl ... sh.rustup.rs` step). The ghcr.io rust feature is
+		// not used because it runs `apt-get update` on top of the already-
+		// built image and fails on Ubuntu 25.04 with "Could not execute
+		// 'gpgv'" (the feature's install script wipes apt lists state).
 		// add the github cli tool (gh)
 		// "ghcr.io/devcontainers/features/github-cli:1": {}
 		// https://just.systems/ — task runner used by ./Justfile

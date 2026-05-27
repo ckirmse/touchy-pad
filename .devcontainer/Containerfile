@@ -9,9 +9,10 @@ ARG USERNAME=ubuntu
 
 # The plain ubuntu image doesn't ship sudo, curl, zsh, or git out of the box,
 # but every later step in this Containerfile assumes they're present.
+# gpgv is needed by apt for signature verification (separate from gnupg).
 RUN apt-get update \
  && apt-get -y install --no-install-recommends \
-      sudo curl ca-certificates zsh git locales gnupg \
+      sudo curl ca-certificates zsh git locales gnupg gpgv \
  && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update \
