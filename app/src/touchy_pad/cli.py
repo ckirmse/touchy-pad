@@ -30,6 +30,11 @@ def _parse_size(ctx, param, value: str | None) -> tuple[int, int] | None:
 @click.group(invoke_without_command=True)
 @click.version_option()
 @click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable debug logging (sets log level to DEBUG).",
+)
+@click.option(
     "--sim-remote",
     "sim_remote",
     metavar="[HOST:PORT]",
@@ -86,6 +91,7 @@ def _parse_size(ctx, param, value: str | None) -> tuple[int, int] | None:
 @click.pass_context
 def cli(
     ctx: click.Context,
+    debug: bool,
     sim_remote: str | None,
     sim_headless: bool,
     sim_gui: bool,
@@ -95,6 +101,16 @@ def cli(
     port: str | None,
 ) -> None:
     """Talk to a connected Touchy-Pad USB device."""
+    # Configure logging level
+    log_level = logging.DEBUG if debug else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(levelname)s:%(name)s:%(message)s",
+        force=True,  # Override any existing configuration
+    )
+    # Suppress noisy RPC trace logs even in debug mode
+    logging.getLogger("touchy_pad.client.rpc").setLevel(logging.INFO)
+
     ctx.ensure_object(dict)
     sim_modes = [bool(sim_remote is not None), sim_headless, sim_gui]
     if sum(sim_modes) > 1:

@@ -76,7 +76,9 @@
 		// Not needed for now
 		// "--ulimit=core=-1:-1" // Allow core dumps
 		// NOTE: Not allowed in github CI devcontainers
-		"--userns=keep-id:uid=1000,gid=1000"
+		"--userns=keep-id:uid=1000,gid=1000",
+		// Allow container to access host ports via host.docker.internal
+		"--add-host=host.docker.internal:host-gateway"
 		// We pre-create this data-only container in initializeCommand
 		//"--volumes-from=starbash-test-data:ro"
 	],

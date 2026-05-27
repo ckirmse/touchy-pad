@@ -298,6 +298,7 @@ class SimDevice:
             return _result()
         path, buf = txn
         try:
+            _log.debug("sim: file_close saving %r (%d bytes)", path, len(buf))
             self._fs.save(path, bytes(buf))
         except ValueError as exc:
             _log.warning("sim: file_close rejected %r: %s", path, exc)

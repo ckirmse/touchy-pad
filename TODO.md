@@ -40,7 +40,9 @@ Main new features: Works with StreamController app to provide arbitrary user but
 * [x] make switchable subscreens by using widgetref?
 * [x] remove Screen.path?  I don't think we need it
 * [x] test https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/lcd/index.html to see if it could help rendering performance - NO
-* [ ] investigate [opendeck](docs/opendeck.md) and possibly do a plugin for that instead-of or in-addition-to StreamController.
+* [x] investigate [opendeck](docs/opendeck.md) and possibly do a plugin for that instead-of or in-addition-to StreamController.
+* [ ] test opendeck plugin with simulator
+* [ ] add plugin binary to release
 * [ ] add some of the example JSON to the API docs
 * [ ] add a widget handle concept so host can say to just redraw one particular widget (only need to implement for screens/layouts/image)
 * [x] make screen sleep default timeout
