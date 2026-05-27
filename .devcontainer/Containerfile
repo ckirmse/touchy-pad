@@ -131,9 +131,7 @@ RUN printf '%s\n' \
         'autoload -U colors && colors' \
         'PROMPT="%n@%m:%~%# "' \
       >> $HOME/.zshrc
-# ESP-IDF is sourced only when needed (firmware-build / flash recipes in
-# the Justfile) — not in .bashrc/.zshrc — so that Poetry, pip, and other
-# host-side tools never see the cross-toolchain on their PATH.
+RUN echo 'source ~/.espressif/tools/activate_idf_v6.0.1.sh' | tee -a $HOME/.bashrc $HOME/.zshrc
 
 # Python tooling for the host-side protobuf workflow (touchy.proto) and the
 # embedded-side nanopb generator. Installed system-wide via --break-system-packages

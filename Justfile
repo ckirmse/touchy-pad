@@ -283,7 +283,7 @@ opendeck-package:
     mkdir -p "$out/$triple/bin"
     cp "${bin}${ext}" "$out/$triple/bin/touchy-opendeck${ext}"
     rm -f target/touchy-opendeck.sdPlugin.zip
-    (cd touchy-opendeck && zip -r ../target/touchy-opendeck.sdPlugin.zip com.geeksville.touchypad.sdPlugin)
+    (cd touchy-opendeck && python3 -m zipfile -c ../target/touchy-opendeck.sdPlugin.zip com.geeksville.touchypad.sdPlugin)
     echo "wrote rust/target/touchy-opendeck.sdPlugin.zip"
 
 # ---------------------------------------------------------------------------
