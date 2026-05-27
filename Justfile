@@ -47,6 +47,9 @@ init:
             echo 'autoload -Uz compinit && compinit' >> ~/.zshrc
         fi
     fi
+
+    echo "Setting default firmware build"
+    just firmware-reconfigure
     
     echo "✓ Dev environment ready. Run 'just build-proto' to generate bindings."
     echo "✓ Shell completions installed. Restart your shell or run 'exec \$SHELL' to activate."
@@ -330,6 +333,10 @@ firmware-build: build-proto-c build-default-screen
     # recipe the temp-script name doesn't match "bash", so sourcing would fail.
     # Run a fresh bash -c so $0 is "bash" and is_sourced() returns true.
     exec bash -c '[ -n "${IDF_PATH:-}" ] || source ~/.espressif/tools/activate_idf_v6.0.1.sh && cmake --build firmware/build'
+ 
+firmware-reconfigure:
+    #!/usr/bin/env bash
+    exec bash -c '[ -n "${IDF_PATH:-}" ] || source ~/.espressif/tools/activate_idf_v6.0.1.sh && idf.py -C firmware set-target esp32s3 && idf.py -C firmware reconfigure'
 
 flash: firmware-build
     #!/usr/bin/env bash
