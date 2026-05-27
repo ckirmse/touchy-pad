@@ -261,8 +261,20 @@ app-run *ARGS: build-proto-py
 # Rust library + demo (rust/) — pure-Rust async client.
 # ---------------------------------------------------------------------------
 
+# Sync the [workspace.package] version in rust/Cargo.toml from the top-level
+# VERSION file. All individual crates inherit it via `version.workspace = true`.
+# Run this before cutting a release:
+#   just _rust-sync-version && just rust-build
+_rust-sync-version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ver=$(head -1 VERSION | tr -d '[:space:]')
+    # perl -i works identically on Linux and macOS (no BSD sed -i '' dance needed).
+    perl -i -pe "s/^version = \"[^\"]+\"/version = \"$ver\"/" rust/Cargo.toml
+    echo "rust workspace version → $ver"
+
 # Build the Rust workspace (library + demo binary).
-rust-build:
+rust-build: _rust-sync-version
     cd rust && cargo build --workspace
 
 # Run the Rust test suite.
