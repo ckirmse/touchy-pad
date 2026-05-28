@@ -34,10 +34,12 @@ firmware/
 ├── CMakeLists.txt              # selects BOARD, layers sdkconfig.defaults
 ├── sdkconfig.defaults          # shared defaults (USB/USJ/LVGL/log)
 ├── README.md                   # ← this file
+├── partitions/                 # shared partition tables, one per flash size
+│   ├── 4M.csv                  # 4 MB layout (jc4827w543)
+│   └── 16M.csv                 # 16 MB layout (waveshare_s3_lcd_7b)
 ├── boards/
 │   ├── waveshare_s3_lcd_7b/    # 7" RGB-parallel Waveshare board
 │   │   ├── sdkconfig.defaults  # PSRAM-OPI, 16 MB QIO flash, partition table
-│   │   ├── partitions.csv      # 16 MB layout
 │   │   └── board/              # ← ESP-IDF component named `board`
 │   │       ├── CMakeLists.txt
 │   │       ├── idf_component.yml
@@ -47,7 +49,6 @@ firmware/
 │   │       └── touch.cpp       # GT911 + LVGL indev
 │   └── jc4827w543/             # 4.3" NV3041A QSPI board
 │       ├── sdkconfig.defaults  # PSRAM-OPI, 4 MB QIO flash, partition table
-│       ├── partitions.csv      # 4 MB layout
 │       └── board/              # ← ESP-IDF component named `board`
 │           ├── CMakeLists.txt
 │           ├── idf_component.yml
@@ -91,7 +92,8 @@ firmware/
    and `touch_init()` (signatures in `main/board.h`, `main/display.h`,
    `main/touch.h`).
 2. Add `boards/<name>/sdkconfig.defaults` with flash/PSRAM/partition
-   overrides, plus a `partitions.csv` if the flash size differs.
+   overrides, referencing the appropriate `partitions/<SIZE>.csv` (add a new
+   one to `firmware/partitions/` if the flash size differs).
 3. Add any board-specific managed-component deps to
    `boards/<name>/board/idf_component.yml`.
 4. Build with `idf.py -DBOARD=<name> set-target esp32s3 && idf.py build`.

@@ -20,7 +20,7 @@
 
 static const char *TAG = "fs.flash";
 
-// LittleFS mount + partition labels (match boards/<board>/partitions.csv).
+// LittleFS mount + partition labels (match firmware/partitions/<SIZE>.csv).
 static constexpr const char *FLASH_MOUNT     = "/littlefs";
 static constexpr const char *FLASH_PARTITION = "storage";
 

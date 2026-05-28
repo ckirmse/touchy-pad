@@ -37,11 +37,15 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 
 Main new features: Works with StreamController app to provide arbitrary user buttons
 
+* [ ] change DSL to allow callback functions attached to actions.  completely hide "event id" from the api consumer (just map it to the callback)
+* [ ] make stand alone example.py
+* [ ] two main readme points: better touchpad (that's graphical!) with streamdeck like features (that's open source) and an easy developer platform so your desktop python/rust apps can make interactive user interfaces on (very cheap!) LCD/eink displays.
+* [ ] investigate this appstore (or others) https://www.xda-developers.com/someone-created-an-esp32-app-store-and-it-lets-you-flash-apps-straight-from-your-browser/
 * [x] make switchable subscreens by using widgetref?
 * [x] remove Screen.path?  I don't think we need it
 * [x] test https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/lcd/index.html to see if it could help rendering performance - NO
 * [x] investigate [opendeck](docs/opendeck.md) and possibly do a plugin for that instead-of or in-addition-to StreamController.
-* [ ] test opendeck plugin with simulator
+* [ ] fix opendeck plugin not enumerating devices - figure out how to debug rust https://code.visualstudio.com/docs/languages/rust#_install-debugging-support
 * [ ] add plugin binary to release
 * [ ] add some of the example JSON to the API docs
 * [ ] add a widget handle concept so host can say to just redraw one particular widget (only need to implement for screens/layouts/image)
@@ -58,6 +62,8 @@ Main new features: Works with StreamController app to provide arbitrary user but
 
 Main new features? Much easier scripting than through StreamController - allow arbitrary Python snippets for button presses/slider moves etc...  Dynamic data displays from host to Touchypad (server stats, ZMK modes, whatever user wants to show)
 
+* [ ] make knobs/dials with gesture overlays (share code with trackpad) ccw/cw/left/up etc...
+* [ ] expose device API via UART (for embedded applications) and wifi/tcp (for arbitary smart signage applications).   Find a good esp32 lib for wifi settings/management/firmware update?
 * [ ] allow setting brightness by putting that GPIO on a hw PWM output
 * [ ] add an animation to demo/test.pb https://lvgl.io/docs/open/9.5/main-modules/animation.html 
 * [ ] Implement multitouch HID to support multitouch native apps

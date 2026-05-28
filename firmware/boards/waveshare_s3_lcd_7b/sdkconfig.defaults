@@ -9,7 +9,7 @@
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="boards/waveshare_s3_lcd_7b/partitions.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/16M.csv"
 
 # ----- PSRAM (8 MB, octal SPI @ 80 MHz) -----
 # Required by the N16R8 board variant. IDF 6.0.1 has missing MSPI tuning
