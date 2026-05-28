@@ -1902,8 +1902,38 @@ records onto the deque.
 7. `docs/host-api.md` documents the reused `EventConsumeCmd` path
    and the priority semantics.
 
-## Stage 64.2: Make CDCACM optional
-If CONFIG_TINYUSB_CDC_COUNT is zero, do not create cdcacm devices in usb_hid.  This will help us save endpoints in our device.  This will also work well with our stage 64.1 added ability to send our logs over our private protobuf based endpoints.
+## Stage 64.2: Make CDCACM optional - DONE
+* If CONFIG_TINYUSB_CDC_COUNT is zero, do not create cdcacm devices in usb_hid.  This will help us save endpoints in our device (so we can eventually use one for interrupt notification).  This will also work well with our stage 64.1 added ability to send our logs over our private protobuf based endpoints.
+* Change our sdkconfig to set that # of CDCs to zero
+
+Implementation notes:
+
+* `firmware/sdkconfig.defaults` now sets `CONFIG_TINYUSB_CDC_ENABLED=n`
+  (which causes the Kconfig-generated `CONFIG_TINYUSB_CDC_COUNT` to
+  vanish; `esp_tinyusb`'s `tusb_config.h` then falls back to
+  `CONFIG_TINYUSB_CDC_COUNT 0`, so `CFG_TUD_CDC == 0`). The
+  `firmware/sdkconfig.jc4827w543` save-defconfig snapshot was updated
+  to match (`# CONFIG_TINYUSB_CDC_ENABLED is not set`).
+* `firmware/main/usb_hid.cpp`:
+  * All CDC-only code (`tinyusb_cdc_acm.h` / `tinyusb_console.h`
+    includes, the `tinyusb_config_cdcacm_t` local, the
+    `tinyusb_cdcacm_init` / `tinyusb_console_init` calls, the
+    `ITF_NUM_CDC*` enumerators and `TUD_CDC_DESCRIPTOR` row) is now
+    gated on `#if CFG_TUD_CDC`. The CDC string-descriptor slot stays
+    in `s_string_desc` (harmless when unused; keeps the indices for
+    HID/vendor stable).
+  * The `EPNUM_*` `#define`s were replaced with a single conditional
+    `enum` so the endpoint numbering compacts when CDC is off:
+    `EPNUM_HID=0x81, EPNUM_VENDOR_OUT=0x02, EPNUM_VENDOR_IN=0x82`.
+    EPs 3 and 4 are now free for a future interrupt-IN event mailbox.
+  * Startup `ESP_LOGI` now reports `"HID + vendor"` or
+    `"CDC-ACM + HID + vendor"` depending on the build.
+* Device log output continues to reach the host via Stage 64.1's
+  `LogRecord` tunnel (`CONFIG_TOUCHY_LOG_OVER_PROTO=y` in defaults)
+  plus UART0 (`CONFIG_TOUCHY_LOG_TO_UART=y`). USB CDC-ACM is no
+  longer a runtime log sink. Re-enabling CDC for ad-hoc debugging
+  is a one-line per-board override
+  (`CONFIG_TINYUSB_CDC_ENABLED=y`).
 
 ## Stage 64.3: add support for CYD2USB board
 

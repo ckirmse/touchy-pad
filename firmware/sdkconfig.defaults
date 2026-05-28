@@ -46,10 +46,16 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 CONFIG_USJ_ENABLE_USB_SERIAL_JTAG=n
 
-# ----- USB (TinyUSB composite: CDC-ACM + HID mouse + custom vendor) -----
+# ----- USB (TinyUSB composite: HID mouse/keyboard + custom vendor) -----
+# Stage 64.2: CDC-ACM is *disabled* to save endpoint slots on the
+# ESP32-S3 USB-OTG controller (5 IN + 5 OUT total) so we can
+# eventually grow a dedicated interrupt-IN event mailbox. Device
+# log output is tunneled over the vendor bulk pair instead (see
+# Stage 64.1, `CONFIG_TOUCHY_LOG_OVER_PROTO`). Set
+# CONFIG_TINYUSB_CDC_ENABLED=y in a per-board sdkconfig to bring
+# the serial console back temporarily for debugging.
 CONFIG_TINYUSB_DEBUG_LEVEL=0
-CONFIG_TINYUSB_CDC_ENABLED=y
-CONFIG_TINYUSB_CDC_COUNT=1
+CONFIG_TINYUSB_CDC_ENABLED=n
 CONFIG_TINYUSB_HID_COUNT=1
 # Stage 13: custom vendor interface for the host_api command/response/event
 # protocol (see docs/host-api.md). esp_tinyusb derives CFG_TUD_VENDOR from

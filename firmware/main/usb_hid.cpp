@@ -7,8 +7,10 @@
 #include "esp_log.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
+#if CFG_TUD_CDC
 #include "tinyusb_cdc_acm.h"
 #include "tinyusb_console.h"
+#endif
 #include "class/hid/hid_device.h"
 #include "class/vendor/vendor_device.h"
 #include "freertos/FreeRTOS.h"
@@ -83,7 +85,8 @@ static const tusb_desc_device_t s_device_desc = {
     .bNumConfigurations = 0x01,
 };
 
-// Composite CDC-ACM + HID mouse + custom vendor (host_api).
+// Composite HID mouse + custom vendor (host_api), optionally with
+// CDC-ACM prepended when `CONFIG_TINYUSB_CDC_ENABLED=y` (see Stage 64.2).
 // CDC uses two interfaces (control + data) and three endpoints.
 // HID uses one interface and one endpoint.
 // Vendor uses one interface with two bulk endpoints (command OUT,
@@ -91,20 +94,38 @@ static const tusb_desc_device_t s_device_desc = {
 // docs/host-api.md is reserved for a future stage; the host transport
 // treats it as optional.
 enum {
-#if CFG_TUD_CDC 
+#if CFG_TUD_CDC
     ITF_NUM_CDC = 0,
     ITF_NUM_CDC_DATA,
-#endif   
+#endif
     ITF_NUM_HID,
     ITF_NUM_VENDOR,
     ITF_NUM_TOTAL
 };
-#define EPNUM_CDC_NOTIF  0x81
-#define EPNUM_CDC_OUT    0x02
-#define EPNUM_CDC_IN     0x82
-#define EPNUM_HID        0x83
-#define EPNUM_VENDOR_OUT 0x04
-#define EPNUM_VENDOR_IN  0x84
+
+// Endpoint addresses. High bit (0x80) = IN (device -> host). Each
+// EP *number* (low 4 bits) can host one IN and one OUT independently,
+// so e.g. 0x02 and 0x82 share number 2 but are separate physical
+// endpoints. The ESP32-S3 USB-OTG controller is full-speed and has 5
+// IN + 5 OUT endpoints total (EP0 + 4 user). Allocations are packed
+// so the freed EP slot when CDC is off can be re-used by a future
+// interrupt-IN event mailbox.
+enum {
+#if CFG_TUD_CDC
+    EPNUM_CDC_NOTIF  = 0x81,
+    EPNUM_CDC_OUT    = 0x02,
+    EPNUM_CDC_IN     = 0x82,
+    EPNUM_HID        = 0x83,
+    EPNUM_VENDOR_OUT = 0x04,
+    EPNUM_VENDOR_IN  = 0x84,
+#else
+    // CDC disabled: shift HID + Vendor down so they occupy EPs 1..2
+    // (leaving 3..4 free for future use).
+    EPNUM_HID        = 0x81,
+    EPNUM_VENDOR_OUT = 0x02,
+    EPNUM_VENDOR_IN  = 0x82,
+#endif
+};
 
 #define CFG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN \
                        + (CFG_TUD_CDC ? TUD_CDC_DESC_LEN : 0) \
@@ -135,7 +156,8 @@ static const uint8_t s_config_desc[] = {
 
 extern "C" void usb_hid_init(void)
 {
-    ESP_LOGI(TAG, "Starting TinyUSB (CDC-ACM + HID mouse, VID:PID = 0x%04x:0x%04x)",
+    ESP_LOGI(TAG, "Starting TinyUSB (%sHID + vendor, VID:PID = 0x%04x:0x%04x)",
+             CFG_TUD_CDC ? "CDC-ACM + " : "",
              s_device_desc.idVendor, s_device_desc.idProduct);
 
     // esp_tinyusb 2.x: start from the target-default config (full-speed on
@@ -147,6 +169,7 @@ extern "C" void usb_hid_init(void)
     tusb_cfg.descriptor.full_speed_config  = s_config_desc;
     ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
 
+#if CFG_TUD_CDC
     // If the call returns ESP_ERR_INVALID_STATE, ESP_ERROR_CHECK aborts, and
     // the chip reboots in a loop — preventing USB enumeration.
     const tinyusb_config_cdcacm_t cdc_cfg = {
@@ -156,7 +179,6 @@ extern "C" void usb_hid_init(void)
         .callback_line_state_changed  = nullptr,
         .callback_line_coding_changed = nullptr,
     };
-#if CFG_TUD_CDC     
     ESP_ERROR_CHECK(tinyusb_cdcacm_init(&cdc_cfg));
 
     // Mirror esp_log output to the CDC-ACM interface.  Logs emitted before
