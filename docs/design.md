@@ -1542,6 +1542,33 @@ exactly like the firmware does. Consequences:
 6. `docs/simulator.md` documents the host-GUI / container-client
    workflow and the new flags.
 
+
+## Stage 61.1: tunnel device serial logs via our protocol
+
+Some future devices don't have a 'real' USB port so we will want to tunnel our current cdcacm based serial logging over our existing protobuf protocol.
+
+* If CONFIG_TOUCHY_LOG_OVER_PROTO is set in the build try to push any log message over our protobuf channel.  Change the current boards to set this build flag.
+* Add a new log message variant to the Response protobuf.  
+  * It should include a string and a priority.  If priority is not set assume TRACE level priority.  Other supported levels TRACE, DEBUG, INFO, WARN, ERROR.
+  * Add a num_dropped field, which is normally not populated, but if the device had to drop messages (because the queue was full or we were printing from an isr or somesuch the next successful message will include num_dropped)
+* Hook the standard esp-idf/freertos logging/printing so that it can try to send log messages via this mechanism.
+* Be careful about reentrancy, if we are already somehow processing a log and we get asked to queue a log again, just drop that extra log and bump up the next time we send num_dropped.  This prevents nasty problems if we try to emit log messages in our logging/usb/protobuf code.
+* Change the python/rust code to emit host side logs with that same priority for any logs it receives from the client.  
+
+## Stage 64.2: add support for CYD2USB board
+
+See [here](hardware.md) for specs.  Somethings to note about this board:
+
+* Try to find 'built-in'/standard ESP32 drivers for the display and touch screen if you can
+* This board is ESP32 (not ES32-S3 based) so make sure the sdkconfig for the board sets that up correctly (no direct USB access so no USB code to be included, no PSRAM)
+* Because theres no USB you'll need to use the board UART for flash programming
+* Initially, run the app debug output on that UART but once we've debugged the basics, I'm going to ask you to move our prioritary protobuf based protocol to be on that port instead (same wire encoding as we used for our TCP link to the simulator)
+* The touchscreen is resistive and has no multitouch.  To support this (and anticipate boards of the future):
+  * make a platform.h/.cpp class in the main code.   Boards will instantiate their own correct subclass which callers can access by platform_get().
+  * Add a is_multitouch() method or property to that class.  The prior boards will return true, this ESP32-2432S028R board will return false.  Have our sim trackpad class check for that property and only try to do multitouch (or anything needing more than 'left' press/drag) on the older boards. 
+  * Add a has_usb() method that indicates that this board has direct USB port access to the host.  The old boards do, this CYD2USB does not.
+
+
 # Old/Existing projects
 
 In the very early days of this project I looked into these ideas/implementations:

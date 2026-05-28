@@ -4,9 +4,11 @@ Currently this project supports two board types, but ali-express seems to have m
 
 Currently the following two boards are supported
 
-## CYD "Cheap Yellow Display"
+## JC4827W543: CYD "Cheap Yellow Display" ish
 
 ![cyd](images/jc4827w543.jpg)
+
+**THIS IS THE CURRENTLY 'BEST' BOARD TO PURCHASE**
 
 CYD "Cheap Yellow Display" boards such as jc4827w543 (costs just $15 USD!)
 The JC4827W543 (often sold under names like Guition or Sunton) is an ESP32-S3 board paired with a 4.3" 480x272 RGB display (using an NV3041A or ST3401A controller) and usually a GT911 capacitive touch chip. For detailed hw docs see [here](https://github.com/profi-max/JC4827W543_4.3inch_ESP32S3_board).
@@ -21,6 +23,94 @@ is set accordingly. At 32 MHz QSPI the raw wire bandwidth is ~16 MB/s,
 which caps a full-frame RGB565 redraw (480×272×2 ≈ 261 KB) at roughly
 ~60 FPS regardless of how the host-side code is structured. Don't raise
 `BOARD_LCD_QSPI_CLK_HZ` without re-validating on real hardware.
+
+## CYD2USB: 2.8" resistive cheap-yellow-display variant (Also called "ESP32-2432S028R v3")
+
+### Core Specifications / GPIOs / Chips
+
+USB connection to host is via a CH341 UART (USB VID=1a86, PID=7523)
+Display resolution 320x240.
+The SoC: ESP32-D0WD-V3 (Dual-core Xtensa 32-bit LX6 microprocessor running at 240 MHz).
+Storage: 4 MB of integrated SPI flash.
+Memory: 520 KB internal SRAM (Again, zero PSRAM on this specific WROOM module).
+NOTE: This it NOT based on an ESP32-S3, so no native USB port support. i.e. can't emulate USB mouse or keyboard.
+
+USB ports: this board contains both a USB-C and a USB-Micro port but they are electrically connected. USE ONLY ONE OF THEM.
+
+| Component | Specification |
+| :--- | :--- |
+| **Display Controller** | ILI9341 or probably ST7789 (Newer v3 boards use ST7789) |
+| **Touch Controller** | XPT2046 (Resistive) |
+| **PSRAM** | 0 MB (Relies on 520KB internal SRAM) |
+| **Flash** | 4 MB SPI Flash |
+
+---
+
+### SPI Pin Assignments
+
+#### Display (ILI9341 / ST7789)
+| Function | GPIO |
+| :--- | :--- |
+| **MOSI** | 13 |
+| **MISO** | 12 |
+| **SCK** | 14 |
+| **CS** | 15 |
+| **DC / RS** | 2 |
+| **Backlight** | Probably 27, but might be 21 |
+
+#### Touchscreen (XPT2046)
+| Function | GPIO |
+| :--- | :--- |
+| **MOSI** | 32 |
+| **MISO** | 39 |
+| **CLK** | 25 |
+| **CS** | 33 |
+| **IRQ** | 36 |
+
+#### MicroSD Card
+| Function | GPIO |
+| :--- | :--- |
+| **MOSI** | 23 |
+| **MISO** | 19 |
+| **CLK** | 18 |
+| **CS** | 5 |
+
+---
+
+### Onboard Peripherals
+
+| Peripheral | GPIO | Notes |
+| :--- | :--- | :--- |
+| **RGB LED - Red** | 4 | Active Low |
+| **RGB LED - Green** | 16 | Active Low |
+| **RGB LED - Blue** | 17 | Active Low |
+| **Audio Out** | 26 | I2S Speaker |
+| **LDR** | 34 | Analog input (Light Sensor) |
+| **Boot Button** | 0 | |
+
+---
+
+### Available Expansion Pins (JST Connectors)
+
+| GPIO | Capability | Suggested Use |
+| :--- | :--- | :--- |
+| **22** | Free (I/O) | I2C SCL |
+| **27** | Free (I/O) | I2C SDA |
+| **35** | Input Only | Analog/Digital Read (No internal pull-ups) |
+
+> **Note:** The display backlight might be hardwired to GPIO 21. Reusing GPIO 21 for general I/O or I2C SDA will cause the screen to strobe during data transmission.
+
+## ESP32-024: The 2.4" version ofCYD2USB (also called ESP32-2432S024)
+
+More pinout information here: https://github.com/F1ATB/ESP32-2432S028-2432S024-2432S032-JC2432W328
+
+### Misc tips
+
+Fix the Colors: The ST7789 panels used on the CYD2USB frequently have their color channels wired backward. If your UI renders with swapped colors (e.g., red appears blue), you must add this to your configuration header:
+#define TFT_RGB_ORDER TFT_BGR
+
+Inversion: If the screen looks like a film negative, flip the inversion flag:
+#define TFT_INVERSION_ON (or OFF, depending on the default state).
 
 ## Waveshare 7 inch
 
