@@ -1935,12 +1935,23 @@ Implementation notes:
   is a one-line per-board override
   (`CONFIG_TINYUSB_CDC_ENABLED=y`).
 
-## Stage 64.3: add support for CYD2USB board
+## Stage 64.3: Allow our protobuf based protocol over serial ports
+
+Though we still want to include support (for some boards) for using our custom USB endpoint based transport of our protobuf based protocol - we want to ADD support for optionally running that protocol over a conventional serial port.
+
+* Use the same 'wire encoding' we used in stage 63 for our TCP based simulator protocol link.  Try to share code.  i.e. on the python/rust side a new sibling class to TCPTransport (which shares much of the code via a common baseclass)
+* If the python CLI tool doesn't already have a --port /dev/foo/blah option add one.  If that option is set that tells the API library to use the 'serial' transport via the specified 'uart like' device.  No need to do any other hw probing in this case.
+* Add a build kconfig flag to our ESP-IDF firmware TOUCHY_PROTO_OVER_SERIAL.
+If set, include appropriate device side code to do this. 
+* To facilitate testing this on the jc4827w543 board (and only that board) set this new flag and CONFIG_TINYUSB_CDC_ENABLED (so that we can temporarily use that board for testing the feature - I'll turn these flag off later)
+
+## Stage 65: add support for CYD2USB board
 
 See [here](hardware.md) for specs.  Somethings to note about this board:
 
 * Try to find 'built-in'/standard ESP32 drivers for the display and touch screen if you can
 * This board is ESP32 (not ES32-S3 based) so make sure the sdkconfig for the board sets that up correctly (no direct USB access so no USB code to be included, no PSRAM)
+* include board_pins.h entries for all gpios in the hw doc (even if not currently needed)
 * Because theres no USB you'll need to use the board UART for flash programming
 * Initially, run the app debug output on that UART but once we've debugged the basics, I'm going to ask you to move our prioritary protobuf based protocol to be on that port instead (same wire encoding as we used for our TCP link to the simulator)
 * The touchscreen is resistive and has no multitouch.  To support this (and anticipate boards of the future):
