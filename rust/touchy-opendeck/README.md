@@ -14,14 +14,18 @@ for a generic guide to writing OpenDeck device plugins.
 ## How it works
 
 ```
-+------------+   stdio JSON    +-----------------+  vendor-bulk USB  +--------------+
-|  OpenDeck  | <-------------> |  touchy-opendeck| <---------------> |  Touchy-Pad  |
-|  (Tauri)   |   openaction    |   (this crate)  |   touchy-pad lib  |   firmware   |
-+------------+                 +-----------------+                   +--------------+
++------------+  ws://localhost  +-----------------+  vendor-bulk USB  +--------------+
+|  OpenDeck  | <--------------> |  touchy-opendeck| <---------------> |  Touchy-Pad  |
+|  (Tauri)   |    openaction    |   (this crate)  |   touchy-pad lib  |   firmware   |
++------------+   (TCP socket)   +-----------------+                   +--------------+
 ```
 
-* `main.rs` calls `openaction::run` which speaks the OpenDeck plugin
-  protocol over the WebSocket OpenDeck spawned us on.
+* OpenDeck runs a WebSocket **server** and spawns this plugin as a child
+  process, passing the port on argv (`-port <n>`). `main.rs` calls
+  `openaction::run`, which parses that arg and `connect_async`es to
+  `ws://localhost:<port>`. The plugin's own stdin/stdout/stderr are
+  **not** the link — OpenDeck redirects the plugin's stdout *and* stderr
+  into a per-plugin log file (see [Logs](#logs)).
 * `plugin.rs` implements `openaction::global_events::GlobalEventHandler`.
   On `plugin_ready` it kicks off a hot-plug watcher that polls
   `touchy_pad::transport_usb::enumerate` once a second.
@@ -117,16 +121,80 @@ so the OpenDeck-launched plugin has permission to talk to the device.
 
 ## Development tips
 
-* Run the plugin standalone with `RUST_LOG=debug ./target/debug/touchy-opendeck`
-  — it'll just sit there waiting for OpenDeck's args, but you get
-  startup smoke-tests.
-* OpenDeck's own log on Linux:
-  `~/.local/share/com.amansprojects.opendeck/logs/`. Our stderr lands
-  there too.
-* To iterate quickly, point OpenDeck at a debug build by editing the
-  installed manifest's `CodePaths` to absolute paths.
-* All logging in this crate goes to **stderr**. Never `println!` —
-  OpenDeck reads stdout as JSON.
+### Logs
+
+OpenDeck redirects each plugin's **stdout and stderr** into a per-plugin
+log file — it does **not** show up in the terminal that launched
+OpenDeck. With a dev build from `just opendeck-run` (Tauri identifier
+`opendeck`) that file is:
+
+```
+~/.local/share/opendeck/logs/plugins/com.geeksville.touchypad.log
+```
+
+(A packaged OpenDeck may use a different app identifier, e.g.
+`com.amansprojects.opendeck`; adjust the path accordingly.) Watch it live
+with:
+
+```sh
+tail -F ~/.local/share/opendeck/logs/plugins/com.geeksville.touchypad.log
+```
+
+Because the OpenAction transport is a separate TCP WebSocket, logging to
+stdout is safe; this crate uses `simplelog` at `Info`. Crank it up with
+`RUST_LOG=debug` if needed.
+
+### Running a debug build under OpenDeck
+
+You do **not** need `just opendeck-package` + the GUI "Install plugin
+from file…" dialog to iterate. OpenDeck loads every plugin directory it
+finds under `config_dir()/plugins/`, so symlink this crate's `.sdPlugin`
+bundle there once and point its `CodePath` at your `cargo build` (debug)
+binary. Then each iteration is just `cargo build` + restart OpenDeck.
+
+One-time setup (Linux, dev build via `just opendeck-run`, identifier
+`opendeck`):
+
+```sh
+# 1. Build a debug binary.
+cd rust && cargo build -p touchy-opendeck && cd ..
+
+# 2. Symlink the plugin bundle into OpenDeck's plugins dir.
+mkdir -p ~/.config/opendeck/plugins
+ln -sfn "$PWD/rust/touchy-opendeck/com.geeksville.touchypad.sdPlugin" \
+        ~/.config/opendeck/plugins/com.geeksville.touchypad.sdPlugin
+
+# 3. Symlink the debug binary into the path the manifest's CodePath
+#    expects (x86_64-unknown-linux-gnu/bin/touchy-opendeck).
+mkdir -p rust/touchy-opendeck/com.geeksville.touchypad.sdPlugin/x86_64-unknown-linux-gnu/bin
+ln -sfn "$PWD/rust/target/debug/touchy-opendeck" \
+        rust/touchy-opendeck/com.geeksville.touchypad.sdPlugin/x86_64-unknown-linux-gnu/bin/touchy-opendeck
+```
+
+The `x86_64-unknown-linux-gnu/` directory is `.gitignore`d inside the
+bundle, so the symlink won't be committed. Then:
+
+```sh
+just opendeck-run     # builds + runs OpenDeck from the tools/OpenDeck submodule
+```
+
+Each iteration afterwards:
+
+```sh
+cd rust && cargo build -p touchy-opendeck && cd ..   # rebuild (symlink picks it up)
+# restart OpenDeck (it re-spawns plugins on launch)
+tail -F ~/.local/share/opendeck/logs/plugins/com.geeksville.touchypad.log
+```
+
+On Linux, make sure the udev rule from
+[`bin/99-touchy-pad.rules`](../../bin/99-touchy-pad.rules) is installed
+so the OpenDeck-launched plugin has permission to talk to the device.
+
+### Standalone smoke test
+
+* Run the plugin standalone with `RUST_LOG=debug ./rust/target/debug/touchy-opendeck`
+  — with no `-port` arg it can't connect to OpenDeck and will exit, but
+  it's a quick check that the binary links and starts.
 
 ## License
 

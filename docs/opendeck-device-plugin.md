@@ -31,9 +31,12 @@ on Linux). When OpenDeck starts it:
    matches the host's Rust target triple.
 3. Spawns that binary as a child process and connects to it over a
    WebSocket on `ws://localhost:<port>/`. The port and a registration
-   UUID are passed on the command line — this is what
+   UUID are passed on the command line (`-port <n> -pluginUUID <id>
+   -registerEvent <evt> -info <json>`) — this is what
    [`openaction::run(std::env::args().collect())`](https://docs.rs/openaction/latest/openaction/fn.run.html)
-   parses.
+   parses. **The WebSocket is a separate TCP socket**, *not* the
+   process's stdin/stdout — so writing to stdout/stderr cannot corrupt
+   it (see [§8 Logging](#8-logging)).
 4. The plugin sends a `registerPlugin` event over the socket and from
    then on receives inbound events and sends outbound events.
 
@@ -159,7 +162,7 @@ async fn main() -> OpenActionResult<()> {
     simplelog::TermLogger::init(
         simplelog::LevelFilter::Info,
         simplelog::Config::default(),
-        simplelog::TerminalMode::Stderr,
+        simplelog::TerminalMode::Stdout,
         simplelog::ColorChoice::Never,
     ).unwrap();
 
@@ -188,13 +191,37 @@ about.
 | `application_did_launch/terminate`  | Application monitoring.                                 |
 | `system_did_wake_up`                | The host left sleep — re-init USB if needed.            |
 
-### Outbound calls you make (in `openaction::device_plugin`)
+### Outbound calls you make
 
-These are free functions, not methods. They send JSON over the socket.
+How you emit outbound events depends on the `openaction` major version:
+
+* **`openaction = "2"` (current).** Free functions under
+  `openaction::device_plugin::*`. Each one grabs the global outbound
+  manager internally, so you can call them from anywhere:
+
+  ```rust
+  use openaction::device_plugin::*;
+  register_device(id, name, rows, columns, encoders, r#type).await?;
+  ```
+
+  **Gotcha:** these free functions *silently no-op* (return `Ok(())`)
+  if the outbound WebSocket manager isn't set up yet. The manager is
+  installed before `plugin_ready` is invoked, so any registration you
+  do from `plugin_ready` (or a task it spawns) is safe — but if you
+  somehow call `register_device` earlier, it vanishes with no error.
+
+* **`openaction = "1"` (older, used by the
+  [`opendeck-akp153` reference](../tools/reference/opendeck-akp153)).**
+  Lock the global manager yourself:
+
+  ```rust
+  OUTBOUND_EVENT_MANAGER.lock().await.as_mut().unwrap()
+      .register_device(id, name, rows, cols, encoders, device_type).await?;
+  ```
+
+Either way the same JSON events go over the socket:
 
 ```rust
-use openaction::device_plugin::*;
-
 // Tell OpenDeck a device is online.
 register_device(
     /* id */       "mh-0001-0007".into(),  // must start with DeviceNamespace
@@ -205,7 +232,7 @@ register_device(
     /* type */     7_u8, // see "Device type values" below
 ).await?;
 
-unregister_device(id).await?;       // device unplugged
+unregister_device(id).await?;       // device unplugged (sends deregisterDevice)
 key_down(id.clone(), position).await?;
 key_up(id, position).await?;
 encoder_down / encoder_up / encoder_change(id, encoder, delta).await?;
@@ -329,22 +356,50 @@ send `key_up` so OpenDeck doesn't think the key is stuck. LVGL's
 
 ## 8. Logging
 
-* Set up `simplelog::TermLogger::init` writing to **stderr**, not
-  stdout. OpenDeck multiplexes the stdio streams; logging to stdout
-  corrupts the JSON channel.
-* OpenDeck's own log (Linux:
-  `~/.local/share/com.amansprojects.opendeck/logs/`) captures your
-  stderr, so anything you log lands there.
-* For local development, run the plugin manually:
+The single most confusing thing to get right, so here is what actually
+happens (verified against OpenDeck `main`, Tauri identifier
+`opendeck`):
 
-  ```sh
-  RUST_LOG=debug ./target/debug/my-plugin <port> <uuid> registerPlugin
+* **The OpenAction link is a TCP WebSocket, not the process stdio.**
+  OpenDeck listens on `ws://localhost:<port>` and passes `<port>` on
+  the plugin's command line. Your stdout/stderr are therefore *free* —
+  writing to them cannot corrupt the protocol channel.
+* **OpenDeck redirects your stdout *and* stderr into a log file.** When
+  it spawns the plugin it sets both `Stdio::from(log_file)` where
+  `log_file = <log-dir>/plugins/<plugin-uuid>.log`. On Linux that is:
+
+  ```
+  ~/.local/share/opendeck/logs/plugins/<plugin-uuid>.log
   ```
 
-  with whatever args OpenDeck would have passed. The
-  [openaction docs](https://docs.rs/openaction/latest/openaction/fn.run.html)
-  describe the schema. In practice the easier route is to launch
-  OpenDeck pointing at a debug build via the `CodePaths` triple.
+  (e.g. `com.geeksville.touchypad.log`). So **log to stdout** — exactly
+  like the [reference plugin](../tools/reference/opendeck-akp153) does —
+  and `tail -F` that file to watch your plugin run:
+
+  ```sh
+  tail -F ~/.local/share/opendeck/logs/plugins/<plugin-uuid>.log
+  ```
+* Initialise with
+  `simplelog::TermLogger::init(LevelFilter::Info, Config::default(),
+  TerminalMode::Stdout, ColorChoice::Never)`. Gate the level on an env
+  var (`RUST_LOG` / a plugin-specific one) so a debug run is one
+  variable away.
+* **Log generously at `info`.** Because you can only observe the plugin
+  through this log file, sparse logging makes "why didn't my device
+  register?" almost impossible to diagnose. Log every lifecycle step:
+  `plugin_ready`, each enumeration poll (and explicitly when it finds
+  nothing), every attach/detach, the `register_device` call and its
+  result, and each forwarded key event.
+* For a fully standalone smoke test you can run the plugin yourself with
+  the args OpenDeck would pass:
+
+  ```sh
+  RUST_LOG=debug ./target/debug/my-plugin -port 1234 \
+      -pluginUUID com.example.myhardware -registerEvent registerPlugin -info '{}'
+  ```
+
+  (it will fail to connect unless something is listening on that port,
+  but you'll see the startup logs).
 
 ---
 
@@ -377,8 +432,13 @@ follow their submission rules; same zip, same layout.
 * **Wrong `DeviceNamespace` prefix on device IDs** → OpenDeck silently
   ignores `register_device` calls. The mismatch is logged at debug
   level only.
-* **Logging to stdout** → OpenDeck reads stdout as JSON and disconnects
-  the plugin with a confusing parse error.
+* **Registering before the outbound link is live** → with
+  `openaction = "2"` the `device_plugin::*` free functions no-op when
+  the outbound manager isn't set yet (and return `Ok(())`, so you get
+  no error). Only register from `plugin_ready` or later.
+* **Expecting logs in the terminal** → OpenDeck redirects the plugin's
+  stdout/stderr to `<log-dir>/plugins/<plugin-uuid>.log`. If you don't
+  see output, you're looking in the wrong place — `tail -F` that file.
 * **Blocking the tokio executor** with synchronous USB / image
   conversion → `set_image` events queue up and OpenDeck times out. Do
   conversion work on a `spawn_blocking` task or in a dedicated

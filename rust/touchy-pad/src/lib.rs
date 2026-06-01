@@ -63,4 +63,3 @@ pub const DEFAULT_SCREEN_PATH: &str = "F:host/s/default.pb";
 /// Directory holding user page bodies that the default chrome's
 /// `widget_ref(id="page")` pages through (Stage 68).
 pub const USER_SCREENS_DIR: &str = "F:host/uscr/";
-

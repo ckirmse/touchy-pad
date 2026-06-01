@@ -34,10 +34,10 @@ const CF_RGB565A8: u8 = 0x14;
 const IMAGE_MAGICS: &[&[u8]] = &[
 	&[0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'], // PNG
 	&[0xff, 0xd8, 0xff],                                  // JPEG
-	&[b'B', b'M'],                                        // BMP
-	&[b'G', b'I', b'F', b'8', b'7', b'a'],                // GIF87a
-	&[b'G', b'I', b'F', b'8', b'9', b'a'],                // GIF89a
-	&[b'R', b'I', b'F', b'F'],                            // WebP (RIFF…WEBP)
+	b"BM",                                                // BMP
+	b"GIF87a",                                            // GIF87a
+	b"GIF89a",                                            // GIF89a
+	b"RIFF",                                              // WebP (RIFF…WEBP)
 ];
 
 /// Convertible image file extensions (matched case-insensitively).

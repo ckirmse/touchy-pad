@@ -2,11 +2,11 @@
 //!
 //! Subcommands:
 //!
-//! * `info`   — print board info from `sys_board_info_get`.
-//! * `demo`   — upload a tiny screen with a few image buttons and
-//!              activate it.
+//! * `info` — print board info from `sys_board_info_get`.
+//! * `demo` — upload a tiny screen with a few image buttons and
+//!   activate it.
 //! * `listen` — run `demo`, then stream events forever, logging each
-//!              touch the user makes.
+//!   touch the user makes.
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

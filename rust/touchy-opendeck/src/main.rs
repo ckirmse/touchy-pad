@@ -12,19 +12,36 @@ use plugin::TouchyPlugin;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> OpenActionResult<()> {
-	// Logs must go to stderr — OpenDeck multiplexes the JSON socket
-	// over the plugin's stdio and stdout writes corrupt it.
-	let _ = simplelog::TermLogger::init(
-		log::LevelFilter::Info,
-		simplelog::ConfigBuilder::new().set_time_format_rfc3339().build(),
-		simplelog::TerminalMode::Stderr,
-		simplelog::ColorChoice::Never,
-	);
+	// Log to stdout, exactly like the reference openaction plugin
+	// (tools/reference/opendeck-akp153). The OpenAction link is a
+	// *separate* TCP WebSocket (`ws://localhost:<port>`), not the
+	// process stdio — so writing to stdout cannot corrupt it. OpenDeck
+	// redirects the plugin's stdout+stderr into
+	// `<opendeck-log-dir>/plugins/<plugin-uuid>.log`; that file is
+	// where these lines land. See README.md → "Logs".
+	//
+	// Default level is Info. Bump it for a debugging run with
+	// `TOUCHY_LOG=debug` (or `RUST_LOG=debug`) in the environment.
+	let level = std::env::var("TOUCHY_LOG")
+		.or_else(|_| std::env::var("RUST_LOG"))
+		.ok()
+		.and_then(|s| s.trim().parse::<log::LevelFilter>().ok())
+		.unwrap_or(log::LevelFilter::Info);
+	let _ = simplelog::TermLogger::init(level, simplelog::Config::default(), simplelog::TerminalMode::Stdout, simplelog::ColorChoice::Never);
+
+	let args: Vec<String> = std::env::args().collect();
+	log::info!("touchy-opendeck starting (log level {level}); argv = {args:?}");
 
 	// `set_global_event_handler` needs a `&'static dyn GlobalEventHandler`.
 	// The plugin lives for the whole process lifetime, so leak it.
 	let plugin: &'static TouchyPlugin = Box::leak(Box::new(TouchyPlugin::new()));
 	openaction::global_events::set_global_event_handler(plugin);
 
-	openaction::run(std::env::args().collect()).await
+	log::info!("connecting to OpenDeck WebSocket and entering event loop");
+	let result = openaction::run(args).await;
+	match &result {
+		Ok(()) => log::info!("openaction::run returned cleanly — shutting down"),
+		Err(e) => log::error!("openaction::run exited with error: {e}"),
+	}
+	result
 }

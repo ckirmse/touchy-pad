@@ -88,22 +88,47 @@ impl TouchyPlugin {
 	/// the set of devices we've already attached.
 	pub async fn run_hotplug_loop(self: Arc<Self>) {
 		let (vid, pid) = usb_vid_pid();
+		log::info!("hot-plug watcher started — polling for USB {vid:04x}:{pid:04x} every 1s");
 		let mut interval = tokio::time::interval(Duration::from_secs(1));
 		interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+		// Track the previous candidate count so we only log the
+		// "found N" / "none found" line when it actually changes —
+		// otherwise a once-per-second poll would flood the log.
+		let mut last_count: Option<usize> = None;
 		loop {
 			interval.tick().await;
 			let infos = match enumerate(vid, pid).await {
 				Ok(v) => v,
 				Err(e) => {
-					log::debug!("usb enumerate failed: {e:#}");
+					log::info!("usb enumerate failed: {e:#}");
+					last_count = None;
 					continue;
 				}
 			};
+			if last_count != Some(infos.len()) {
+				if infos.is_empty() {
+					log::info!("no Touchy-Pad devices found ({vid:04x}:{pid:04x})");
+				} else {
+					log::info!("found {} Touchy-Pad candidate(s)", infos.len());
+					for info in &infos {
+						log::info!(
+							"  candidate {:04x}:{:04x} bus {} addr {} -> id {}",
+							info.vendor_id(),
+							info.product_id(),
+							info.busnum(),
+							info.device_address(),
+							layout::device_id_for(info.busnum(), info.device_address()),
+						);
+					}
+				}
+				last_count = Some(infos.len());
+			}
 			let mut seen = Vec::with_capacity(infos.len());
 			for info in &infos {
 				let id = layout::device_id_for(info.busnum(), info.device_address());
 				seen.push(id.clone());
 				if !self.devices.read().await.contains_key(&id) {
+					log::info!("new device {id} — attaching");
 					if let Err(e) = self.attach(info, &id).await {
 						log::warn!("attach {id} failed: {e:#}");
 					}
@@ -115,17 +140,28 @@ impl TouchyPlugin {
 				map.keys().filter(|k| !seen.contains(k)).cloned().collect()
 			};
 			for id in to_drop {
+				log::info!("device {id} disappeared — detaching");
 				self.detach(&id).await;
 			}
 		}
 	}
 
 	async fn attach(&self, info: &DeviceInfo, device_id: &str) -> Result<()> {
-		log::info!("attaching {device_id}");
+		log::info!("attach {device_id}: opening USB transport");
 		let transport = UsbTransport::open_info(info).await.context("open usb transport")?;
 		let pad = Arc::new(Touchy::from_transport(Arc::new(transport)));
 
+		log::info!("attach {device_id}: querying board info");
 		let board = pad.client().sys_board_info_get().await.context("sys_board_info_get")?;
+		log::info!(
+			"attach {device_id}: board '{}', display {}×{}, protocol v{}, multitouch={}, usb={}",
+			board.board_name,
+			board.display_width,
+			board.display_height,
+			board.protocol_version,
+			board.is_multitouch,
+			board.has_usb,
+		);
 		if board.display_width == 0 || board.display_height == 0 {
 			return Err(anyhow!("{device_id} reported zero display dimensions ({}×{})", board.display_width, board.display_height));
 		}
@@ -134,13 +170,16 @@ impl TouchyPlugin {
 		if cols == 0 || rows == 0 {
 			return Err(anyhow!("{device_id} display {}×{} is smaller than one key ({KEY_PX} px)", board.display_width, board.display_height));
 		}
+		log::info!("attach {device_id}: grid {cols}×{rows} ({} keys, {KEY_PX}px each)", cols as u32 * rows as u32);
 		let screen_path = layout::screen_path_for(device_id);
 		let screen = layout::build_screen(cols, rows, device_id);
+		log::info!("attach {device_id}: uploading screen to {screen_path}");
 		pad.screen_save(&screen_path, &screen).await.context("screen_save")?;
 		pad.screen_load(&screen_path).await.context("screen_load")?;
 
 		// Take the event receiver before we hand the pad off.
 		let mut rx = pad.events().await.ok_or_else(|| anyhow!("events() already taken"))?;
+		log::info!("attach {device_id}: spawning event-forwarding task");
 		let id_for_task = device_id.to_string();
 		let event_task = tokio::spawn(async move {
 			while let Some(evt) = rx.recv().await {
@@ -149,11 +188,23 @@ impl TouchyPlugin {
 				{
 					// Slider/toggle events — not applicable to a key grid.
 				}
-				let Some(key) = layout::key_for_host_code(evt.host_code) else { continue };
+				let Some(key) = layout::key_for_host_code(evt.host_code) else {
+					log::debug!("{id_for_task}: ignoring event host_code={:#x} code={} (outside key range)", evt.host_code, evt.code);
+					continue;
+				};
 				let res = match evt.code {
-					LV_EVENT_PRESSED => device_plugin::key_down(id_for_task.clone(), key).await,
-					LV_EVENT_RELEASED | LV_EVENT_PRESS_LOST => device_plugin::key_up(id_for_task.clone(), key).await,
-					_ => continue,
+					LV_EVENT_PRESSED => {
+						log::info!("{id_for_task}: key {key} down -> keyDown");
+						device_plugin::key_down(id_for_task.clone(), key).await
+					}
+					LV_EVENT_RELEASED | LV_EVENT_PRESS_LOST => {
+						log::info!("{id_for_task}: key {key} up -> keyUp");
+						device_plugin::key_up(id_for_task.clone(), key).await
+					}
+					other => {
+						log::debug!("{id_for_task}: key {key} ignored event code {other}");
+						continue;
+					}
 				};
 				if let Err(e) = res {
 					log::warn!("dispatch event for {id_for_task}/key{key}: {e:?}");
@@ -174,29 +225,39 @@ impl TouchyPlugin {
 
 		self.devices.write().await.insert(device_id.to_string(), ctx.clone());
 
-		// Tell OpenDeck about the new device.
+		// Tell OpenDeck about the new device. NOTE: openaction's
+		// `register_device` silently no-ops (returns Ok) if the outbound
+		// WebSocket manager isn't live yet — but by the time the
+		// hot-plug loop runs (spawned from `plugin_ready`) the manager is
+		// always set, so a successful return here does mean the
+		// `registerDevice` event hit the socket.
+		log::info!("attach {device_id}: sending registerDevice (name='{}', {cols}×{rows}, type {DEVICE_TYPE})", ctx.name());
 		device_plugin::register_device(device_id.to_string(), ctx.name(), rows, cols, /* encoders */ 0, DEVICE_TYPE)
 			.await
 			.map_err(|e| anyhow!("register_device: {e:?}"))?;
-		log::info!("registered {device_id} as {cols}x{rows}");
+		log::info!("attach {device_id}: registered OK as {cols}×{rows}");
 		Ok(())
 	}
 
 	async fn detach(&self, device_id: &str) {
-		log::info!("detaching {device_id}");
+		log::info!("detach {device_id}: tearing down");
 		let ctx = self.devices.write().await.remove(device_id);
 		if let Some(ctx) = ctx {
 			if let Some(h) = ctx.reload_handle.lock().await.take() {
+				log::info!("detach {device_id}: cancelling pending screen reload");
 				h.abort();
 			}
 			if let Some(h) = ctx.event_task.lock().await.take() {
+				log::info!("detach {device_id}: cancelling event task");
 				h.abort();
 			}
 			ctx.pad.close().await;
 		}
+		log::info!("detach {device_id}: sending deregisterDevice");
 		if let Err(e) = device_plugin::unregister_device(device_id.to_string()).await {
 			log::warn!("unregister_device {device_id}: {e:?}");
 		}
+		log::info!("detach {device_id}: done");
 	}
 
 	async fn ctx_for(&self, device_id: &str) -> Option<Arc<DeviceCtx>> {
@@ -220,13 +281,14 @@ impl TouchyPlugin {
 	}
 
 	async fn handle_set_image(&self, ev: SetImageEvent) -> Result<()> {
+		log::info!("set_image: device={} position={:?} has_image={}", ev.device, ev.position, ev.image.is_some());
 		let Some(ctx) = self.ctx_for(&ev.device).await else {
-			log::debug!("set_image for unknown device {}", ev.device);
+			log::info!("set_image for unknown device {} — ignored", ev.device);
 			return Ok(());
 		};
 		match (ev.position, ev.image.as_deref()) {
 			(Some(pos), Some(data_url)) => {
-				let key = u8::try_from(pos).context("position out of u8 range")?;
+				let key = pos;
 				if key as usize >= (ctx.cols as usize) * (ctx.rows as usize) {
 					log::debug!("set_image position {key} out of range for {}", ctx.device_id);
 					return Ok(());
@@ -241,7 +303,7 @@ impl TouchyPlugin {
 				// Clear single key — write a 1px transparent PNG so
 				// LVGL has something to render. Easiest portable
 				// approach: drop the asset and reload.
-				let key = u8::try_from(pos).context("position out of u8 range")?;
+				let key = pos;
 				let asset = layout::asset_path_for(&ctx.device_id, key);
 				let _ = ctx.pad.client().file_delete(&asset).await;
 				self.schedule_reload(&ctx).await;
@@ -262,7 +324,11 @@ impl TouchyPlugin {
 	}
 
 	async fn handle_set_brightness(&self, ev: SetBrightnessEvent) -> Result<()> {
-		let Some(ctx) = self.ctx_for(&ev.device).await else { return Ok(()) };
+		log::info!("set_brightness: device={} brightness={}", ev.device, ev.brightness);
+		let Some(ctx) = self.ctx_for(&ev.device).await else {
+			log::info!("set_brightness for unknown device {} — ignored", ev.device);
+			return Ok(());
+		};
 		// Touchy-Pad doesn't expose a brightness knob via the host
 		// API yet; we map 0 → sleep ASAP, anything else → wake.
 		// Document this limitation in the README.
@@ -278,7 +344,7 @@ impl TouchyPlugin {
 #[async_trait]
 impl GlobalEventHandler for TouchyPlugin {
 	async fn plugin_ready(&self) -> OpenActionResult<()> {
-		log::info!("plugin_ready — starting hot-plug watcher");
+		log::info!("plugin_ready — OpenDeck outbound link is live; starting hot-plug watcher");
 		let me = Arc::new(self.clone());
 		tokio::spawn(async move { me.run_hotplug_loop().await });
 		Ok(())

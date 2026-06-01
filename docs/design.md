@@ -2733,6 +2733,256 @@ the generated `*.pb.h`.
   files and comments, not wire fields.
 * `CLAUDE.md` is a symlink to `AGENTS.md` — edit once.
 
+## Stage 70: make OpenDeck device enumeration/registration actually work — DONE
+
+### Motivation
+
+Stage 62 shipped the `touchy-opendeck` plugin with a full hot-plug /
+enumerate / `register_device` path on paper, but **in practice it was
+never observed successfully telling OpenDeck about a connected
+Touchy-Pad** — no device ever appeared in OpenDeck's device list. This
+stage is a debugging-and-hardening pass: instrument every step heavily,
+align the plugin to the *proven* reference implementation
+(`4ndv/opendeck-akp153`, now vendored read-only at
+`tools/reference/opendeck-akp153/`), and refresh the
+[opendeck-device-plugin.md](opendeck-device-plugin.md) write-up with
+what we learn.
+
+**Be clear about the starting point:** the scaffolding already exists.
+`rust/touchy-opendeck/src/plugin.rs` already has `run_hotplug_loop`
+(1 Hz USB poll diffing attached devices), `attach` (open transport →
+`sys_board_info_get` → build grid screen → spawn event task →
+`device_plugin::register_device`), `detach`
+(`device_plugin::unregister_device`), and per-event forwarding
+(`device_plugin::key_down` / `key_up`). Stage 70 does **not** rewrite
+this from scratch — it figures out *why the registration is invisible*
+and makes the whole lifecycle observable.
+
+### Findings from the reference example
+
+The reference plugin (`tools/reference/opendeck-akp153/`) is the plugin
+the OpenAction `device_plugin` surface was designed around, so it is the
+ground truth for "what a working registration looks like". Key
+differences vs. our crate:
+
+| Aspect | Reference (`opendeck-akp153`) | Our `touchy-opendeck` |
+|---|---|---|
+| openaction version | `openaction = "1.1.5"` | `openaction = "2"` (resolves to 2.6.0) |
+| Entry point | `init_plugin(GlobalEventHandler, ActionEventHandler)` inside `tokio::select!` w/ SIGTERM | `set_global_event_handler(&leaked)` + `openaction::run(args)` |
+| Register call | `OUTBOUND_EVENT_MANAGER.lock().await.as_mut()` → `outbound.register_device(id, name, rows, cols, encoders, device_type)` | `device_plugin::register_device(id, name, rows, cols, 0, type)` free fn |
+| Log sink | `TermLogger::init(Info, …, TerminalMode::Stdout, …)` | `TermLogger::init(Info, …, TerminalMode::Stderr, …)` |
+| Per-device model | one `device_task(candidate, CancellationToken)` per device, tracked in a `TaskTracker`; events read in a loop, each `key_down/up` via `OUTBOUND_EVENT_MANAGER` | one spawned `event_task` per device storing a `JoinHandle`; hot-plug diff loop owns lifecycle |
+| Logging density | `log::info!` at nearly every step (candidate found, registering, reader ready, each update) | sparse — mostly one `info` per attach, rest `debug`/`warn` |
+
+### How OpenDeck actually transports + captures plugin output (verified)
+
+Before guessing, the openaction crate and the OpenDeck source were read
+directly to settle the stdout/stderr question:
+
+* **The OpenAction transport is a real TCP WebSocket, not stdio.**
+  `openaction::run` parses a `-port <n>` CLI arg and calls
+  `connect_async("ws://localhost:{port}")` (openaction 2.6.0
+  `src/lib.rs:63`; v1.1.5 is the same shape). OpenDeck runs a WebSocket
+  *server* (`init_websocket_server`) and passes the port on argv. So the
+  plugin's own stdin/stdout/stderr are **not** the link — writing to
+  them cannot corrupt the protocol.
+* **OpenDeck redirects the plugin's stdout *and* stderr to a log file.**
+  When it spawns a native plugin it does
+  `.stdout(Stdio::from(log_file))` / `.stderr(Stdio::from(log_file))`
+  where `log_file = log_dir()/plugins/<plugin-uuid>.log`
+  (`OpenDeck/src-tauri/src/plugins/mod.rs`). With the dev build from
+  `just opendeck-run` (Tauri identifier `opendeck`) that path is
+  `~/.local/share/opendeck/logs/plugins/com.geeksville.touchypad.log`;
+  a packaged OpenDeck may use a different identifier.
+
+**Consequence:** the original "stdout corrupts the JSON socket" comment
+in our `main.rs`/README is simply wrong, and **stderr vs stdout doesn't
+matter** — OpenDeck funnels both into the same per-plugin log file. The
+most likely reason "I never saw it notifying the app" is that the logs
+were going to that file (not the terminal), combined with one of the
+registration/enumeration faults below. Per the user's instruction we
+will still match the reference exactly (simplelog `TermLogger` → Stdout,
+`Info`), purely to remove any doubt and stay byte-for-byte aligned with a
+known-good plugin.
+
+### Suspected root causes (investigate in order)
+
+1. **Looking in the wrong place / log level.** Because OpenDeck captures
+   stdout+stderr to `log_dir()/plugins/<plugin-uuid>.log`, nothing shows
+   in the terminal that launched OpenDeck. First step in debugging is
+   `tail -f` that file. Ensure the plugin logs at `Info` and emits a
+   line at *every* lifecycle step (Phase 1) so the file tells the whole
+   story.
+
+2. **`device_plugin::register_device` (v2) actually reaching the
+   socket.** Confirm the openaction-2 free function maps onto the same
+   outbound `registerDevice` event the v1 `OUTBOUND_EVENT_MANAGER` path
+   sends. If it is a no-op / not yet wired in the version we pull,
+   switch to the reference's proven pattern (acquire the outbound
+   manager and call `register_device` on it). Pin/verify the exact
+   openaction version in `Cargo.lock`.
+
+3. **Registration timing vs. the outbound manager being ready.** We
+   spawn `run_hotplug_loop` from `plugin_ready`; the first
+   `register_device` fires ~1 s later. Verify the outbound channel /
+   WebSocket handshake is fully up before the first registration (the
+   reference registers from inside the per-device task spawned *after*
+   `plugin_ready`, which is safe). Log the moment registration is
+   attempted and its `Result`.
+
+4. **Enumeration returning empty.** If `enumerate(vid, pid)` finds
+   nothing (nusb backend missing, udev permissions, or the device held
+   open by another process), `attach` never runs and nothing registers.
+   Today an enumerate error is logged at `debug` and an empty result is
+   silent. *Fix:* `log::info!` the candidate count and each candidate's
+   VID/PID/bus/addr every poll (rate-limited), and log when the set is
+   empty.
+
+5. **Device-ID namespace.** OpenDeck routes by the manifest's
+   two-char `DeviceNamespace` (ours is `"tp"`), and every registered ID
+   must start with it. `layout::device_id_for` returns `"tp-<bus><addr>"`
+   — consistent — but log the exact ID string we register so a prefix
+   mismatch is obvious.
+
+### Plan
+
+**Phase 1 — Instrumentation (do this first, before changing behaviour).**
+Add `log::info!` at every lifecycle step so a single run shows the whole
+story, mirroring the reference's density:
+* `plugin_ready`: "plugin_ready — outbound manager ready, starting watcher".
+* each poll: candidate count + per-candidate VID/PID/bus/addr; an explicit
+  "no Touchy-Pad devices found" when empty.
+* `attach`: start, board-info result (`board_name`, `display_width × height`,
+  `protocol_version`), computed `cols × rows`, screen upload, event-task
+  spawn, and the `register_device(id, name, rows, cols, encoders, type)`
+  call **with its `Result`** logged.
+* `detach`: which id, task cancellation, `unregister_device` result.
+* event forwarding: each `LvEvent` (code/host_code/key) → `key_down`/`key_up`.
+* `set_image` / `set_brightness` inbound events: log device id + position.
+
+**Phase 2 — Logging init exactly like the example.** Match the reference
+verbatim: `simplelog::TermLogger::init(LevelFilter::Info,
+Config::default(), TerminalMode::Stdout, ColorChoice::Never)`. Keep an
+env override (e.g. `RUST_LOG` / `TOUCHY_LOG`) so `Debug` is one var away.
+Delete the inaccurate "stdout corrupts the socket" comment from `main.rs`
+and the README — OpenDeck captures both stdout and stderr into
+`log_dir()/plugins/<plugin-uuid>.log`, so the sink is irrelevant to
+correctness.
+
+**Phase 3 — Verify / fix the registration path.** Trace whether
+openaction-2 `device_plugin::register_device` emits the outbound
+`registerDevice` event. If not (or unreliable), adopt the reference's
+`OUTBOUND_EVENT_MANAGER`-based call. Either way, ensure registration
+happens only after `plugin_ready`/outbound is live, and log success.
+
+**Phase 4 — Restructure per-device tasks to mirror the example
+(optional but recommended).** Split `plugin.rs` into modules analogous
+to the reference (`watcher.rs` for enumerate + hot-plug, `device.rs` for
+the per-device task + event loop), use a `CancellationToken` per device
+plus a `TaskTracker` for clean shutdown, and register from inside the
+device task (as the reference does). This makes "device threads" map
+one-to-one to the example and gives graceful SIGTERM teardown. Reuse the
+rust-api patterns already exercised by `touchy-demo`
+(`Touchy::from_transport`, `file_save`, `screen_save`/`screen_load`,
+`events()`).
+
+**Phase 5 — Documentation.** Update
+[opendeck-device-plugin.md](opendeck-device-plugin.md) from these
+findings (see below) and substantially expand
+[rust/touchy-opendeck/README.md](../rust/touchy-opendeck/README.md):
+
+* Fix the architecture diagram + remove the wrong "OpenDeck reads stdout
+  as JSON" claim (the link is a TCP WebSocket; stdout/stderr are both
+  captured to a log file).
+* Add a **"Running a debug build under OpenDeck"** section so a
+  contributor can iterate without `opendeck-package` + GUI "install from
+  file" each time: symlink the `.sdPlugin` bundle into OpenDeck's
+  `config_dir()/plugins/`, symlink the `cargo build` (debug) binary into
+  the bundle's `CodePath`, run `just opendeck-run`, and
+  `tail -f log_dir()/plugins/<plugin-uuid>.log` to watch the plugin's
+  output. Document the exact dev-build paths (`~/.config/opendeck/plugins/`,
+  `~/.local/share/opendeck/logs/plugins/com.geeksville.touchypad.log`).
+
+### Documentation update (opendeck-device-plugin.md)
+
+Add/extend sections covering what the reference example taught us:
+
+* **Outbound calls.** Document both shapes: openaction-1
+  `OUTBOUND_EVENT_MANAGER.lock().await.as_mut().register_device(id, name,
+  rows, cols, encoders, device_type)` and openaction-2
+  `device_plugin::register_device(...)`, plus `unregister_device(id)`,
+  `key_down(id, key)`, `key_up(id, key)`, and the encoder variants. Note
+  which version this repo targets and why.
+* **Device identity & namespace.** Reiterate that every registered ID
+  must start with the manifest's two-char `DeviceNamespace`; show the
+  reference's `"{NAMESPACE}-{serial}"` scheme and ours
+  (`"tp-{bus}{addr}"`), and the serial-stability caveat.
+* **`device_type` byte.** Document what the trailing byte means and why
+  we pass `0` (StreamDeck-Original-shaped 3×5 grid, no encoders).
+* **Logging.** Spell out that the OpenAction transport is a TCP
+  WebSocket (`ws://localhost:<port>` from the `-port` argv), **not** the
+  plugin's stdio, and that OpenDeck redirects the plugin's stdout *and*
+  stderr into `log_dir()/plugins/<plugin-uuid>.log`. So logging to
+  stdout is safe (the reference does exactly that) and is where you go
+  to debug "my plugin does nothing and I can't tell why". Recommend
+  `simplelog`/`Info` to stdout to match the reference.
+* **Lifecycle / hot-plug.** Document the watcher pattern: enumerate on
+  `plugin_ready`, then a hot-plug watcher (`DeviceWatcher` in the
+  reference; our 1 Hz `enumerate` diff), one cancellable task per
+  device, and `unregister_device` on disconnect.
+
+### Acceptance
+
+1. With OpenDeck running and a Touchy-Pad plugged in, the plugin's log
+   (visible to the user) shows the full chain: enumerate → candidate →
+   attach → board info → grid → `register_device` → **Ok**.
+2. The Touchy-Pad appears in OpenDeck's device list.
+3. Pressing a key on the pad shows up as a key event in OpenDeck;
+   setting a key image shows on the pad.
+4. Unplug logs `detach` + `unregister_device` and removes the device;
+   replug re-registers without restarting OpenDeck.
+5. `cargo build` / `just rust-build` clean; `opendeck-device-plugin.md`
+   updated with the sections above.
+
+### Out of scope
+
+* Encoder/dial support (no rotary inputs on current boards).
+* Windows/macOS hot-plug semantics beyond enumerate-on-start.
+* Marketplace submission (separate packaging stage).
+
+### What was implemented
+
+* **Logging init (Phase 2).** `main.rs` now logs to **stdout** (matching
+  the reference `opendeck-akp153` plugin) via
+  `simplelog::TermLogger::init(level, Config::default(),
+  TerminalMode::Stdout, …)`, with the level read from `TOUCHY_LOG` /
+  `RUST_LOG` (default `Info`). The previous "log to stderr so we don't
+  corrupt the JSON socket" comment was wrong and was removed: the
+  OpenAction link is a *separate* TCP WebSocket (`ws://localhost:<port>`),
+  and OpenDeck redirects the plugin's stdout+stderr into
+  `<log-dir>/plugins/<plugin-uuid>.log`.
+* **Instrumentation (Phase 1).** `plugin.rs` now emits `log::info!` at
+  every lifecycle step: watcher start, each enumeration poll (logging the
+  candidate count + per-candidate VID/PID/bus/addr, and an explicit
+  "no Touchy-Pad devices found" when empty, de-duplicated so the 1 Hz
+  poll doesn't flood), attach (USB open → board info → computed grid →
+  screen upload → event-task spawn), the `register_device` call **and its
+  result**, every forwarded key event (`keyDown`/`keyUp`), detach/task
+  cancellation/`unregister_device`, and inbound `set_image`/`set_brightness`.
+* **Registration path verified (Phase 3).** Traced openaction 2.6.0:
+  `run()` installs the outbound manager (`set_outbound_manager`) *before*
+  `plugin_ready` fires, so `device_plugin::register_device` (which silently
+  no-ops if the manager is unset) is always live by the time the hot-plug
+  loop runs. The existing path is correct; no structural change was needed
+  beyond logging the result. The per-device watcher/attach/detach structure
+  already mirrors the reference's task model, so it was kept single-file
+  rather than over-split.
+* **Docs (Phase 5).** `README.md` and `docs/opendeck-device-plugin.md`
+  corrected: TCP-WebSocket transport, stdout/stderr→logfile capture, the
+  `tail -F` log path, v1 (`OUTBOUND_EVENT_MANAGER`) vs v2
+  (`device_plugin::*` free fns) outbound APIs, and the "register only after
+  `plugin_ready`" gotcha.
+
 # Old/Existing projects
 
 In the very early days of this project I looked into these ideas/implementations:
