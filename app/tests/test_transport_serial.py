@@ -8,6 +8,7 @@ only; skipped on Windows where ``os.openpty`` is unavailable.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 
 import pytest
@@ -19,6 +20,11 @@ from touchy_pad.transport_serial import BAUD_RATE, SerialTransport  # noqa: E402
 
 if not hasattr(os, "openpty"):  # pragma: no cover - platform dependent
     pytest.skip("openpty unavailable on this platform", allow_module_level=True)
+
+if sys.platform == "darwin":  # pragma: no cover - macOS CI has no serial hardware
+    # macOS PTY + pyserial can hang in tcdrain() on close; serial hardware
+    # is never present in CI anyway.
+    pytest.skip("serial PTY tests skipped on macOS", allow_module_level=True)
 
 
 def _pty_port() -> tuple[int, str]:
