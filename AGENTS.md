@@ -25,7 +25,7 @@ a StreamDeck-compatibility shim (`TouchyDeck`).
 | `VERSION` | Single-source version (read by Python + CMake) |
 
 ## Implementation status
-All stages 0–24.4, 50.2, 51, 64.1, 64.3, 64.4, 65, 65.1, and 67 are **done**. Latest active wire-format:
+All stages 0–24.4, 50.2, 51, 64.1, 64.3, 64.4, 65, 65.1, 67, and 68 are **done**. Latest active wire-format:
 `Screen.Version.CURRENT == 5`, `SysBoardInfoResponse.ProtocolVersion.CURRENT == 6`.
 Highlights worth remembering:
 
@@ -84,6 +84,11 @@ Highlights worth remembering:
   flash), `R:host/...` = ramdisk (transient, e.g. image assets). RamFs
   prefers `MALLOC_CAP_SPIRAM` but falls back to internal RAM, so the `R:`
   drive and image assets work even on no-PSRAM boards (CYD, ~520 KB SRAM).
+  Screens live under `F:host/s/` (moved from `host/screens/` in Stage 68);
+  `host/s/default.pb` is the canonical prev/next chrome the firmware prefers
+  as its boot screen. User page bodies live under `F:host/uscr/` and the
+  chrome's `widget_ref(id="page")` pages through them. Path constants are
+  centralised in `app/src/touchy_pad/paths.py` (Python) and `lib.rs` (Rust).
 - Stage 21 (Python CLI for layouts) is implemented as `touchy screens push`,
   consuming the `touchy_pad.api.screens` DSL (`button`, `slider`, `toggle`,
   `image_button`, `trackpad`, `log_line`, layout helpers `row`/`col`/`grid`).
@@ -94,6 +99,31 @@ Highlights worth remembering:
   `Touchy.screen_save`/`widget_save` walk the proto tree
   (`_collect_host_codes`), `harvest()` the matching bindings, and register
   them via `on_host_event` — so inline callbacks light up on upload.
+- Stage 68 cleaned up screen switching. Screens moved `host/screens/`→
+  `host/s/` via symbolic path constants. The prev/next chrome is now one
+  default screen `host/s/default.pb` built from
+  `touchy_pad.api.screens.build_default_screen()` — a vertical flex column
+  (`col`) holding a prev/next chrome row plus a flex-growing body
+  `widget_ref(id="page")` (this is what the new `int32 flex_grow` field on
+  `Rect` is for: maps to `lv_obj_set_flex_grow`, honoured only under flex
+  parents). Flex children also fill the *cross* axis for COLUMN parents:
+  LVGL v9 has no `STRETCH` flex-align, so `apply_rect` sizes COLUMN
+  children to `lv_pct(100)` width (full width). It deliberately does NOT
+  force ROW children to full height — a pct(100) child height under a
+  content-height row is a circular dependency that collapses the row. The
+  parent flow is threaded into `apply_rect` via its `parent_layout` arg
+  (also stored on `ActiveRef` so the Stage-57 widget-ref rebuild path
+  keeps the cross-fill). The sim mirrors this via Qt box-layout stretch
+  factors. A flex-grow spacer between the prev/next buttons pushes them to
+  opposite edges. User page bodies live in `host/uscr/` and are uploaded via
+  `Touchy.user_screen_save(name, widget)`. The `touchy screen init` CLI
+  provisions the chrome + a trackpad page; `screen demo` adds a smiley test
+  page. The firmware's built-in fallback is **generated** from the same DSL:
+  `proto/gen_default_screen.py` → `proto/default_screen.json` (pure JSON,
+  no comments — `json_format.Parse` rejects them) → `embed_screen_json.py`
+  → `firmware/main/default_screen_pb.h`, all wired through the
+  `just gen-default-screen` / `build-default-screen` recipes. The simulator
+  reads `proto/default_screen.json` at runtime.
 - Stage 30 simulator lives in `app/src/touchy_pad/sim/` (Tkinter/PySide6).
   Invoke with `touchy --sim ...` (or `--sim-headless` for CI).
 - Stage 50.2 StreamDeck shim is `touchy_pad.touchydeck.TouchyDeck`;

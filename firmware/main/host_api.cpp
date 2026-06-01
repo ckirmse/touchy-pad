@@ -460,7 +460,7 @@ static void dispatch(const touchy_Command *cmd, touchy_Response *resp)
         bool ok = fs_close_write(fc.handle, fc.commit);
         if (ok && fc.commit && !s_active_write_path.empty()) {
             // Hand the freshly-committed file to the screen registry;
-            // it's a no-op for anything outside `*:host/screens/*.pb`.
+            // it's a no-op for anything outside `*:host/s/*.pb`.
             screens_register_from_file(s_active_write_path.c_str());
             // Stage 55: poke the active screen so any widget that
             // references this path picks up the new bytes. Cheap when

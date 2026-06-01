@@ -64,7 +64,7 @@ pub fn device_id_for(bus: u8, addr: u8) -> String {
 /// pushes a new image, and flash wear from per-keypress reloads would
 /// be wasteful.
 pub fn screen_path_for(device_id: &str) -> String {
-	format!("R:host/screens/opendeck_{device_id}.pb")
+	format!("R:host/s/opendeck_{device_id}.pb")
 }
 
 /// PSRAM ramdisk path for cell ``key``'s image asset for ``device_id``.

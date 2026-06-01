@@ -60,7 +60,7 @@ the user switches profiles, and flash wear from per-keypress reloads
 would be silly.
 
 ```
-R:host/screens/opendeck_<device_id>.pb      ← encoded layout
+R:host/s/opendeck_<device_id>.pb      ← encoded layout
 R:host/opendeck/<device_id>/key_<k>.bin     ← per-key images
 ```
 

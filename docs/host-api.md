@@ -26,8 +26,16 @@ via a small set of streaming commands. The device inspects the file
 extension after the writing transaction is committed to decide how to
 post-process it:
 
-* `host/screens/*.pb` — decoded as a `touchy.Screen` protobuf (see
+* `host/s/*.pb` — decoded as a `touchy.Screen` protobuf (see
   [Stage 15](../docs/why-not-xml.md)) and cached for `Screen_Load`.
+  (Stage 68 — moved from the old `host/screens/`. The canonical
+  prev/next chrome lives at `host/s/default.pb`, which the firmware
+  prefers as its boot screen when present.)
+* `host/uscr/*.pb` — user page bodies (Stage 68): standalone
+  `touchy.Widget` blobs the default chrome's `widget_ref(id="page")`
+  pages through via `Screen_Load`-time `ActionChangeWidgetRef`
+  NEXT/PREVIOUS. Upload them with the Python API's
+  `Touchy.user_screen_save(name, widget)`.
 * `host/widgets/*.pb` — a serialized standalone `touchy.Widget`
   (Stage 54). Referenced by `Widget.widget_ref { string path = 1; }`
   in a screen's widget tree; the firmware reads + decodes the file
@@ -68,9 +76,10 @@ Commands:
   redraw. With `commit = false` the temp file is
   discarded — used by the host as a clean abort path on exceptions.
 * `Screen_Load(path)` — Activate a previously-uploaded screen by its
-  full drive-prefixed path (e.g. `F:host/screens/home.pb`). The empty
-  string loads the device default (the first registered screen, or
-  the firmware's built-in fallback if nothing has been uploaded).
+  full drive-prefixed path (e.g. `F:host/s/home.pb`). The empty
+  string loads the device default (`host/s/default.pb` if present,
+  else the first registered screen, or the firmware's built-in
+  fallback if nothing has been uploaded).
 * `Screen_Wake` — Turn backlight on.
 * `Screen_Sleep_Timeout(msec)` — Auto sleep after `msec` of inactivity.
 * `Event_Consume` — Pop an event from the device event queue.
@@ -81,7 +90,7 @@ Commands:
 
 Every path the host sends to the device is **drive-prefixed**: the
 first two characters are `<letter>:` and the rest is the path within
-that filesystem, e.g. `F:host/screens/home.pb` or
+that filesystem, e.g. `F:host/s/home.pb` or
 `R:host/images/avatar.bin`. The device refuses unprefixed paths
 rather than silently rebasing them.
 

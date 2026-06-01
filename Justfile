@@ -159,13 +159,34 @@ build-proto-c:
         touchy.proto widgets.proto preferences.proto
     echo "wrote ${_c_out}/touchy.pb.c ${_c_out}/widgets.pb.c ${_c_out}/preferences.pb.c"
 
+# Regenerate proto/default_screen.json from the Python DSL
+# (touchy_pad.api.screens.build_default_screen) — the single source of
+# truth for the firmware's built-in fallback chrome. Depends on
+# build-proto-py because the generator imports the host package (which
+# pulls in the generated _proto bindings).
+gen-default-screen: build-proto-py
+    #!/usr/bin/env bash
+    set -euo pipefail
+    _py="${SYS_PYTHON:-/usr/bin/python3}"
+    _json="proto/default_screen.json"
+    _py_out="app/src/touchy_pad/_proto"
+    if [ -f "${_json}" ] \
+        && [ "${_json}" -nt "proto/gen_default_screen.py" ] \
+        && [ "${_json}" -nt "app/src/touchy_pad/api/screens.py" ] \
+        && [ "${_json}" -nt "${_py_out}/widgets_pb2.py" ]; then
+        echo "gen-default-screen: up to date"
+        exit 0
+    fi
+    "${_py}" proto/gen_default_screen.py "${_json}"
+
 # Compile proto/default_screen.json (the firmware's built-in fallback
 # screen, shown when no host-uploaded screens are present) into a C++
 # header carrying its serialised protobuf bytes. Depends on
-# build-proto-py because the embed script needs touchy_pb2.
+# gen-default-screen (which regenerates the JSON from the DSL) and thus
+# transitively on build-proto-py.
 default_screen_json := justfile_directory() + "/proto/default_screen.json"
 default_screen_out  := justfile_directory() + "/firmware/main/default_screen_pb.h"
-build-default-screen: build-proto-py
+build-default-screen: gen-default-screen
     #!/usr/bin/env bash
     set -euo pipefail
     _py="${SYS_PYTHON:-/usr/bin/python3}"

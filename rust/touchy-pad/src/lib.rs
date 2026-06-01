@@ -51,3 +51,16 @@ pub mod transport_usb;
 
 pub use error::{Result, TouchyError};
 pub use pad::Touchy;
+
+/// On-device directory holding screen-layout blobs (Stage 68; moved from
+/// the old `host/screens/`). Mirror of `touchy_pad.paths.SCREENS_DIR`.
+pub const SCREENS_DIR: &str = "F:host/s/";
+
+/// Canonical prev/next chrome screen the host's `screen init` writes; the
+/// firmware prefers it as its boot screen when present.
+pub const DEFAULT_SCREEN_PATH: &str = "F:host/s/default.pb";
+
+/// Directory holding user page bodies that the default chrome's
+/// `widget_ref(id="page")` pages through (Stage 68).
+pub const USER_SCREENS_DIR: &str = "F:host/uscr/";
+

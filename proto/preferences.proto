@@ -23,7 +23,7 @@ message PreferencesFile {
         V1 = 1;       // initial format: file_version + screen_timeout_ms
         V2 = 2;       // Stage 24: + current_screen (last loaded screen name)
         V3 = 3;       // Stage 51: current_screen now stores a full
-                      //           drive-letter path (e.g. "F:host/screens/home.pb")
+                      //           drive-letter path (e.g. "F:host/s/home.pb")
         CURRENT = 3;  // alias: always equals the latest defined version
     }
 
@@ -35,7 +35,7 @@ message PreferencesFile {
     uint32 screen_timeout_ms = 2;
 
     // Full drive-letter path of the most-recently-loaded screen, e.g.
-    // "F:host/screens/home.pb". Updated by the firmware on every
+    // "F:host/s/home.pb". Updated by the firmware on every
     // successful `screens_load` so a reboot restores the screen the user
     // was looking at. Empty means "no preference — load the first
     // discovered screen, then the built-in fallback". If the recorded

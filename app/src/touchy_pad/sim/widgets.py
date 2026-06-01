@@ -192,7 +192,13 @@ def _build_layout(
         lay.setContentsMargins(0, 0, 0, 0)
         for child in f.layout.children:
             cw = build_widget(child, fs, on_event, overrides, registry)
-            lay.addWidget(cw)
+            # Honour Rect.flex_grow as the Qt stretch factor so a body
+            # with flex_grow=1 fills the main axis while content-sized
+            # siblings (e.g. a chrome row) keep their size hint — mirrors
+            # the firmware's lv_obj_set_flex_grow. QBoxLayout already
+            # stretches children across the cross axis to fill the parent.
+            grow = int(child.rect.flex_grow) if child.WhichOneof("placement") == "rect" else 0
+            lay.addWidget(cw, grow)
         return container
 
     # layout_absolute: no Qt layout — children are placed via setGeometry

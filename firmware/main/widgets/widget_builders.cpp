@@ -67,6 +67,9 @@ struct ActiveRef {
     bool                       layer_root      = false;  // expansion at layer level
     bool                       grid_cell       = false;  // parent layout is grid
     bool                       absolute_layout = false;  // parent layout is absolute
+    // Stage 68 — parent layout widget (for flex cross-axis sizing on
+    // rebuild). Points into the live screen proto; null for layer roots.
+    const touchy_Widget       *parent_layout   = nullptr;
     std::unique_ptr<WidgetMsg> holder;
 };
 
@@ -836,7 +839,7 @@ void widget_build_children(lv_obj_t *parent, const touchy_Widget &container)
         if (grid_layout) {
             apply_grid_cell(obj, placement_src);
         } else {
-            apply_rect(obj, placement_src, absolute_layout);
+            apply_rect(obj, placement_src, absolute_layout, &container);
         }
         if (w->centered) lv_obj_center(obj);
         // Stage 57 — patch the outermost ref entry so it can be
@@ -853,6 +856,7 @@ void widget_build_children(lv_obj_t *parent, const touchy_Widget &container)
             back.layer_root      = false;
             back.grid_cell       = grid_layout;
             back.absolute_layout = absolute_layout;
+            back.parent_layout   = &container;
             back.id              = std::string(L->children[i].id);
             back.path            = std::string(L->children[i].kind.widget_ref.path);
         }
@@ -990,6 +994,7 @@ bool widget_refs_change(const char *target_id, const char *new_path)
     const bool                 layer_root       = match->layer_root;
     const bool                 grid_cell        = match->grid_cell;
     const bool                 absolute_layout  = match->absolute_layout;
+    const touchy_Widget       *parent_layout    = match->parent_layout;
 
     // Tear down the old LVGL subtree.
     if (layer_root && match->root == parent) {
@@ -1034,7 +1039,7 @@ bool widget_refs_change(const char *target_id, const char *new_path)
             if (grid_cell) {
                 apply_grid_cell(obj, *outer);
             } else {
-                apply_rect(obj, *outer, absolute_layout);
+                apply_rect(obj, *outer, absolute_layout, parent_layout);
             }
             if (w->centered) lv_obj_center(obj);
             if (g_pending_refs.size() > pre) {
@@ -1045,6 +1050,7 @@ bool widget_refs_change(const char *target_id, const char *new_path)
                 back.layer_root      = false;
                 back.grid_cell       = grid_cell;
                 back.absolute_layout = absolute_layout;
+                back.parent_layout   = parent_layout;
                 back.id              = std::string(outer->id);
                 back.path            = new_path;
             }

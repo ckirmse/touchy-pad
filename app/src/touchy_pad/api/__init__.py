@@ -30,6 +30,11 @@ Submodules:
 
 from __future__ import annotations
 
+from ..paths import (
+    DEFAULT_SCREEN_PATH,
+    SCREENS_DIR,
+    USER_SCREENS_DIR,
+)
 from . import hid_keys, images, lvgl_image, protobuf
 from .device import (
     MINIMUM_FIRMWARE_VERSION,
@@ -97,8 +102,10 @@ from .screens import (
     absolute,
     action,
     arc,
+    build_default_screen,
     build_demo,
     build_demo_screen,
+    build_user_pages,
     button,
     cell,
     change_widget_ref_action,
@@ -188,6 +195,12 @@ __all__ = [
     "force_render",
     "build_demo",
     "build_demo_screen",
+    "build_default_screen",
+    "build_user_pages",
+    # On-device filesystem paths (Stage 68).
+    "SCREENS_DIR",
+    "USER_SCREENS_DIR",
+    "DEFAULT_SCREEN_PATH",
     # Macros.
     "key_down",
     "key_up",

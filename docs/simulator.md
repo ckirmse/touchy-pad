@@ -58,7 +58,7 @@ sudo apt-get install -y \
 
 ```bash
 touchy --sim-gui screen demo   # upload demo assets to the sim's pseudo-fs
-touchy --sim-gui screen load F:host/screens/home.pb
+touchy --sim-gui screen load F:host/s/home.pb
 ```
 
 Each `--sim-gui` invocation spins up an in-process `SimServer` on an
@@ -179,7 +179,7 @@ from touchy_pad.sim.server import make_tempdir_server_transport
 with make_tempdir_server_transport() as transport:
     client = TouchyClient(transport)
     print(client.sys_board_info_get().board_name)   # "sim"
-    client.screen_load("F:host/screens/home.pb")
+    client.screen_load("F:host/s/home.pb")
 ```
 
 `make_tempdir_server_transport()` returns a `SimServerTransport` (a
@@ -226,7 +226,7 @@ let pad = Touchy::from_transport(t);
 | Feature                                | Sim behaviour                                                                                                                   |
 |----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
 | `Command` / `Response` protocol        | Full — identical protobuf framing on TCP as the firmware uses on USB bulk.                                                       |
-| Screen storage (`F:host/screens/*.pb`) | Sandbox-rooted pseudo-fs; survives across runs.                                                                                  |
+| Screen storage (`F:host/s/*.pb`) | Sandbox-rooted pseudo-fs; survives across runs.                                                                                  |
 | `R:` PSRAM filesystem                  | Mirrored under an `R/` subdir; treat as transient for parity with hardware.                                                      |
 | Image asset upload                     | PNG/JPEG/etc. are converted to LVGL `.bin` by the host pipeline (same path the real device exercises). The GUI window decodes `.bin` natively. |
 | Widget rendering                       | Buttons, labels, sliders, checkboxes, toggles, images, image-buttons, FPS, log, force-render checkbox.                           |

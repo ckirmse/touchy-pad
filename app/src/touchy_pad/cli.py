@@ -548,9 +548,54 @@ def screen_set_timeout(seconds: float) -> None:
 @screen.command("load")
 @click.argument("path")
 def screen_load(path: str) -> None:
-    """Activate the screen at PATH (drive-prefixed, e.g. F:host/screens/home.pb)."""
+    """Activate the screen at PATH (drive-prefixed, e.g. F:host/s/home.pb)."""
     with _client() as c:
         c.screen_load(path)
+
+
+def _do_screen_init(pad) -> None:
+    """Write the default chrome screen + baseline trackpad page.
+
+    Uploads ``F:host/s/default.pb`` (the persistent prev/next chrome with
+    a ``widget_ref(id="page")`` body) and the baseline ``trackpad`` page
+    into ``F:host/uscr/`` so the device has a usable layout out of the
+    box. Shared by ``screen init`` and ``screen demo``.
+    """
+    from .api.screens import build_default_screen, build_user_pages
+    from .paths import DEFAULT_SCREEN_PATH
+
+    pad.screen_save(build_default_screen())
+    logger.info("sent %s", DEFAULT_SCREEN_PATH)
+
+    pages = dict(build_user_pages())
+    trackpad = pages["trackpad"]
+    pad.user_screen_save("trackpad", trackpad)
+    logger.info("sent F:host/uscr/trackpad.pb")
+
+    pad.screen_load(DEFAULT_SCREEN_PATH)
+    logger.info("loaded %s", DEFAULT_SCREEN_PATH)
+
+
+@screen.command("init")
+def screen_init() -> None:
+    """Write the default chrome screen + baseline trackpad page.
+
+    Creates ``F:host/s/default.pb`` (the persistent prev/next chrome) and
+    ``F:host/uscr/trackpad.pb`` (the baseline page), then loads the
+    default screen. Run this once to give a freshly-wiped device a usable
+    layout; afterwards push your own pages into ``F:host/uscr/`` with the
+    Python API's :meth:`Touchy.user_screen_save`.
+    """
+    with _open_pad() as pad:
+        if pad.board_info is not None:
+            info = pad.board_info
+            logger.info(
+                "board %s  firmware %s  protocol %s",
+                info.board_name or "(unknown)",
+                info.firmware_version_str or str(info.firmware_version),
+                str(info.protocol_version),
+            )
+        _do_screen_init(pad)
 
 
 @screen.command("demo")
@@ -568,41 +613,37 @@ def screen_load(path: str) -> None:
 )
 @click.pass_context
 def screens_demo(ctx: click.Context, listen: bool, as_json: bool) -> None:
-    """Upload the sample multi-screen demo (stages 16, 18, 20, 24).
+    """Upload the sample demo on top of the default chrome.
 
-    Uploads two screens that share a ``[Prev | FPS | Next]`` header
-    row driven by Stage-24 device-side ``ActionSwitchScreen`` actions:
+    Runs ``screen init`` first (writing ``F:host/s/default.pb`` plus the
+    baseline ``F:host/uscr/trackpad.pb``), then adds the widget-showcase
+    ``test`` page into ``F:host/uscr/`` and the 16x16 smiley image asset.
 
-      * ``home`` — full-bleed multitouch trackpad for USB HID mouse;
-      * ``test`` — the widget showcase (macro button, ping/slider/
-        checkbox host actions 0x100/0x101/0x102, the Stage-20 smiley
-        image button on 0x103, log line).
+    The default chrome's persistent ``[< Prev | Next >]`` row pages its
+    body ``widget_ref`` through ``F:host/uscr/``; flip to the ``test``
+    page on-device with ``Next >``.
 
-    The 16x16 smiley PNG asset is auto-uploaded to
-    ``/from_host/images/smiley.png``; the host transparently converts
-    it to LVGL's native ``.bin`` format before sending.
-
-    After upload the device is told to load ``home``. With ``--listen``
-    the CLI registers Python handlers for the test screen's host
-    action codes and prints incoming events (flip to the ``test``
-    screen on-device with the ``Next >`` button).
+    With ``--listen`` the CLI parks and the Stage-67 inline
+    ``host_action(on_event=...)`` callbacks on the ``test`` page print
+    incoming events.
     """
     from .api.images import make_smiley_png
-    from .api.screens import build_demo
-
-    screen, widgets = build_demo()
+    from .api.screens import build_default_screen, build_user_pages
+    from .paths import DEFAULT_SCREEN_PATH
 
     if as_json:
         from google.protobuf import json_format
 
-        click.echo(f"// screen: {screen.name}")
-        click.echo(json_format.MessageToJson(screen.to_proto(), indent=2))
-        for name, w in widgets:
-            click.echo(f"// widget: {name}")
+        screen_msg = build_default_screen()
+        click.echo(f"// screen: {screen_msg.name}")
+        click.echo(json_format.MessageToJson(screen_msg.to_proto(), indent=2))
+        for name, w in build_user_pages():
+            click.echo(f"// page: {name}")
             click.echo(json_format.MessageToJson(w, indent=2))
         return
 
     smiley = make_smiley_png()
+    pages = dict(build_user_pages())
 
     with _open_pad() as pad:
         if pad.board_info is not None:
@@ -613,19 +654,20 @@ def screens_demo(ctx: click.Context, listen: bool, as_json: bool) -> None:
                 info.firmware_version_str or str(info.firmware_version),
                 str(info.protocol_version),
             )
+        # Baseline: default chrome + trackpad page (and load default).
+        _do_screen_init(pad)
+
+        # Demo extras: the smiley asset and the showcase `test` page.
         pad.file_save("F:host/images/smiley.png", smiley)
         logger.info("sent F:host/images/smiley.png (%d bytes source)", len(smiley))
-        for name, w in widgets:
-            pad.widget_save(name, w)
-            logger.info("sent F:host/w/%s.pb", name)
-        pad.screen_save(screen)
-        logger.info("sent F:host/screens/%s.pb (%d widgets)", screen.name, len(screen.widgets))
-        pad.screen_load(f"F:host/screens/{screen.name}.pb")
-        logger.info("loaded screen %r", screen.name)
+        pad.user_screen_save("test", pages["test"])
+        logger.info("sent F:host/uscr/test.pb")
+        pad.screen_load(DEFAULT_SCREEN_PATH)
+        logger.info("loaded %s", DEFAULT_SCREEN_PATH)
 
         if listen:
             # Stage 67: the demo widgets carry inline ``host_action(on_event=...)``
-            # callbacks, registered automatically by ``widget_save`` /
+            # callbacks, registered automatically by ``user_screen_save`` /
             # ``screen_save`` above. Nothing left to wire up here — just park
             # and let the background event thread dispatch them.
             if ctx.obj.get("sim_gui"):

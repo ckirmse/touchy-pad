@@ -6,8 +6,8 @@
 // the host streams to the device. Screens may live on either of the
 // device's two filesystems:
 //
-//   F:host/screens/<name>.pb   — persistent flash
-//   R:host/screens/<name>.pb   — PSRAM (transient; lost on reboot)
+//   F:host/s/<name>.pb   — persistent flash
+//   R:host/s/<name>.pb   — PSRAM (transient; lost on reboot)
 //
 // All public functions identify screens by their full drive-prefixed
 // path. The host-side authoring DSL lives in
@@ -26,14 +26,24 @@
 
 #include "esp_lcd_touch.h"
 
+// Stage 68: on-disk location of screen-layout blobs. Screens live under
+// `<drive>:host/s/` (moved from the old `host/screens/`); the canonical
+// prev/next chrome the host's `screen init` writes is `default.pb`,
+// which the firmware prefers as its boot screen when present. These are
+// the C++ mirror of `touchy_pad.paths.SCREENS_DIR` / `DEFAULT_SCREEN_FILE`.
+#define HOST_SCREENS_SUBDIR "host/s"
+#define HOST_SCREENS_PREFIX "host/s/"
+#define DEFAULT_SCREEN_FILE "default.pb"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// One-time setup. Safe to call more than once. Scans the `host/screens/`
+// One-time setup. Safe to call more than once. Scans the `host/s/`
 // subtree on every registered filesystem (currently F: and R:) for
-// host-uploaded `.pb` files and registers them; the first one found
-// becomes the default screen (see `screens_load`).
+// host-uploaded `.pb` files and registers them; `host/s/default.pb` is
+// preferred as the boot screen, else the first one found (see
+// `screens_load`).
 void screens_init(void);
 
 // Provide the touch controller handle so Trackpad widgets inside loaded
@@ -44,7 +54,7 @@ void screens_init(void);
 void screens_set_touch(esp_lcd_touch_handle_t handle);
 
 // Inspect a freshly-written file at the given drive-prefixed `path`
-// (e.g. `"F:host/screens/home.pb"`). For `*:host/screens/*.pb` files,
+// (e.g. `"F:host/s/home.pb"`). For `*:host/s/*.pb` files,
 // decode and cache the screen so a subsequent `screens_load(path)` can
 // instantiate it. For other files, returns true without doing anything
 // (the file is already on disk for LVGL's loaders to resolve via its

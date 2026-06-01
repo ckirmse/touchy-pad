@@ -25,7 +25,7 @@ SCREEN_NAME = "touchydeck"
 #: grid is rewritten by the host on every connect anyway — putting it
 #: in flash would just wear the flash for no benefit, and RAM rewrites
 #: are much faster.
-SCREEN_PATH = f"R:host/screens/{SCREEN_NAME}.pb"
+SCREEN_PATH = f"R:host/s/{SCREEN_NAME}.pb"
 
 #: Widget-id prefix for the per-key image buttons.
 ID_PREFIX = "sdk_key_"

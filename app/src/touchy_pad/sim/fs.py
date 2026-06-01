@@ -69,7 +69,7 @@ class SimFs:
     """A flat key/value store under ``<root>/<serial>/<drive>/``.
 
     Keys are full drive-prefixed paths the host uses on the wire (e.g.
-    ``"F:host/screens/home.pb"``, ``"R:host/images/avatar.bin"``).
+    ``"F:host/s/home.pb"``, ``"R:host/images/avatar.bin"``).
     They map to ``<root>/<serial>/<letter>/<rest>`` on disk; parent
     directories are created on demand. Path traversal (``..``) and
     missing/unknown drive letters are rejected.
@@ -135,18 +135,18 @@ class SimFs:
         """Return uploaded screen paths, sorted lexicographically.
 
         Returns full drive-prefixed paths
-        (e.g. ``"F:host/screens/home.pb"``) so callers can hand them
+        (e.g. ``"F:host/s/home.pb"``) so callers can hand them
         straight to :meth:`SimDevice._do_screen_load` /
         :meth:`TouchyClient.screen_load`. Mirrors the firmware's
-        boot-time scan of every drive's ``host/screens/*.pb`` subtree.
+        boot-time scan of every drive's ``host/s/*.pb`` subtree.
         """
         found: list[str] = []
         for letter in ("F", "R"):
-            d = self._drive_root(letter) / "host" / "screens"
+            d = self._drive_root(letter) / "host" / "s"
             if not d.is_dir():
                 continue
             for p in d.glob("*.pb"):
-                found.append(f"{letter}:host/screens/{p.name}")
+                found.append(f"{letter}:host/s/{p.name}")
         found.sort()
         return found
 

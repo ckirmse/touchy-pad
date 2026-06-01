@@ -158,7 +158,7 @@ extern "C" void app_main(void)
     // order:
     //   1. The screen the user was last viewing (saved by screens.cpp into
     //      `prefs/prefs.pb` after every successful screens_load). Stored
-    //      as a full drive-prefixed path (e.g. `F:host/screens/home.pb`).
+    //      as a full drive-prefixed path (e.g. `F:host/s/home.pb`).
     //   2. If that path isn't currently registered, screens_load() falls
     //      back to the first discovered host screen.
     //   3. If nothing has been provisioned, the built-in fallback compiled

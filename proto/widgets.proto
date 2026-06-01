@@ -4,7 +4,7 @@
 //
 // These messages describe LVGL screens authored on the host and uploaded to
 // the device via streamed `FileOpenWrite`/`FileWrite`/`FileClose` (see
-// `touchy.proto`). The device decodes them from `F:host/screens/<name>.pb`
+// `touchy.proto`). The device decodes them from `F:host/s/<name>.pb`
 // files using nanopb; the host DSL in `app/src/touchy_pad/screens.py`
 // serialises them using protobuf-python.
 //
@@ -20,9 +20,9 @@ package touchy;
 //
 // A `Screen` describes a single LVGL screen as a flat list of `Widget`s
 // plus an optional `Layout`. The host serialises one `Screen` per file
-// and streams it to the device under `F:host/screens/<name>.pb`; the
+// and streams it to the device under `F:host/s/<name>.pb`; the
 // device caches the encoded bytes and instantiates LVGL objects when
-// `ScreenLoadCmd("F:host/screens/<name>.pb")` arrives.
+// `ScreenLoadCmd("F:host/s/<name>.pb")` arrives.
 //
 // See docs/why-not-xml.md for the rationale behind protobuf over XML.
 
@@ -34,6 +34,13 @@ message Rect {
     int32 y = 2;
     int32 w = 3;
     int32 h = 4;
+    // Stage 68 — LVGL flex-grow factor. Only honoured when this widget
+    // is a child of a flex (ROW/COLUMN) layout. 0 (default) leaves the
+    // widget content-sized; a value > 0 makes it grow to share the
+    // parent's free space along the main axis in proportion to the
+    // factor (maps to `lv_obj_set_flex_grow`). Ignored under absolute /
+    // grid parents.
+    int32 flex_grow = 5;
 }
 
 // LVGL event codes — mirrors lv_event_code_t from
@@ -740,7 +747,7 @@ message Widget {
     // root widget's `version` field on file load and deletes the file
     // on mismatch.
     //
-    // For screen files (`F:host/screens/<name>.pb`) the root is
+    // For screen files (`F:host/s/<name>.pb`) the root is
     // `Screen.active`, so `screen.active.version` must equal
     // `CURRENT`. For standalone widget files
     // (`{F,R}:host/widgets/<name>.pb`, see `WidgetRef`) the top-level
@@ -749,7 +756,7 @@ message Widget {
     // `Screen`, or any message they reference.
     enum Version {
         VERSION_UNKNOWN = 0;   // proto3 default / nested child widgets
-        CURRENT         = 18;  // Stage 59: AnimTrack / Animation / Widget.animations
+        CURRENT         = 19;
     }
     Version version = 6;
 
@@ -813,7 +820,7 @@ message Widget {
 // so widgets placed on them persist across screen switches.
 //
 // One on-device LVGL screen. The encoded `Screen` is what lives in
-// F:host/screens/<name>.pb.
+// F:host/s/<name>.pb.
 message Screen {
     // Stage 56 — the wire-format version field lives on `Widget`
     // (only the root widget of each file carries it). For screen

@@ -157,7 +157,7 @@ class TouchyClient:
     def file_delete(self, path: str) -> None:
         """Delete a file or directory subtree from the device filesystem.
 
-        *path* must be drive-prefixed, e.g. ``"F:host/screens/home.pb"``
+        *path* must be drive-prefixed, e.g. ``"F:host/s/home.pb"``
         or ``"F:host"`` to wipe the whole host-uploaded area on flash.
         Passing ``"R:host"`` wipes the PSRAM filesystem instead.
         """
@@ -189,7 +189,7 @@ class TouchyClient:
         """Write a file to the device filesystem in one logical call.
 
         *path* is the drive-prefixed filesystem path
-        (e.g. ``"F:host/screens/home.pb"`` for persistent flash or
+        (e.g. ``"F:host/s/home.pb"`` for persistent flash or
         ``"R:host/images/sdk_key_0.bin"`` for transient PSRAM storage).
         *data* may be ``bytes`` (for binary files such as images) or
         ``str`` (for text payloads, encoded as UTF-8).
@@ -247,7 +247,7 @@ class TouchyClient:
         """Activate a previously-uploaded screen.
 
         *path* is the full drive-prefixed path the screen was uploaded
-        to (e.g. ``"F:host/screens/home.pb"``). Passing an empty string
+        to (e.g. ``"F:host/s/home.pb"``). Passing an empty string
         loads the device's default screen.
         """
         logger.debug("screen_load: %s", path or "(default)")

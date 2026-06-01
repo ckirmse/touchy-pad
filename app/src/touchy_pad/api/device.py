@@ -32,6 +32,7 @@ from google.protobuf.message import Message as _PbMessage
 
 from .. import _proto
 from ..client import TouchyClient
+from ..paths import screen_path
 from ..transport import PID, VID, Transport
 from . import _events, protobuf
 from .screens import Screen as _DslScreen
@@ -168,7 +169,7 @@ class Touchy:
         """Delete a file or directory subtree from the device filesystem.
 
         *path* must be drive-prefixed
-        (e.g. ``"F:host/screens/home.pb"`` to remove one screen, or
+        (e.g. ``"F:host/s/home.pb"`` to remove one screen, or
         ``"F:host"`` to wipe the whole host-uploaded area on flash).
         """
         self._client.file_delete(path)
@@ -196,7 +197,7 @@ class Touchy:
     def screen_load(self, path: str) -> None:
         """Activate the screen at the given drive-prefixed *path*.
 
-        E.g. ``pad.screen_load("F:host/screens/home.pb")``. Passing an
+        E.g. ``pad.screen_load("F:host/s/home.pb")``. Passing an
         empty string loads the device's default screen.
         """
         self._client.screen_load(path)
@@ -217,7 +218,7 @@ class Touchy:
           containing the same.
 
         ``name`` overrides the screen's own name if given. The screen
-        is uploaded to ``F:host/screens/<name>.pb`` (persistent flash).
+        is uploaded to ``F:host/s/<name>.pb`` (persistent flash).
         Returns the final name used.
         """
         if name is not None:
@@ -243,7 +244,7 @@ class Touchy:
             widget_count,
         )
         self._register_inline_callbacks(msg)
-        self._client.file_save(f"F:host/screens/{final_name}.pb", msg.SerializeToString())
+        self._client.file_save(screen_path(final_name), msg.SerializeToString())
         return final_name
 
     @staticmethod
@@ -351,6 +352,46 @@ class Touchy:
         stamped.CopyFrom(widget)
         stamped.version = _proto.Widget.Version.CURRENT
         logger.debug("widget_save: %s", path)
+        self._register_inline_callbacks(stamped)
+        self._client.file_save(path, stamped.SerializeToString())
+        return path
+
+    def user_screen_save(
+        self,
+        name: str,
+        widget: _proto.Widget,
+        *,
+        drive: str = "F",
+    ) -> str:
+        """Upload a user-screen page body (Stage 68).
+
+        Writes the serialized widget to ``{drive}:host/uscr/{name}.pb``.
+        The default chrome screen (``F:host/s/default.pb``, see
+        :func:`touchy_pad.api.build_default_screen`) pages its body
+        ``widget_ref`` through this directory, so each file here is one
+        top-level page that fills the area below the prev/next row. This
+        is the directory most users push to; ``F:host/w/`` (see
+        :meth:`widget_save`) is for generic widget-refs instead.
+
+        *drive* defaults to ``"F"`` (persistent flash); pass ``"R"`` for
+        the volatile PSRAM ramdisk. Returns the drive-prefixed path.
+        """
+        if not name:
+            raise ValueError("user_screen_save: name must be non-empty")
+        if drive not in ("F", "R"):
+            raise ValueError(f"user_screen_save: drive must be 'F' or 'R', got {drive!r}")
+        if not isinstance(widget, _proto.Widget):
+            raise TypeError(
+                f"user_screen_save: widget must be touchy_pad.api.protobuf.Widget, "
+                f"got {type(widget).__name__}"
+            )
+        path = f"{drive}:host/uscr/{name}.pb"
+        # Stage 56 version stamp (mirrors widget_save) so the firmware
+        # validates the root widget on load.
+        stamped = _proto.Widget()
+        stamped.CopyFrom(widget)
+        stamped.version = _proto.Widget.Version.CURRENT
+        logger.debug("user_screen_save: %s", path)
         self._register_inline_callbacks(stamped)
         self._client.file_save(path, stamped.SerializeToString())
         return path

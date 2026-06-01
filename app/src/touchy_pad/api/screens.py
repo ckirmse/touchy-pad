@@ -73,6 +73,8 @@ __all__ = [
     "force_render",
     "build_demo_screen",
     "build_demo",
+    "build_default_screen",
+    "build_user_pages",
     # LvState / LvPart selector bits (see widgets.proto:LvState).
     "STATE_DEFAULT",
     "STATE_CHECKED",
@@ -1313,61 +1315,77 @@ class Screen:
         return f"Screen(name={self.name!r}, widgets={len(self.active.widgets)})"
 
 
-def build_demo() -> tuple[Screen, list[tuple[str, _proto.Widget]]]:
-    """Build the Stage-57 demo: one screen + a directory of widget pages.
+def build_default_screen() -> Screen:
+    """Build the Stage-68 default *chrome* screen (``F:host/s/default.pb``).
 
-    Returns ``(screen, widgets)`` where:
+    A vertical flex column with two children:
 
-    * ``screen`` is the single "demo" screen — a persistent Prev / Next
-      chrome row plus a Stage-54 :func:`widget_ref` (``id="page"``)
-      pointing into ``F:host/w/`` for the body. The Prev / Next buttons
-      use :func:`prev_widget_action` / :func:`next_widget_action` so
-      paging happens entirely on-device.
-    * ``widgets`` is a list of ``(name, Widget)`` pairs that the caller
-      uploads to ``F:host/w/<name>.pb`` (CLI: ``touchy screens demo``):
+    * a content-sized top chrome row holding ``< Prev`` / ``Next >``
+      buttons (sized to their content — the column flow shrinks the row
+      to just the button heights), and
+    * a ``widget_ref(id="page")`` **body** that grows to fill the rest of
+      the screen (``rect.flex_grow = 1``). It initially points at
+      :data:`USER_SCREENS_DIR` ``trackpad.pb``; the prev/next buttons step
+      the ref through :data:`USER_SCREENS_DIR` on-device.
 
-      - ``"trackpad"`` — full-bleed multitouch trackpad (USB HID mouse).
-      - ``"test"`` — Stage 16 / 18 / 20 widget showcase wrapped in a
-        4x7 grid: hello / ping / force / fps / slider / checkbox /
-        smiley image-button / log line.
+    Users normally leave this screen alone and just push page bodies into
+    ``host/uscr/`` (see :func:`build_user_pages`); replacing
+    ``host/s/default.pb`` is the escape hatch for a fully custom layout.
+    """
+    from ..paths import USER_SCREENS_DIR, user_screen_path
 
-    Lexicographic order in that directory is ``test`` then ``trackpad``,
-    so Next/Prev wrap predictably.
+    PAGE_ID = "page"
+
+    screen = Screen("default", layout=col(gap=8))
+
+    # Content-sized chrome row (a nested flex row → no grow, shrinks to
+    # the buttons' height inside the column flow). A flex-grow spacer
+    # between the buttons pushes `< Prev` to the left edge and `Next >`
+    # to the right edge of the full-width row.
+    chrome = Layer(layout=row(gap=8))
+    chrome += button(
+        "prev",
+        text="< Prev",
+        on_click=prev_widget_action(PAGE_ID, USER_SCREENS_DIR),
+    )
+    gap = rect()
+    gap.flex_grow = 1
+    chrome += spacer("chrome_gap", rect=gap)
+    chrome += button(
+        "next",
+        text="Next >",
+        on_click=next_widget_action(PAGE_ID, USER_SCREENS_DIR),
+    )
+    chrome_widget = _proto.Widget()
+    chrome.copy_into(chrome_widget)
+    screen += chrome_widget
+
+    # Body — grows to fill the remaining height below the chrome row.
+    body = widget_ref(user_screen_path("trackpad"), id=PAGE_ID)
+    body.rect.flex_grow = 1
+    screen += body
+
+    return screen
+
+
+def build_user_pages() -> list[tuple[str, _proto.Widget]]:
+    """Build the demo user-screen page bodies for ``F:host/uscr/``.
+
+    Returns a list of ``(name, Widget)`` pairs the caller uploads via
+    :meth:`Touchy.user_screen_save` (CLI: ``touchy screen init`` /
+    ``touchy screen demo``). Lexicographic order in that directory is
+    ``test`` then ``trackpad``, so the chrome's Next/Prev wrap predictably.
+
+    * ``"trackpad"`` — full-bleed multitouch trackpad (USB HID mouse).
+      Written by ``screen init`` so the device has a usable page out of
+      the box.
+    * ``"test"`` — Stage 16 / 18 / 20 widget showcase (hello / ping /
+      force / fps / slider / checkbox / smiley image-button / log line),
+      with Stage-67 inline ``host_action(on_event=...)`` callbacks. Added
+      by ``screen demo`` on top of the baseline.
     """
     from . import hid_keys as k
     from . import macros as m
-
-    # ── chrome screen ─────────────────────────────────────────────────
-    PAGE_ID = "page"
-    PAGE_DIR = "F:host/w/"
-    PAGE_INITIAL = "F:host/w/trackpad.pb"
-
-    screen = Screen("demo", layout=grid(cols=2, rows=8, gap=8))
-    screen += cell(
-        button(
-            "prev",
-            text="< Prev",
-            on_click=prev_widget_action(PAGE_ID, PAGE_DIR),
-        ),
-        col=0,
-        row=0,
-    )
-    screen += cell(
-        button(
-            "next",
-            text="Next >",
-            on_click=next_widget_action(PAGE_ID, PAGE_DIR),
-        ),
-        col=1,
-        row=0,
-    )
-    screen += cell(
-        widget_ref(PAGE_INITIAL, id=PAGE_ID),
-        col=0,
-        row=1,
-        col_span=2,
-        row_span=7,
-    )
 
     # ── trackpad page widget ──────────────────────────────────────────
     pad = trackpad(
@@ -1511,11 +1529,22 @@ def build_demo() -> tuple[Screen, list[tuple[str, _proto.Widget]]]:
     test_widget = _proto.Widget()
     outer.copy_into(test_widget)
 
-    return screen, [("test", test_widget), ("trackpad", pad)]
+    return [("test", test_widget), ("trackpad", pad)]
 
 
-def build_demo_screen(name: str = "demo") -> Screen:
-    """Back-compat shim returning the Stage-57 demo chrome screen."""
-    screen, _ = build_demo()
+def build_demo() -> tuple[Screen, list[tuple[str, _proto.Widget]]]:
+    """Back-compat shim: the Stage-68 default chrome + user page bodies.
+
+    Returns ``(build_default_screen(), build_user_pages())``. Prefer the
+    two builders directly — the chrome now lives in
+    ``F:host/s/default.pb`` and the pages in ``F:host/uscr/`` (see
+    :func:`build_default_screen` / :func:`build_user_pages`).
+    """
+    return build_default_screen(), build_user_pages()
+
+
+def build_demo_screen(name: str = "default") -> Screen:
+    """Back-compat shim returning the Stage-68 default chrome screen."""
+    screen = build_default_screen()
     screen.name = name
     return screen

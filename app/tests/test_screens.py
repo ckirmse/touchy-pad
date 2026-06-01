@@ -17,7 +17,9 @@ from touchy_pad.api import (
     STATE_PRESSED,
     Screen,
     arc,
+    build_default_screen,
     build_demo,
+    build_user_pages,
     button,
     change_widget_ref_action,
     checkbox,
@@ -649,17 +651,24 @@ def test_prev_widget_action():
 
 def test_build_demo_returns_screen_and_widgets():
     screen, widgets = build_demo()
-    assert screen.name == "demo"
-    # Chrome row carries prev/next nav addressed at the body ref.
-    active_ids = [w.id for w in screen.widgets]
-    assert "prev" in active_ids and "next" in active_ids
-    # The body slot is a widget_ref(id="page") pointing into F:host/w/.
+    # Stage 68 — the chrome screen is the canonical "default".
+    assert screen.name == "default"
+    # Stage 68 — the active layer is a vertical flex column whose first
+    # child is the prev/next chrome row and second child is the growing
+    # body widget_ref(id="page") pointing into F:host/uscr/.
     decoded = _proto.Screen.FromString(screen.to_bytes())
-    refs = [w for w in _children(decoded.active) if w.WhichOneof("kind") == "widget_ref"]
-    assert len(refs) == 1
-    assert refs[0].id == "page"
-    assert refs[0].widget_ref.path == "F:host/w/trackpad.pb"
-    # Two named widget pages, sorted by build order.
+    assert decoded.active.layout_flex.flow == _proto.LayoutFlex.Flow.COLUMN
+    top = list(decoded.active.layout_flex.layout.children)
+    assert len(top) == 2
+    chrome, body = top
+    chrome_ids = [c.id for c in chrome.layout_flex.layout.children]
+    assert "prev" in chrome_ids and "next" in chrome_ids
+    assert body.id == "page"
+    assert body.WhichOneof("kind") == "widget_ref"
+    assert body.widget_ref.path == "F:host/uscr/trackpad.pb"
+    # The body grows to fill the column (Stage 68 flex_grow).
+    assert body.rect.flex_grow == 1
+    # Two named user pages, sorted by build order.
     names = [n for n, _ in widgets]
     assert names == ["test", "trackpad"]
 
@@ -667,8 +676,11 @@ def test_build_demo_returns_screen_and_widgets():
 def test_build_demo_chrome_wires_change_widget_ref_actions():
     """Prev/Next buttons emit ActionDevice(change_widget_ref=NEXT/PREVIOUS)."""
     screen, _ = build_demo()
-    prev = next(w for w in screen.widgets if w.id == "prev")
-    nxt = next(w for w in screen.widgets if w.id == "next")
+    decoded = _proto.Screen.FromString(screen.to_bytes())
+    chrome = decoded.active.layout_flex.layout.children[0]
+    chrome_children = list(chrome.layout_flex.layout.children)
+    prev = next(w for w in chrome_children if w.id == "prev")
+    nxt = next(w for w in chrome_children if w.id == "next")
     for w, expected in [
         (prev, _proto.ActionChangeWidgetRef.Behavior.PREVIOUS),
         (nxt, _proto.ActionChangeWidgetRef.Behavior.NEXT),
@@ -679,7 +691,7 @@ def test_build_demo_chrome_wires_change_widget_ref_actions():
         cw = act.device.change_widget_ref
         assert cw.behavior == expected
         assert cw.target_id == "page"
-        assert cw.path == "F:host/w/"
+        assert cw.path == "F:host/uscr/"
 
 
 def test_widget_ref_round_trip():
@@ -716,3 +728,65 @@ def test_widget_ref_rejects_inline_styling():
     # rect/style still belong to the referenced widget, not the ref node.
     with pytest.raises(ValueError):
         widget_ref("F:host/widgets/a.pb", rect=rect(0, 0, 10, 10))
+
+
+# -- Stage 68: default chrome screen + user page bodies ---------------------
+
+
+def test_build_default_screen_is_vertical_flex_with_growing_body():
+    """The default chrome is a COLUMN: chrome row + flex-growing page body."""
+    screen = build_default_screen()
+    assert screen.name == "default"
+    decoded = _proto.Screen.FromString(screen.to_bytes())
+    assert decoded.active.layout_flex.flow == _proto.LayoutFlex.Flow.COLUMN
+    top = list(decoded.active.layout_flex.layout.children)
+    assert len(top) == 2
+    chrome, body = top
+    # Chrome is a nested flex row carrying the prev/next buttons with a
+    # flex-grow spacer between them (pushes prev left, next right).
+    assert chrome.WhichOneof("kind") == "layout_flex"
+    chrome_kids = list(chrome.layout_flex.layout.children)
+    chrome_ids = [c.id for c in chrome_kids]
+    assert chrome_ids == ["prev", "chrome_gap", "next"]
+    spacer_w = chrome_kids[1]
+    assert spacer_w.WhichOneof("kind") == "spacer"
+    assert spacer_w.rect.flex_grow == 1
+    assert chrome.rect.flex_grow == 0
+    # Body is the page widget_ref that fills the remaining height.
+    assert body.id == "page"
+    assert body.WhichOneof("kind") == "widget_ref"
+    assert body.widget_ref.path == "F:host/uscr/trackpad.pb"
+    assert body.rect.flex_grow == 1
+
+
+def test_build_user_pages_targets_user_screens_dir():
+    """Page bodies are addressed into F:host/uscr/ by the chrome actions."""
+    pages = dict(build_user_pages())
+    assert set(pages) == {"test", "trackpad"}
+    screen = build_default_screen()
+    decoded = _proto.Screen.FromString(screen.to_bytes())
+    chrome = decoded.active.layout_flex.layout.children[0]
+    for btn in chrome.layout_flex.layout.children:
+        if btn.WhichOneof("kind") != "button":
+            continue
+        cw = btn.button.on_click[0].device.change_widget_ref
+        assert cw.path == "F:host/uscr/"
+
+
+def test_default_screen_json_round_trips_to_default():
+    """proto/default_screen.json decodes to the same chrome layout."""
+    from google.protobuf import json_format
+
+    repo_root = Path(__file__).resolve().parents[2]
+    raw = (repo_root / "proto" / "default_screen.json").read_text(encoding="utf-8")
+    msg = json_format.Parse(raw, _proto.Screen())
+    # Same structure as build_default_screen().
+    assert msg.active.layout_flex.flow == _proto.LayoutFlex.Flow.COLUMN
+    top = list(msg.active.layout_flex.layout.children)
+    assert len(top) == 2
+    body = top[1]
+    assert body.id == "page"
+    assert body.widget_ref.path == "F:host/uscr/trackpad.pb"
+    assert body.rect.flex_grow == 1
+    # The on-disk JSON must match what the DSL produces today.
+    assert msg.SerializeToString() == build_default_screen().to_proto().SerializeToString()

@@ -2,7 +2,7 @@
 //
 // Touchy-Pad host-uploaded screen registry — see screens.h.
 //
-// Each `.pb` file under `<drive>:host/screens/` is a serialised
+// Each `.pb` file under `<drive>:host/s/` is a serialised
 // `touchy.Screen` (see proto/touchy.proto). After a successful
 // FileClose we cache the raw encoded bytes keyed by the full
 // drive-prefixed path; on ScreenLoad we decode and walk the message,
@@ -62,7 +62,7 @@ extern "C" esp_lcd_touch_handle_t screens_get_touch(void)
 }
 
 // ---------------------------------------------------------------------------
-// Cache: drive-prefixed path (e.g. "F:host/screens/home.pb")
+// Cache: drive-prefixed path (e.g. "F:host/s/home.pb")
 //        -> encoded touchy.Screen bytes.
 // ---------------------------------------------------------------------------
 
@@ -85,7 +85,7 @@ bool ends_with(const char *s, const char *suffix)
 }
 
 // True iff `path` looks like a screen-bearing host upload, i.e.
-// `<drive>:host/screens/*.pb`. Used to filter both auto-discovery walks
+// `<drive>:host/s/*.pb`. Used to filter both auto-discovery walks
 // and post-FileClose registration attempts.
 bool is_screen_path(const char *path)
 {
@@ -95,7 +95,8 @@ bool is_screen_path(const char *path)
     const char *rest = path + 2;
     // Tolerate `F:/host/...` from older clients that include the slash.
     if (*rest == '/') rest++;
-    if (strncmp(rest, "host/screens/", 13) != 0) return false;
+    if (strncmp(rest, HOST_SCREENS_PREFIX, strlen(HOST_SCREENS_PREFIX)) != 0)
+        return false;
     return ends_with(path, ".pb");
 }
 
@@ -236,6 +237,23 @@ bool load_decoded(std::unique_ptr<ScreenMsg> holder, const char *log_name)
     }
 
     ESP_LOGI(TAG, "loaded screen '%s'", log_name);
+
+    // Stage 68 debug — force a layout pass and dump the geometry LVGL
+    // actually computed for the screen and its immediate children, so we
+    // can tell whether apply_rect's pct(100) sizing took effect (the
+    // boot-time apply_rect logs get dropped under load).
+    lvgl_port_lock(0);
+    lv_obj_update_layout(scr);
+    ESP_LOGI(TAG, "geom scr -> w=%ld h=%ld", (long)lv_obj_get_width(scr),
+             (long)lv_obj_get_height(scr));
+    for (uint32_t i = 0; i < lv_obj_get_child_count(scr); i++) {
+        lv_obj_t *c = lv_obj_get_child(scr, i);
+        ESP_LOGI(TAG, "geom child[%lu] -> x=%ld y=%ld w=%ld h=%ld",
+                 (unsigned long)i, (long)lv_obj_get_x(c), (long)lv_obj_get_y(c),
+                 (long)lv_obj_get_width(c), (long)lv_obj_get_height(c));
+    }
+    lvgl_port_unlock();
+
     dump_critical_info();
     return true;
 }
@@ -252,25 +270,26 @@ void screens_init(void)
     if (inited) return;
     inited = true;
 
-    // Auto-discovery: scan `<drive>:host/screens/` on every registered
+    // Auto-discovery: scan `<drive>:host/s/` on every registered
     // filesystem for any .pb files the host has previously uploaded and
-    // register them. The first one we find becomes the boot default
-    // (screens_load(NULL) target). Order is whatever the filesystem
-    // returns from list() — for LittleFS this is the on-disk order, so
-    // it's stable across reboots but not alphabetical. RamFs (R:) is
-    // scanned too even though it's empty at boot, to keep the code
-    // symmetric and to pick up any persistent boot-time seeds we might
-    // add later.
+    // register them. `host/s/default.pb` is preferred as the boot
+    // default (screens_load(NULL) target); otherwise the first one we
+    // find wins. Order is whatever the filesystem returns from list()
+    // — for LittleFS this is the on-disk order, so it's stable across
+    // reboots but not alphabetical. RamFs (R:) is scanned too even
+    // though it's empty at boot, to keep the code symmetric and to pick
+    // up any persistent boot-time seeds we might add later.
     auto scan_fs = [](Fs &fs) {
         char drive = fs.letter();
-        fs.list("host/screens",
+        fs.list(HOST_SCREENS_SUBDIR,
             [drive](const std::string &name, bool is_dir) {
                 if (is_dir) return true;
                 if (!ends_with(name.c_str(), ".pb")) return true;
                 std::string full;
                 full.reserve(name.size() + 16);
                 full.push_back(drive);
-                full.append(":host/screens/");
+                full.push_back(':');
+                full.append(HOST_SCREENS_PREFIX);
                 full.append(name);
                 screens_register_from_file(full.c_str());
                 return true;
@@ -292,7 +311,7 @@ bool screens_register_from_file(const char *path)
 {
     if (!path || !*path) return false;
 
-    // Only `<drive>:host/screens/*.pb` files are layout descriptors;
+    // Only `<drive>:host/s/*.pb` files are layout descriptors;
     // everything else (images, fonts, ...) is on disk for LVGL's loaders
     // to pick up via drive-letter paths and needs no per-file
     // registration step.
@@ -341,9 +360,14 @@ bool screens_register_from_file(const char *path)
     registry()[key].assign(raw, raw + len);
     delete[] raw;
 
-    // First screen to land becomes the boot default. Subsequent uploads
-    // don't reshuffle the default (host can always pick by path).
-    if (g_default_screen_path.empty()) {
+    // Boot-default selection (Stage 68): the canonical prev/next chrome
+    // `host/s/default.pb` always wins as the screens_load(NULL) target,
+    // even if it's discovered after some other screen. Failing that, the
+    // first screen to land becomes the default. Subsequent non-default
+    // uploads don't reshuffle it (host can always pick by path).
+    if (ends_with(key.c_str(), HOST_SCREENS_PREFIX DEFAULT_SCREEN_FILE)) {
+        g_default_screen_path = key;
+    } else if (g_default_screen_path.empty()) {
         g_default_screen_path = key;
     }
 

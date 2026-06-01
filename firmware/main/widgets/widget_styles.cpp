@@ -169,7 +169,7 @@ lv_style_t *build_lv_style(const touchy_Style &s, WidgetStyles *ws)
 
 void apply_styles(lv_obj_t *obj, const touchy_Widget &w)
 {
-    ESP_LOGI(TAG, "apply_styles id='%s' count=%u", w.id, (unsigned)w.styles_count);
+    ESP_LOGD(TAG, "apply_styles id='%s' count=%u", w.id, (unsigned)w.styles_count);
     if (w.styles_count == 0 || w.styles == nullptr) return;
     auto *ws = new (std::nothrow) WidgetStyles{};
     if (!ws) return;
@@ -178,7 +178,7 @@ void apply_styles(lv_obj_t *obj, const touchy_Widget &w)
         lv_style_t *st = build_lv_style(s, ws);
         if (!st) continue;
         ws->styles.push_back(st);
-        ESP_LOGI(TAG, "  [%u] for_state=0x%08lx bg=0x%06lx text=0x%06lx "
+        ESP_LOGD(TAG, "  [%u] for_state=0x%08lx bg=0x%06lx text=0x%06lx "
                       "radius=%ld border=%ld pad=%ld recolor=0x%06lx opa=%lu "
                       "tw=%ld transition=%d",
                  (unsigned)i, (unsigned long)s.for_state,

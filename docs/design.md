@@ -2525,7 +2525,30 @@ How it works:
 - Docs: `docs/python-api.md` "Event callbacks" now leads with the inline
   form and keeps explicit codes + `on_host_event` as the lower-level path.
 
-## Stage 68: clean up screen switching
+## Stage 68: clean up screen switching — DONE
+
+**Implemented.** Screens moved `host/screens/` → `host/s/` behind symbolic
+path constants (`app/src/touchy_pad/paths.py`, `firmware/main/screens.h`
+macros, Rust `lib.rs` consts). The prev/next chrome is now a single default
+screen `host/s/default.pb` built by
+`touchy_pad.api.screens.build_default_screen()` — a vertical flex `col`
+holding a content-sized prev/next chrome row plus a flex-growing body
+`widget_ref(id="page")`. The new additive `int32 flex_grow` field on `Rect`
+maps to `lv_obj_set_flex_grow` (honoured only under flex parents) and drives
+the growing body. User page bodies live under `host/uscr/` and are uploaded
+with `Touchy.user_screen_save(name, widget)`; `build_user_pages()` returns
+the `trackpad` + `test` bodies. The `touchy screen init` CLI provisions the
+chrome + a trackpad page; `screen demo` reuses `_do_screen_init` then adds
+the smiley asset + `test` page. The firmware's built-in fallback is now
+generated from the same DSL: `proto/gen_default_screen.py` →
+`proto/default_screen.json` (pure JSON — `json_format.Parse` rejects
+comments) → `embed_screen_json.py` → `firmware/main/default_screen_pb.h`,
+wired through `just gen-default-screen` / `build-default-screen`; the
+simulator reads `proto/default_screen.json` at runtime. Boot (device + sim)
+prefers `*:host/s/default.pb`, else first-discovered, else the compiled
+fallback. Validated: `just build-proto`, `just app-test` (157 passed),
+`just app-lint` (clean), `just firmware-build` (clean), `cargo build`
+(clean).
 
 * Change existing places that were using F:host/screens to use a symbolic constant (for code cleanliness) instead.  And that constant should have the value "F:host/s" (I'm picking 's' as the new shorter filepath for the 'screens' directory)
 * move the next/prev buttons into standard widgets at the top of all screens (by default - even custom user screens).  It was a mistake that I started putting that row at the top of every 'screen'.pb file.  Really - most of the time users should just be updating content in a (new host/uscr) directory.  With one file for each top level widget that fills the bottom portion of the screen.

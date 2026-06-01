@@ -27,7 +27,7 @@ public:
 
     // Full drive-prefixed path of the screen the firmware was most
     // recently asked to show (set by screens.cpp after every successful
-    // screens_load) — e.g. `F:host/screens/home.pb`. Empty string
+    // screens_load) — e.g. `F:host/s/home.pb`. Empty string
     // means "no preference": boot uses the registry's first entry,
     // falling back to the built-in default screen.
     const std::string &current_screen() const { return m_current_screen; }

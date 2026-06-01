@@ -48,8 +48,8 @@ s += button("go", text="Go",
             style=style(bg_color=0x1E90FF, text_color=0xFFFFFF))
 
 with touchy_open() as pad:
-    pad.screen_save(s)         # uploads to F:host/screens/home.pb
-    pad.screen_load("F:host/screens/home.pb")
+    pad.screen_save(s)         # uploads to F:host/s/home.pb
+    pad.screen_load("F:host/s/home.pb")
 ```
 
 `Screen.to_proto()` is also exposed for advanced users who want the raw

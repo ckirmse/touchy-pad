@@ -171,7 +171,7 @@ def test_screen_save_accepts_host_dsl(open_pad):
     s = Screen("home")
     s += button("go", text="Go")
     pad.screen_save(s)
-    assert "F:host/screens/home.pb" in server.saved
+    assert "F:host/s/home.pb" in server.saved
 
 
 def test_screen_save_accepts_protobuf_message(open_pad):
@@ -179,13 +179,13 @@ def test_screen_save_accepts_protobuf_message(open_pad):
     msg = protobuf.Screen()
     msg.active.version = protobuf.Widget.Version.CURRENT
     pad.screen_save(msg, name="raw")
-    assert "F:host/screens/raw.pb" in server.saved
+    assert "F:host/s/raw.pb" in server.saved
 
 
 def test_screen_save_accepts_dict(open_pad):
     pad, server = open_pad()
     pad.screen_save({"active": {"version": "CURRENT"}}, name="dictish")
-    assert "F:host/screens/dictish.pb" in server.saved
+    assert "F:host/s/dictish.pb" in server.saved
 
 
 def test_screen_save_accepts_json_path(open_pad, tmp_path: Path):
@@ -193,15 +193,15 @@ def test_screen_save_accepts_json_path(open_pad, tmp_path: Path):
     p = tmp_path / "pathish.json"
     p.write_text(json.dumps({"active": {"version": "CURRENT"}}))
     pad.screen_save(p, name="pathish")
-    assert "F:host/screens/pathish.pb" in server.saved
+    assert "F:host/s/pathish.pb" in server.saved
 
 
 def test_screen_save_name_override(open_pad):
     pad, server = open_pad()
     s = Screen("default")
     pad.screen_save(s, name="renamed")
-    assert "F:host/screens/renamed.pb" in server.saved
-    assert "F:host/screens/default.pb" not in server.saved
+    assert "F:host/s/renamed.pb" in server.saved
+    assert "F:host/s/default.pb" not in server.saved
 
 
 def test_screen_save_requires_a_name(open_pad):
@@ -213,8 +213,8 @@ def test_screen_save_requires_a_name(open_pad):
 def test_screen_load_and_file_reset_wrappers(open_pad):
     pad, server = open_pad()
     pad.file_reset()
-    pad.screen_load("F:host/screens/home.pb")
-    assert server.loaded == ["F:host/screens/home.pb"]
+    pad.screen_load("F:host/s/home.pb")
+    assert server.loaded == ["F:host/s/home.pb"]
 
 
 def test_on_host_event_dispatches_callback(open_pad):
@@ -303,6 +303,36 @@ def test_widget_save_registers_inline_callback(open_pad):
     )
     code = pad._collect_host_codes(w).pop()
     pad.widget_save("ping", w)
+    assert _events.harvest({code}) == {}
+
+    server.events.put(_proto.LvEvent(host_code=code))
+    assert fired.wait(timeout=2.0)
+
+
+def test_user_screen_save_writes_to_user_screens_dir(open_pad):
+    """user_screen_save uploads page bodies under F:host/uscr/."""
+    pad, server = open_pad()
+    w = button("pad", text="Pad")
+    path = pad.user_screen_save("trackpad", w)
+    assert path == "F:host/uscr/trackpad.pb"
+    assert "F:host/uscr/trackpad.pb" in server.saved
+
+
+def test_user_screen_save_registers_inline_callback(open_pad):
+    """Inline callbacks on a page body are harvested by user_screen_save."""
+    from touchy_pad.api import _events, host_action
+
+    _events._reset()
+    fired = threading.Event()
+
+    pad, server = open_pad()
+    w = button(
+        "ping",
+        text="Ping",
+        on_click=host_action(on_event=lambda e: fired.set()),
+    )
+    code = pad._collect_host_codes(w).pop()
+    pad.user_screen_save("page1", w)
     assert _events.harvest({code}) == {}
 
     server.events.put(_proto.LvEvent(host_code=code))

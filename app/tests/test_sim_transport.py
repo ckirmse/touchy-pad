@@ -64,16 +64,16 @@ def test_file_save_and_screen_load_roundtrip(tmp_path: pathlib.Path) -> None:
         with TouchyClient(t) as c:
             screen, widgets = build_demo()
             c.file_save(
-                f"F:host/screens/{screen.name}.pb",
+                f"F:host/s/{screen.name}.pb",
                 screen.to_proto().SerializeToString(),
             )
             for name, w in widgets:
-                c.file_save(f"F:host/w/{name}.pb", w.SerializeToString())
-            c.screen_load(f"F:host/screens/{screen.name}.pb")
+                c.file_save(f"F:host/uscr/{name}.pb", w.SerializeToString())
+            c.screen_load(f"F:host/s/{screen.name}.pb")
         active = t.device.active_screen
         assert active is not None
         assert t.device.list_screens() == [
-            "F:host/screens/demo.pb",
+            "F:host/s/default.pb",
         ]
     finally:
         t.close()
@@ -83,9 +83,7 @@ def test_screen_load_missing_returns_not_found() -> None:
     with make_tempdir_transport() as t:
         c = TouchyClient(t)
         # _check raises on non-OK; assert the underlying response code.
-        reply = c._rpc(
-            _proto.Command(screen_load=_proto.ScreenLoadCmd(path="F:host/screens/nope.pb"))
-        )
+        reply = c._rpc(_proto.Command(screen_load=_proto.ScreenLoadCmd(path="F:host/s/nope.pb")))
         assert reply.code == _proto.RESULT_NOT_FOUND
 
 

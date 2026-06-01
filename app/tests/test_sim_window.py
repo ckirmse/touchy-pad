@@ -48,11 +48,11 @@ def provisioned_fs(tmp_path: pathlib.Path) -> SimFs:
     fs.save("F:host/images/smiley.png", make_smiley_png())
     screen, widgets = build_demo()
     fs.save(
-        f"F:host/screens/{screen.name}.pb",
+        f"F:host/s/{screen.name}.pb",
         screen.to_proto().SerializeToString(),
     )
     for name, w in widgets:
-        fs.save(f"F:host/w/{name}.pb", w.SerializeToString())
+        fs.save(f"F:host/uscr/{name}.pb", w.SerializeToString())
     return fs
 
 
@@ -72,7 +72,7 @@ def test_renders_initial_screen(qapp, provisioned_fs) -> None:
     win = SimWindow(dev, size=(480, 300))
     qapp.processEvents()
 
-    assert dev.active_screen_path == "F:host/screens/demo.pb"
+    assert dev.active_screen_path == "F:host/s/default.pb"
     labels = [b.text() for b in win.findChildren(QPushButton)]
     assert "< Prev" in labels and "Next >" in labels
 
@@ -82,7 +82,7 @@ def test_next_button_changes_widget_ref(qapp, provisioned_fs) -> None:
 
     Stage 57 — the demo now uses a single screen + a widget_ref page
     slot. Pressing Next must rebind that ref in-RAM (no screen change).
-    Initial path is ``F:host/w/trackpad.pb``; the sorted directory is
+    Initial path is ``F:host/uscr/trackpad.pb``; the sorted directory is
     ``[test, trackpad]`` so NEXT wraps trackpad → test.
     """
     dev = SimDevice(provisioned_fs)
@@ -93,8 +93,8 @@ def test_next_button_changes_widget_ref(qapp, provisioned_fs) -> None:
     nxt.click()
     qapp.processEvents()
 
-    assert dev.active_screen_path == "F:host/screens/demo.pb"
-    assert win._widget_ref_overrides.get("page") == "F:host/w/test.pb"
+    assert dev.active_screen_path == "F:host/s/default.pb"
+    assert win._widget_ref_overrides.get("page") == "F:host/uscr/test.pb"
 
 
 def test_host_action_pushes_event(qapp, provisioned_fs) -> None:
@@ -149,12 +149,12 @@ def test_button_press_release_edges_dispatch(qapp, tmp_path) -> None:
         on_press=host_action(0xABC),
         on_release=host_action(0xABC),
     )
-    fs.save("F:host/screens/edges.pb", s.to_proto().SerializeToString())
+    fs.save("F:host/s/edges.pb", s.to_proto().SerializeToString())
 
     dev = SimDevice(fs)
     win = SimWindow(dev, size=(320, 200))
     qapp.processEvents()
-    assert dev.active_screen_path == "F:host/screens/edges.pb"
+    assert dev.active_screen_path == "F:host/s/edges.pb"
 
     pad = next(b for b in win.findChildren(QPushButton) if b.text() == "Pad")
     pad.click()

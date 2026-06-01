@@ -74,7 +74,7 @@ enum LogPriority {
 //
 // All file paths exchanged with the device are drive-letter prefixed:
 //
-//   "F:host/screens/home.pb"   — flash, persisted across reboots
+//   "F:host/s/home.pb"   — flash, persisted across reboots
 //   "R:host/images/foo.bin"    — RAM (PSRAM), lost on reboot
 //
 // The drive letter is a single ASCII byte followed by a colon; everything
@@ -88,7 +88,7 @@ enum LogPriority {
 //
 //   FileDelete("F:host")                  -- wipe all flash host files
 //   FileDelete("R:host")                  -- wipe all RAM host files
-//   FileDelete("F:host/screens/old.pb")   -- delete a single screen
+//   FileDelete("F:host/s/old.pb")   -- delete a single screen
 //
 // Missing files / directories are treated as success.
 message FileDeleteCmd {
@@ -96,7 +96,7 @@ message FileDeleteCmd {
 }
 
 // Open a new write transaction. `path` includes the drive letter (e.g.
-// "F:host/screens/home.pb"). On success the response carries a
+// "F:host/s/home.pb"). On success the response carries a
 // FileOpenWriteResponse with an opaque uint32 handle that subsequent
 // FileWriteCmd / FileCloseCmd messages must echo back.
 //
@@ -127,7 +127,7 @@ message FileCloseCmd {
 }
 
 // Switch the currently displayed screen to the screen at `path`. The
-// path must be drive-letter prefixed (e.g. "F:host/screens/home.pb").
+// path must be drive-letter prefixed (e.g. "F:host/s/home.pb").
 // An empty path loads the first registered screen, or the built-in
 // fallback if none have been uploaded.
 message ScreenLoadCmd {

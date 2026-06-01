@@ -16,10 +16,10 @@
 //                    LVGL FS driver (`lv_fs_drv_register`) so widgets
 //                    can `lv_image_set_src("R:host/foo.bin")`.
 //
-// Wire paths are always prefixed (e.g. `"F:host/screens/home.pb"`).
+// Wire paths are always prefixed (e.g. `"F:host/s/home.pb"`).
 // Internal FS-relative paths (passed to the `Fs::*` virtual methods)
 // have the drive letter / colon stripped and no leading slash —
-// e.g. `"host/screens/home.pb"`.
+// e.g. `"host/s/home.pb"`.
 //
 // Streaming writes follow an open / append* / close protocol so the
 // host can transfer files larger than a single USB bulk frame. Only

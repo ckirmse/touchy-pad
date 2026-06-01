@@ -126,15 +126,21 @@ class SimDevice:
         #: Decoded active screen, or None when nothing has loaded yet.
         self._active_screen: _proto.Screen | None = None
 
-        # Auto-load the lexicographically first uploaded screen on
-        # startup, mirroring firmware boot behavior. Falls back to the
-        # embedded default screen when the sim-fs is empty.
+        # Auto-load a screen on startup, mirroring firmware boot
+        # behaviour: prefer the canonical chrome ``host/s/default.pb``
+        # (Stage 68), else the lexicographically first uploaded screen.
+        # Falls back to the embedded default screen when the sim-fs is
+        # empty.
         paths = self._fs.list_screens()
         if paths:
+            boot = next(
+                (p for p in paths if p.endswith("host/s/default.pb")),
+                paths[0],
+            )
             try:
-                self._do_screen_load(paths[0])
+                self._do_screen_load(boot)
             except Exception as exc:  # noqa: BLE001 — keep sim alive on bad data
-                _log.warning("auto-load of %r failed: %s", paths[0], exc)
+                _log.warning("auto-load of %r failed: %s", boot, exc)
         if self._active_screen is None:
             default = _load_default_screen()
             if default is not None:

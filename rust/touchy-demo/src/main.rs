@@ -85,6 +85,7 @@ async fn upload_demo(pad: &Touchy) -> Result<()> {
 				y: 16,
 				w: 64,
 				h: 64,
+				flex_grow: 0,
 			})),
 			kind: Some(widget::Kind::ImageButton(ImageButton {
 				released: Some(img),
@@ -110,8 +111,8 @@ async fn upload_demo(pad: &Touchy) -> Result<()> {
 		active: Some(active),
 		..Default::default()
 	};
-	pad.screen_save("F:host/screens/rust_demo.pb", &screen).await?;
-	pad.screen_load("F:host/screens/rust_demo.pb").await?;
+	pad.screen_save("F:host/s/rust_demo.pb", &screen).await?;
+	pad.screen_load("F:host/s/rust_demo.pb").await?;
 	log::info!("rust_demo screen activated");
 	Ok(())
 }
