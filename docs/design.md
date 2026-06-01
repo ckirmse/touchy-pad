@@ -2525,6 +2525,191 @@ How it works:
 - Docs: `docs/python-api.md` "Event callbacks" now leads with the inline
   form and keeps explicit codes + `on_host_event` as the lower-level path.
 
+## Stage 68: clean up screen switching
+
+* Change existing places that were using F:host/screens to use a symbolic constant (for code cleanliness) instead.  And that constant should have the value "F:host/s" (I'm picking 's' as the new shorter filepath for the 'screens' directory)
+* move the next/prev buttons into standard widgets at the top of all screens (by default - even custom user screens).  It was a mistake that I started putting that row at the top of every 'screen'.pb file.  Really - most of the time users should just be updating content in a (new host/uscr) directory.  With one file for each top level widget that fills the bottom portion of the screen.
+*  Do this by putting it in a single default.pb screen file and having it work with files in host/uscr/foo.pb widget layout files (to fill the entire bottom portion of the screen).  Most of the time users will just populate uscr (user screens) files.  If users want a true completely custom experience they can replace host/s/default.pb with whatever they want (though this is not recommended).
+* change that default screen layout to use a vertical flow layout so the top row automatically shrinks to cover just the sizes needed for those botton.
+* in the python code move the next/prev screen buttons out of the "screen demo" cli.  Move them into a new "screen init" cli command which is intended to write any config files (in this case host/s/default.pb).  Calling "screen demo" should imply that it should also screen init.
+
+### Decisions (locked in with the user)
+
+* **Clean break** on the screens directory: the on-disk dir moves from
+  `host/screens/` → `host/s/`. No backward-compat read of the old path;
+  existing devices need a flash wipe + re-push. (Same for the sim's
+  pseudo-fs.)
+* **New `host/uscr/` directory** ("user screens") holds one widget-layout
+  `.pb` per top-level page that fills the *bottom* of the default screen.
+  The default screen's prev/next + `widget_ref` page through `host/uscr/`.
+  `host/w/` is **unchanged** and still holds arbitrary widget-refs
+  (TouchyDeck keys, `widget_save`).
+* **`trackpad` is a baseline page written by `screen init`**, not by
+  `screen demo`. So after `screen init` the device already has a usable
+  trackpad page. `screen demo` adds the `test` showcase page (and the
+  smiley image asset) on top.
+* **Boot prefers `*:host/s/default.pb`** when present, else falls back to
+  the first-discovered screen, else the built-in compiled fallback.
+* **The built-in fallback is generated from the same Python chrome
+  builder.** A build step runs `build_default_screen()` to (re)emit
+  `proto/default_screen.json`, which `embed_screen_json.py` turns into
+  `firmware/main/default_screen_pb.h` and which the sim loads at runtime.
+  Device, sim, and host therefore all share one definition of the chrome.
+
+### Names / constants
+
+| Meaning | On-disk (relative) | Drive-prefixed | Constant |
+|---|---|---|---|
+| Screens dir | `host/s/` | `F:host/s/` | `SCREENS_DIR` |
+| Default screen file | `host/s/default.pb` | `F:host/s/default.pb` | `DEFAULT_SCREEN_PATH` |
+| User-screen page bodies | `host/uscr/` | `F:host/uscr/` | `USER_SCREENS_DIR` |
+| Widgets (generic refs) | `host/w/` (unchanged) | `F:host/w/` | `WIDGETS_DIR` |
+| Images (unchanged) | `host/images/` | `F:host/images/` | `IMAGES_DIR` |
+
+Define these once per language and import everywhere instead of literals:
+
+* **Python** — new internal module `app/src/touchy_pad/paths.py` (top-level
+  so `api/`, `sim/`, `client.py`, `cli.py` can all import it without a
+  cycle). Re-export `SCREENS_DIR`, `DEFAULT_SCREEN_PATH`, `USER_SCREENS_DIR`
+  from `touchy_pad.api.__init__` for public use.
+* **Firmware C++** — in `firmware/main/screens.h`:
+  `inline constexpr const char *HOST_SCREENS_SUBDIR = "host/s";` and
+  `inline constexpr const char *DEFAULT_SCREEN_FILE = "default.pb";`.
+* **Rust** — `pub const SCREENS_DIR: &str = "F:host/s/";` etc. in
+  `rust/touchy-pad/src/lib.rs`.
+
+### Implementation plan (do in this order)
+
+**Phase 1 — proto + generated bindings (comment/string only).**
+Update the doc comments mentioning `F:host/screens/...` in
+`proto/touchy.proto`, `proto/widgets.proto`, `proto/preferences.proto`
+(and their copies under `rust/touchy-pad/proto/`) to `F:host/s/...`. These
+are comments only — no field changes, so the wire format is unchanged
+(`Screen.Version.CURRENT` and `ProtocolVersion.CURRENT` stay put). Run
+`just build-proto` to regenerate `app/.../_proto`, the firmware
+`firmware/main/proto/*.pb.h`, and the Rust bindings. Do **not** hand-edit
+the generated `*.pb.h`.
+
+**Phase 2 — Python paths module + DSL builders.**
+1. Create `app/src/touchy_pad/paths.py` with the constants table above
+   plus small helpers if useful (e.g. `screen_path(name) -> SCREENS_DIR +
+   name + ".pb"`, `user_screen_path(name)`, `widget_path(name)`).
+2. In `app/src/touchy_pad/api/screens.py`, refactor `build_demo()`:
+   * Add **`build_default_screen() -> Screen`** — the chrome. It must be a
+     **vertical flex column** (`col(...)` / `flex(..., column)`) where the
+     **top chrome row** (`< Prev`, `Next >`, optionally an `fps`) is sized
+     to its content and the **body** is a `widget_ref(id="page")` that
+     **grows to fill** the remaining height. Verify the flex DSL: the body
+     cell/widget needs `flex_grow=1` (inspect `flex`/`col`/`cell` and the
+     `Layout`/`LayoutFlex` proto for the grow field; the chrome row gets no
+     grow so it shrinks to content). Initial body path =
+     `USER_SCREENS_DIR + "trackpad.pb"`; prev/next use
+     `prev_widget_action("page", USER_SCREENS_DIR)` /
+     `next_widget_action("page", USER_SCREENS_DIR)`. Name the screen
+     `"default"` so it serialises to `host/s/default.pb`.
+   * Add **`build_user_pages() -> list[tuple[str, Widget]]`** returning the
+     `("trackpad", pad_widget)` and `("test", showcase_widget)` page bodies
+     (lifted from today's `build_demo`). Keep the inline
+     `host_action(on_event=...)` callbacks from Stage 67 on the `test` page.
+   * Keep `build_demo()`/`build_demo_screen()` as thin shims if anything
+     still imports them, or update call sites; prefer removing the
+     prev/next chrome from per-page widgets entirely (that was the
+     "mistake" the user called out).
+3. In `app/src/touchy_pad/api/device.py`:
+   * Replace the `f"F:host/screens/{name}.pb"` literals in `screen_save`
+     and the default in `screen_load`'s docstring with `SCREENS_DIR`.
+   * Add **`user_screen_save(name, widget, *, drive="F") -> str`** writing
+     to `{drive}:host/uscr/{name}.pb` (mirror `widget_save`, including the
+     Stage-56 version stamp and the Stage-67
+     `_register_inline_callbacks`). `widget_save` (→ `host/w/`) is
+     unchanged.
+
+**Phase 3 — CLI (`app/src/touchy_pad/cli.py`).**
+* Add **`screen init`**: opens the pad, writes the chrome via
+  `pad.screen_save(build_default_screen())` (→ `host/s/default.pb`), writes
+  the baseline `trackpad` page via `pad.user_screen_save("trackpad", ...)`,
+  then `pad.screen_load(DEFAULT_SCREEN_PATH)`. No prev/next wiring here —
+  that now lives inside the chrome.
+* Rework **`screen demo`** to call the same init path first (factor a
+  helper `_do_screen_init(pad)` so `demo` reuses it), then upload the
+  smiley image and the `test` page via `user_screen_save`, and load the
+  default. The `--listen` block stays as-is (Stage 67 inline callbacks).
+  `--json` should print the chrome + the user pages.
+* Update the `screen load` help string example to `F:host/s/home.pb`.
+
+**Phase 4 — built-in fallback generation.**
+* Add `proto/gen_default_screen.py` (or extend `embed_screen_json.py`):
+  imports `touchy_pad.api.screens.build_default_screen`, serialises to
+  canonical proto JSON via `google.protobuf.json_format.MessageToJson`,
+  and writes `proto/default_screen.json`.
+* Add a `just gen-default-screen` recipe and chain it: `build-proto-py`
+  → `gen-default-screen` → the existing `embed_screen_json` step that
+  produces `firmware/main/default_screen_pb.h`. Keep
+  `proto/default_screen.json` tracked in git (the sim reads it at runtime;
+  see Phase 5), and note in a header comment that it is generated.
+* Sanity: the chrome's `widget_ref` points at `host/uscr/trackpad.pb`; on a
+  truly empty fs that body is blank until `screen init` runs — acceptable.
+
+**Phase 5 — firmware C++ (`firmware/main/screens.cpp` / `screens.h`).**
+* `is_screen_path()`: compare against `"host/s/"` (length 7, **not** 13)
+  using `HOST_SCREENS_SUBDIR`. Keep tolerating an optional leading `/`.
+* `screens_init()` scan: `fs.list("host/s", ...)` and
+  `full.append(":host/s/")` (build from the constant).
+* Boot preference: when a freshly registered or discovered screen's key
+  ends with `:host/s/default.pb` (use `DEFAULT_SCREEN_FILE`), set it as
+  `g_default_screen_path` even if another screen arrived first. Simplest:
+  in `screens_register_from_file`/`screens_init`, prefer a `default.pb`
+  match over "first discovered". `screens_load(NULL)` already follows
+  `g_default_screen_path`, so only the selection rule changes.
+* No change needed to `change_widget_ref` next/prev: the directory comes
+  from the action's `path`, so `host/uscr/` flows through as data.
+
+**Phase 6 — simulator.**
+* `sim/fs.py`: `scan_screens()` and the screen-path glob use `host/s`
+  instead of `host/screens` (import the Python constant; strip the `F:`
+  prefix to the relative `host/s`). `_iter_pb` / `list_pb` already take a
+  directory arg, so `host/uscr/` works unchanged.
+* `sim/device.py`: still loads `proto/default_screen.json` (now generated)
+  as the embedded fallback; add the same "prefer `host/s/default.pb`"
+  selection when scanning a non-empty fs.
+* `sim/__init__.py`: update the `screens/home.pb` example path.
+
+**Phase 7 — Rust.**
+* `rust/touchy-pad/src/lib.rs`: add the `SCREENS_DIR` etc. consts; update
+  `touchy-demo/src/main.rs` (`F:host/s/rust_demo.pb`) and
+  `touchy-opendeck/src/layout.rs` (`R:host/s/opendeck_{id}.pb`).
+* Update `rust/touchy-opendeck/README.md` path reference.
+
+**Phase 8 — tests + docs.**
+* Python tests: update `test_sim_transport.py`, `test_sim_window.py`,
+  `test_screens.py` literals (`F:host/screens/` → `F:host/s/`,
+  `F:host/w/` page-body paths → `F:host/uscr/`). Add coverage:
+  `build_default_screen()` is a vertical-flex chrome with a growing
+  `widget_ref(id="page")` into `host/uscr/`; `user_screen_save` writes to
+  `host/uscr/`; `screen init` produces `host/s/default.pb` +
+  `host/uscr/trackpad.pb`; the regenerated `default_screen.json` round-trips
+  to a Screen named `default`.
+* Docs: `docs/host-api.md`, `docs/why-not-xml.md`, `docs/simulator.md`,
+  `docs/python-api.md`, `proto/*.proto` comments, and `AGENTS.md`
+  (filesystem-paths bullet + a Stage 68 highlight). Add the Stage-68 "DONE"
+  writeup here and flip the heading.
+* Run `just build-proto`, `just app-test`, `just app-lint`, and at least
+  one `just firmware-build` (default board) to confirm the C++ compiles;
+  `cargo build` for the Rust crates.
+
+### Gotchas
+
+* `firmware/main/proto/*.pb.h` and `app/.../_proto` are **generated** —
+  edit `proto/*.proto` then `just build-proto`, never the outputs.
+* `proto/default_screen.json` flips from hand-maintained to generated;
+  don't hand-edit it after Phase 4. The sim reads it at runtime via a
+  dev-tree relative path (`parents[4]/proto/default_screen.json`).
+* The `is_screen_path` length constant (13 → 7) is easy to miss — it's a
+  raw `strncmp` count.
+* Keep `Screen.Version` / `ProtocolVersion` unchanged: this stage moves
+  files and comments, not wire fields.
+* `CLAUDE.md` is a symlink to `AGENTS.md` — edit once.
+
 # Old/Existing projects
 
 In the very early days of this project I looked into these ideas/implementations:

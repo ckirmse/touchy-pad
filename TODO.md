@@ -38,8 +38,6 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 Main new features: Works with StreamController app to provide arbitrary user buttons
 
 * [ ] add aliexress/etc... links to recommended board
-* [ ] move the next/prev buttons into standard widgets at the top of all screens (by default - even custom user screens).  Do this by putting it in a default.pb screen file and having it work with files in host/uscr/foo.pb widget layout files.  Most of the time users will just populate uscr (user screens) files.  If users want a true completely custom experience they can replace host/s/default.pb with whatever they want.
-* [ ] change the default screen layout to use flow layout so the top row is a bit smaller.
 * [ ] support eink displays in my test devices drawer
 * [x] change DSL to allow callback functions attached to actions.  completely hide "event id" from the api consumer (just map it to the callback)
 * [ ] make stand alone example.py
