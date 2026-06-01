@@ -28,6 +28,28 @@ def test_sysversion_reports_sim() -> None:
     assert v.board_name == "sim"
 
 
+def test_board_info_capabilities_default_full() -> None:
+    """By default the sim emulates a full-featured device (multitouch + USB)."""
+    with make_tempdir_transport() as t:
+        c = TouchyClient(t)
+        v = c.sys_board_info_get()
+    assert v.is_multitouch is True
+    assert v.has_usb is True
+
+
+def test_board_info_capabilities_configurable(tmp_path: pathlib.Path) -> None:
+    """Stage 65 — caps are configurable so the sim can emulate the CYD."""
+    from touchy_pad.sim.device import SimDevice
+    from touchy_pad.sim.fs import SimFs
+
+    dev = SimDevice(SimFs(tmp_path, "cyd"), is_multitouch=False, has_usb=False)
+    cmd = _proto.Command(sys_board_info_get=_proto.SysBoardInfoGetCmd())
+    reply = _proto.Response()
+    reply.ParseFromString(dev.handle_command(cmd.SerializeToString()))
+    assert reply.sys_board_info.is_multitouch is False
+    assert reply.sys_board_info.has_usb is False
+
+
 def test_default_screen_autoloads_on_empty_fs() -> None:
     with make_tempdir_transport() as t:
         # The sim's default screen comes from proto/default_screen.json.

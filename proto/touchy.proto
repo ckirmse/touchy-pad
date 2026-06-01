@@ -197,7 +197,9 @@ message SysBoardInfoResponse {
         V5 = 5;  // stage 64.3: self-synchronising frame
                  //           (MAGIC | uint16 LEN | payload | CRC8) on every
                  //           transport, replacing the bare uint32 length prefix
-        CURRENT = 5;  // alias: always equals the latest defined version
+        V6 = 6;  // stage 65: SysBoardInfoResponse gains is_multitouch +
+                 //           has_usb capability flags (additive scalar fields)
+        CURRENT = 6;  // alias: always equals the latest defined version
     }
     ProtocolVersion protocol_version = 1;
     uint32 firmware_version = 2;    // monotonically-increasing build number
@@ -210,6 +212,15 @@ message SysBoardInfoResponse {
     // simulator these report the configured sim canvas size.
     uint32 display_width  = 5;
     uint32 display_height = 6;
+    // Stage 65 capability flags. Let host-side adapters/simulators adapt
+    // to the board without hard-coding board names.
+    // True when the touch panel reports >1 simultaneous contact (capacitive
+    // GT911) vs. a single-point resistive panel (XPT2046).
+    bool is_multitouch = 7;
+    // True when the device has a native USB-OTG port (HID + vendor-bulk
+    // transport). False on classic-ESP32 boards reached only via a UART
+    // bridge, where the protocol rides a serial port and HID is unavailable.
+    bool has_usb = 8;
 }
 
 // Reply to FileOpenWriteCmd. Carries the handle the host must echo

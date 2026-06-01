@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Board-specific Kconfig defaults for the ESP32-2432S028Rv3 ("Cheap Yellow
+# Display", CYD2USB variant).
+#
+#   - MCU:     classic ESP32-D0WD-V3 (Xtensa LX6, set-target esp32),
+#              520 KB SRAM, NO PSRAM, 4 MB flash.
+#   - Display: 2.8" 320x240 ST7789/ILI9341 over SPI.
+#   - Touch:   XPT2046 resistive on a separate SPI bus.
+#   - Host link: NO native USB. A CH340 UART bridge (UART0) is the only
+#                connection to the host, so the touchy protocol rides UART0.
+
+# ----- Flash (4 MB, DIO @ 80 MHz; CYD modules are typically DIO) -----
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/4M.csv"
+
+# ----- No PSRAM on this module -----
+# (CONFIG_SPIRAM intentionally left unset.) The 'R:' ramdisk still works —
+# RamFs prefers MALLOC_CAP_SPIRAM but falls back to internal RAM when PSRAM is
+# absent (see fs/ram_fs.cpp), so image assets are supported, just bounded by
+# the ~520 KB internal SRAM instead of PSRAM.
+
+# ----- Host transport: touchy protocol over the CH340 UART (UART0) -----
+# This board has no USB-OTG (CONFIG_SOC_USB_OTG_SUPPORTED is unset for the
+# classic ESP32), so the vendor-bulk link does not exist. The protocol
+# instead rides UART0 via the Stage 65 UartLink.
+CONFIG_TOUCHY_PROTO_OVER_SERIAL=y
+
+# Keep the IDF console OFF UART0 so its log text never interleaves with the
+# binary protocol frames. Device ESP_LOG output reaches the host through the
+# Stage 64.1 LogRecord tunnel instead (CONFIG_TOUCHY_LOG_OVER_PROTO=y, the
+# common default), so we lose nothing by silencing the raw UART console.
+CONFIG_ESP_CONSOLE_UART_NONE=y
+# CONFIG_TOUCHY_LOG_TO_UART has no effect once the console UART is disabled,
+# but set it explicitly so intent is clear.
+# CONFIG_TOUCHY_LOG_TO_UART is not set
+
+# ----- First-light bring-up override (manual; do NOT leave enabled) ---------
+# Before the protocol link is trusted it can be handy to see boot logs on a
+# serial monitor. For that, temporarily edit the options above:
+#   - replace CONFIG_ESP_CONSOLE_UART_NONE=y with CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+#   - replace CONFIG_TOUCHY_PROTO_OVER_SERIAL=y with CONFIG_TOUCHY_PROTO_OVER_SERIAL=n
+# That re-routes the console to UART0 (human-readable text) and disables the
+# binary protocol so the port carries logs only. NEVER ship with that config.
+#
+# NOTE: do not express those overrides here as `# CONFIG_X is not set` lines —
+# in sdkconfig syntax that is the *real* directive for X=n (not a comment) and
+# would silently undo the settings above.

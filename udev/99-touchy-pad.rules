@@ -14,4 +14,10 @@
 #
 # Make sure your user is in the plugdev group:
 #   sudo usermod -aG plugdev "$USER"   # then log out / log back in
+
+# Our assigned PID from espressive
 SUBSYSTEM=="usb", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="8369", OWNER="1000", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# A common ID used for ch341 uarts (used on some ESP32 boards)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", OWNER="1000", MODE="0660", GROUP="plugdev", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", OWNER="1000", MODE="0660", GROUP="plugdev"

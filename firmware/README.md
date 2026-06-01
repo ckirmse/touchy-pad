@@ -1,24 +1,33 @@
 # touchy-pad — ESP-IDF firmware
 
 ESP-IDF firmware with first-class support for
-multiple ESP32-S3 touch-LCD development boards.
+multiple ESP32 / ESP32-S3 touch-LCD development boards.
+
+Each board declares its own IDF chip target in a one-line
+`boards/<BOARD>/target` file (e.g. `esp32s3` or `esp32`), so the build
+system supports a mix of native-USB (ESP32-S3) and UART-only
+(classic ESP32) boards.
 
 ## Supported boards
 
-| `BOARD=` value          | Hardware                                                                 | Display                              | Touch | Status      |
-|-------------------------|--------------------------------------------------------------------------|--------------------------------------|-------|-------------|
-| `waveshare_s3_lcd_7b`   | [Waveshare ESP32-S3-Touch-LCD-7B](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-7B) (N16R8, 16 MB flash, 8 MB OPI PSRAM) | 800×480 ST7262 16-bit parallel RGB   | GT911 | Builds; tested incomplete |
-| `jc4827w543`            | "JC4827W543" 4.3-inch ESP32-S3 board (4 MB flash, 8 MB OPI PSRAM)         | 480×272 NV3041A 4-line QSPI IPS      | GT911 | Builds;      |
+| `BOARD=` value          | Chip    | Hardware                                                                 | Display                              | Touch | Host link | Status      |
+|-------------------------|---------|--------------------------------------------------------------------------|--------------------------------------|-------|-----------|-------------|
+| `waveshare_s3_lcd_7b`   | esp32s3 | [Waveshare ESP32-S3-Touch-LCD-7B](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-7B) (N16R8, 16 MB flash, 8 MB OPI PSRAM) | 800×480 ST7262 16-bit parallel RGB   | GT911 | USB | Builds; tested incomplete |
+| `jc4827w543`            | esp32s3 | "JC4827W543" 4.3-inch ESP32-S3 board (4 MB flash, 8 MB OPI PSRAM)         | 480×272 NV3041A 4-line QSPI IPS      | GT911 | USB | Builds;      |
+| `esp32_2432s028rv3`     | esp32   | "CYD2USB" ESP32-2432S028R v3 (classic ESP32, 4 MB flash, **no PSRAM**)    | 320×240 ST7789 SPI                   | XPT2046 (resistive, single-touch) | UART (CH340 `/dev/ttyUSB*`) | Builds; HW bring-up |
 
-The default is `jc4827w543`.
+The default is `jc4827w543`. The CYD board has no native USB: the protobuf
+protocol rides UART0 @ 115200 and there is no HID emulation.
 
 What it does today (parity with v1 Stage 10):
 
 - Brings up the panel (RGB parallel or QSPI depending on board).
 - Brings up the touch controller and feeds events into LVGL.
 - Drives LVGL through `esp_lvgl_port`, RGB565.
-- Enumerates over the USB-OTG port as a **USB-HID mouse** (TinyUSB,
-  VID/PID = `0x303A / 0x8369`).
+- On native-USB (ESP32-S3) boards, enumerates over the USB-OTG port as a
+  **USB-HID mouse** (TinyUSB, VID/PID = `0x303A / 0x8369`). On UART-only
+  boards (classic ESP32) HID is unavailable and the host link is the
+  protobuf protocol over UART0.
 - Implements `TrackpadWidget` with the v1 gesture rules:
   - 1-finger tap → left click
   - 2-finger tap → right click
@@ -48,6 +57,7 @@ firmware/
 │   │       ├── display.cpp     # esp_lcd_panel_rgb + esp_lvgl_port
 │   │       └── touch.cpp       # GT911 + LVGL indev
 │   └── jc4827w543/             # 4.3" NV3041A QSPI board
+│       ├── target              # one-line IDF chip: "esp32s3"
 │       ├── sdkconfig.defaults  # PSRAM-OPI, 4 MB QIO flash, partition table
 │       └── board/              # ← ESP-IDF component named `board`
 │           ├── CMakeLists.txt
@@ -57,6 +67,16 @@ firmware/
 │           ├── display.cpp     # NV3041A + LVGL flush_cb
 │           ├── nv3041a.{h,c}   # standalone QSPI panel driver
 │           └── touch.cpp       # GT911 + LVGL indev
+│   └── esp32_2432s028rv3/      # classic-ESP32 CYD2USB, UART-only, no PSRAM
+│       ├── target              # one-line IDF chip: "esp32"
+│       ├── sdkconfig.defaults  # 4 MB flash, proto-over-UART0, no PSRAM
+│       └── board/              # ← ESP-IDF component named `board`
+│           ├── CMakeLists.txt
+│           ├── idf_component.yml  # atanisoft/esp_lcd_touch_xpt2046
+│           ├── board.cpp       # platform_get() {multitouch:false, usb:false}
+│           ├── board_pins.h    # GPIO map (private)
+│           ├── display.cpp     # ST7789 SPI + esp_lvgl_port
+│           └── touch.cpp       # XPT2046 resistive + LVGL indev
 └── main/                       # board-agnostic app code
     ├── CMakeLists.txt          # REQUIRES board
     ├── idf_component.yml       # common deps (lvgl, esp_lvgl_port, tinyusb, ...)
@@ -100,20 +120,27 @@ firmware/
    component called `board` and implements `board_init()`, `display_init()`,
    and `touch_init()` (signatures in `main/board.h`, `main/display.h`,
    `main/touch.h`).
-2. Add `boards/<name>/sdkconfig.defaults` with flash/PSRAM/partition
+2. Add `boards/<name>/target` — a one-line file naming the IDF chip
+   (`esp32s3`, `esp32`, …). `just firmware-reconfigure <name>` reads it.
+3. Add `boards/<name>/sdkconfig.defaults` with flash/PSRAM/partition
    overrides, referencing the appropriate `partitions/<SIZE>.csv` (add a new
    one to `firmware/partitions/` if the flash size differs).
-3. Add any board-specific managed-component deps to
+4. Add any board-specific managed-component deps to
    `boards/<name>/board/idf_component.yml`.
-4. Build with `idf.py -DBOARD=<name> set-target esp32s3 && idf.py build`.
-5. Add a row to the table at the top of this file.
+5. Build with `just firmware-reconfigure <name> && just firmware-build`
+   (or `idf.py -DBOARD=<name> set-target <chip> && idf.py build`). Note the
+   `-DBOARD` is required on `set-target`, and `rm -f firmware/sdkconfig`
+   first when switching to a different chip.
+6. Add a row to the table at the top of this file.
 
 ---
 
 ## Prerequisites
 
-- **ESP-IDF v5.3 or later** (tested with v6.0.1).
-- A connected ESP32-S3 board from the table above.
+- **ESP-IDF v5.3 or later** (tested with v6.0.1). For the classic-ESP32
+  `esp32_2432s028rv3` board, install both toolchains: `./install.sh
+  esp32,esp32s3`.
+- A connected board from the table above.
 
 In every shell where you build:
 

@@ -92,6 +92,8 @@ class SimDevice:
         on_screen_change: Callable[[_proto.Screen | None], None] | None = None,
         *,
         display_size: tuple[int, int] = (480, 300),
+        is_multitouch: bool = True,
+        has_usb: bool = True,
     ) -> None:
         self._fs = fs
         self._lock = threading.RLock()
@@ -106,6 +108,10 @@ class SimDevice:
         # Reported back via SysBoardInfoResponse.display_{width,height}.
         # Host adapters (e.g. TouchyDeck) size their UI from this.
         self._display_size = (int(display_size[0]), int(display_size[1]))
+        # Stage 65 capability flags surfaced through SysBoardInfoResponse so
+        # the host can adapt (e.g. emulate the single-touch / no-USB CYD).
+        self._is_multitouch = bool(is_multitouch)
+        self._has_usb = bool(has_usb)
 
         #: Active write transactions: handle → (path, accumulated bytes).
         #: Only one in flight at a time, matching firmware constraints,
@@ -248,6 +254,8 @@ class SimDevice:
                 board_name="sim",
                 display_width=self._display_size[0],
                 display_height=self._display_size[1],
+                is_multitouch=self._is_multitouch,
+                has_usb=self._has_usb,
             ),
         )
 

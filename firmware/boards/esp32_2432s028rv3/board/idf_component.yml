@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Board-specific deps for the ESP32-2432S028Rv3 ("Cheap Yellow Display").
+dependencies:
+  # XPT2046 resistive-touch driver (separate SPI bus). The common
+  # esp_lcd_touch abstraction is pulled in board-agnostically by main/.
+  # atanisoft's is the de-facto community XPT2046 esp_lcd_touch driver and
+  # provides ESP_LCD_TOUCH_IO_SPI_XPT2046_CONFIG + esp_lcd_touch_new_spi_xpt2046.
+  atanisoft/esp_lcd_touch_xpt2046: "^1.0.6"

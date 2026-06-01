@@ -26,6 +26,22 @@ which caps a full-frame RGB565 redraw (480×272×2 ≈ 261 KB) at roughly
 
 ## ESP32-2432S028Rv3: 2.8" resistive cheap-yellow-display variant (Also called "ESP32-2432S028R v3" or CYD2USB)
 
+> **touchy-pad support: implemented (Stage 65).** Board id
+> `esp32_2432s028rv3` (`firmware/boards/esp32_2432s028rv3/`, IDF target
+> `esp32`). Flash and talk to it over the CH340 UART on `/dev/ttyUSB*`
+> (not `/dev/ttyACM*`) — the proprietary protobuf protocol runs over
+> UART0 at 115200, device logs ride the Stage 64.1 `LogRecord` tunnel.
+> No native USB ⇒ no HID mouse/keyboard. No PSRAM, but the `R:` ramdisk
+> and image assets still work (RamFs falls back to internal SRAM,
+> bounded by ~520 KB). The resistive XPT2046 is single-touch, so the
+> device reports `is_multitouch=false` / `has_usb=false` in board-info.
+>
+> **Driver settings exposed in `board/board_pins.h`** (flip on real
+> hardware if the panel looks wrong): the ST7789 is configured BGR +
+> colour-inversion with SWAP_XY/MIRROR_X, and the backlight defaults to
+> GPIO 21. The XPT2046 needs per-unit touch calibration. These are the
+> "resolve on hardware" items from the Stage 65 plan.
+
 ### Core Specifications / GPIOs / Chips
 
 USB connection to host is via a CH341 UART (USB VID=1a86, PID=7523)

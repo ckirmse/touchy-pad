@@ -65,6 +65,7 @@ Main new features: Works with StreamController app to provide arbitrary user but
 
 Main new features? Much easier scripting than through StreamController - allow arbitrary Python snippets for button presses/slider moves etc...  Dynamic data displays from host to Touchypad (server stats, ZMK modes, whatever user wants to show)
 
+* [ ] when using ch341 uart try to use 460800 for better speeds
 * [ ] make knobs/dials with gesture overlays (share code with trackpad) ccw/cw/left/up etc...
 * [ ] expose device API via UART (for embedded applications) and wifi/tcp (for arbitary smart signage applications).   Find a good esp32 lib for wifi settings/management/firmware update?
 * [ ] allow setting brightness by putting that GPIO on a hw PWM output

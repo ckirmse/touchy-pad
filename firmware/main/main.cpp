@@ -6,6 +6,7 @@
 #include "board.h"
 #include "display.h"
 #include "fs.h"
+#include "host_api.h"
 #include "log_proto.h"
 #include "macros.h"
 #include "prefs.h"
@@ -79,11 +80,19 @@ extern "C" void app_main(void)
 
     ESP_LOGI(TAG, "touchy-pad v2 booting");
 
+#if CONFIG_SOC_USB_OTG_SUPPORTED
     // Bring USB up first so the host sees the HID device enumerate quickly,
     // right after the USB-Serial/JTAG peripheral is disabled at IDF startup.
     // If USB were initialised after display/touch (which can take ~1 s) the
     // host port may time out waiting for a re-connection.
     usb_hid_init();
+#endif
+
+    // Start the host_api command/response dispatcher(s). Decoupled from
+    // usb_hid_init() (Stage 65) so it also runs on no-USB chips, where it
+    // brings up the serial/UART transport instead of the vendor bulk pair.
+    // Must run after usb_hid_init() so the vendor link's TinyUSB stack is up.
+    host_api_start();
 
     // Give enough time for user to open a debug serial port to our board
     vTaskDelay(pdMS_TO_TICKS(5000));

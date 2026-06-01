@@ -22,9 +22,13 @@
 extern "C" {
 #endif
 
-// Start the host-API dispatcher task. Called once from usb_hid_init() after
-// TinyUSB is up. The task blocks on the vendor bulk OUT endpoint and
-// services commands sequentially.
+// Start the host-API dispatcher task(s). Called once from app_main() after
+// the transports are configured (USB brought up via usb_hid_init() on chips
+// with native USB-OTG, and/or the serial UART). Selects its byte-stream
+// link(s) by build config: the vendor bulk pair on native-USB chips
+// (CONFIG_SOC_USB_OTG_SUPPORTED), and/or a serial port when
+// CONFIG_TOUCHY_PROTO_OVER_SERIAL is set. Each link's task blocks on its
+// stream and services commands sequentially.
 void host_api_start(void);
 
 // Hook for TinyUSB's tud_vendor_rx_cb — woken when bytes arrive on the

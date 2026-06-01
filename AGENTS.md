@@ -25,9 +25,21 @@ a StreamDeck-compatibility shim (`TouchyDeck`).
 | `VERSION` | Single-source version (read by Python + CMake) |
 
 ## Implementation status
-All stages 0–24.4, 50.2, 51, 64.1, 64.3, and 64.4 are **done**. Latest active wire-format:
-`Screen.Version.CURRENT == 5`, `SysBoardInfoResponse.ProtocolVersion.CURRENT == 5`.
+All stages 0–24.4, 50.2, 51, 64.1, 64.3, 64.4, and 65 are **done**. Latest active wire-format:
+`Screen.Version.CURRENT == 5`, `SysBoardInfoResponse.ProtocolVersion.CURRENT == 6`.
 Highlights worth remembering:
+
+- **Boards span two chips (Stage 65).** ESP32-S3 boards (`jc4827w543`,
+  `waveshare_s3_lcd_7b`) have native USB; the classic-ESP32
+  `esp32_2432s028rv3` ("CYD2USB") does not. Each board declares its chip
+  in a one-line `firmware/boards/<board>/target` file; USB capability is
+  keyed off `CONFIG_SOC_USB_OTG_SUPPORTED` (not a custom flag). `just
+  firmware-reconfigure [board]` reads `target` and runs `idf.py
+  -DBOARD=<board> set-target <chip>` — the `-DBOARD` is required, and
+  `rm -f firmware/sdkconfig firmware/sdkconfig.<board>` before switching
+  chips. `firmware/main/platform.{h,cpp}` exposes `platform_get()` →
+  `{is_multitouch, has_usb}`, surfaced over proto as
+  `SysBoardInfoResponse.is_multitouch` / `has_usb`.
 
 - USB device is a composite class: CDC-ACM + HID (mouse + keyboard via
   report IDs 1/2) + vendor-class bulk pair (command/response) + interrupt-IN
@@ -43,12 +55,20 @@ Highlights worth remembering:
   `serial` feature) always runs at 115200 baud and carries only protocol
   frames — device logs ride the Stage 64.1 `LogRecord` tunnel, never raw
   text on the protocol port. Firmware serial path is gated on
-  `CONFIG_TOUCHY_PROTO_OVER_SERIAL` (default n).
+  `CONFIG_TOUCHY_PROTO_OVER_SERIAL` (default n; `y` for the CYD board,
+  which has a `UartLink` on `UART_NUM_0` gated `#if
+  CONFIG_TOUCHY_PROTO_OVER_SERIAL && !CONFIG_SOC_USB_OTG_SUPPORTED`).
+  `firmware/main/CMakeLists.txt` REQUIRES `esp_driver_uart` for this
+  (IDF v6 split out `driver/uart.h`). Gotcha: in `sdkconfig.defaults`,
+  `# CONFIG_X is not set` is **not** a comment — it's the `X=n` directive
+  and will silently override an earlier `CONFIG_X=y`.
 - nanopb uses `FT_POINTER` (heap) for `repeated` widget/action/step
   fields and the `FileWrite` payload. RAII via `PbMessage<T>` in
   `firmware/main/protobuf.h`.
 - Filesystem paths are drive-prefixed: `F:host/...` = LittleFS (persistent
-  flash), `R:host/...` = PSRAM ramdisk (transient, e.g. image assets).
+  flash), `R:host/...` = ramdisk (transient, e.g. image assets). RamFs
+  prefers `MALLOC_CAP_SPIRAM` but falls back to internal RAM, so the `R:`
+  drive and image assets work even on no-PSRAM boards (CYD, ~520 KB SRAM).
 - Stage 21 (Python CLI for layouts) is implemented as `touchy screens push`,
   consuming the `touchy_pad.api.screens` DSL (`button`, `slider`, `toggle`,
   `image_button`, `trackpad`, `log_line`, layout helpers `row`/`col`/`grid`).
@@ -114,7 +134,12 @@ touches `usb.core.find()` must guard against `NoBackendError`
 
 ## Hardware
 - Display + touch panel ride a shared I²C-ish interface (board-specific);
-  see `firmware/boards/<board>/`. GT911 multitouch on jc4827w543.
+  see `firmware/boards/<board>/`. GT911 multitouch on jc4827w543 /
+  waveshare. The CYD (`esp32_2432s028rv3`) is ST7789 over SPI2 +
+  XPT2046 resistive single-touch over SPI3 (managed component
+  `atanisoft/esp_lcd_touch_xpt2046`); BGR/INVERT/SWAP/MIRROR + backlight
+  GPIO live in its `board/board_pins.h`. Note `reset_gpio_num` is
+  `gpio_num_t` in IDF v6 — assign the enum directly.
 - Optional haptics: DRV2605L on a separate I²C bus (not yet wired).
 - USB-OTG controller exposes one IN/OUT bulk pair + one interrupt-IN
   endpoint for the vendor interface (no second IN for events — hence the

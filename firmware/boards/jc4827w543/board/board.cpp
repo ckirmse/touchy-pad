@@ -7,6 +7,7 @@
 
 #include "board.h"           // public API (main/board.h)
 #include "board_pins.h"      // private pin map
+#include "platform.h"        // capability descriptor
 
 #include "esp_log.h"
 #include "driver/i2c_master.h"
@@ -42,4 +43,14 @@ extern "C" void board_init(void)
     bus_cfg.glitch_ignore_cnt            = 7;
     bus_cfg.flags.enable_internal_pullup = true;
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &s_i2c_bus));
+}
+
+// Capacitive GT911 multitouch panel on a native-USB ESP32-S3.
+extern "C" const struct Platform *platform_get(void)
+{
+    static const struct Platform p = {
+        .is_multitouch = true,
+        .has_usb = true,
+    };
+    return &p;
 }

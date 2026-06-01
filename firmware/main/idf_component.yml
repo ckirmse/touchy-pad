@@ -12,8 +12,15 @@ dependencies:
   # indev objects, runs the LVGL task, anti-tearing, etc).
   espressif/esp_lvgl_port: "^2.3.0"
 
-  # TinyUSB wrapper – HID mouse interface (v2.x has a new API).
-  espressif/esp_tinyusb: "^2.2.0"
+  # TinyUSB wrapper – HID mouse interface (v2.x has a new API). Only pulled
+  # in for chips with native USB-OTG (the esp32s2 / esp32s3); the classic
+  # ESP32 has no USB peripheral, so the component must not be required there.
+  # The IDF target is set per-board (boards/<board>/target), so this rule
+  # tracks the same esp32-vs-esp32s3 split as CONFIG_SOC_USB_OTG_SUPPORTED.
+  espressif/esp_tinyusb:
+    version: "^2.2.0"
+    rules:
+      - if: "target in [esp32s2, esp32s3]"
 
   # Common esp_lcd_touch abstraction; touch.h uses esp_lcd_touch_handle_t.
   # Concrete drivers (GT911 etc.) live in board-specific idf_component.yml.

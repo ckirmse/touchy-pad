@@ -406,6 +406,9 @@ def board_info() -> None:
     table.add_row("board", v.board_name or "(unknown)")
     table.add_row("protocol", str(v.protocol_version))
     table.add_row("firmware", f"{v.firmware_version} ({v.firmware_version_str})")
+    table.add_row("display", f"{v.display_width}x{v.display_height}")
+    table.add_row("multitouch", "yes" if v.is_multitouch else "no")
+    table.add_row("usb", "yes" if v.has_usb else "no")
     Console().print(table)
 
 

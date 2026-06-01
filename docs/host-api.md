@@ -267,7 +267,7 @@ configuration for `bInterfaceClass == 0xFF`. See
 ### Wire framing
 
 Every protobuf message — `Command`, `Response`, or `Event` — is wrapped in
-a self-synchronising frame (Stage 64.3, `ProtocolVersion.CURRENT == 5`):
+a self-synchronising frame (Stage 64.3, `ProtocolVersion.CURRENT == 6`):
 
 ```
 +----------+----------+--------------------+---------+
@@ -293,6 +293,38 @@ firmware `host_api` link abstraction). On USB, large messages still span
 multiple successive transfers and the receiver concatenates them before
 the decoder extracts a frame. On the serial port the frame's MAGIC lets
 the host skip device boot-log noise and lock onto the first real frame.
+
+### Physical layers
+
+The same framing rides several physical layers, chosen by board:
+
+* **USB vendor-bulk pair** — ESP32-S3 boards (`jc4827w543`,
+  `waveshare_s3_lcd_7b`) with native USB-OTG. Also carries HID
+  mouse/keyboard on separate interfaces.
+* **UART0 @ 115200 8N1** — the classic-ESP32 `esp32_2432s028rv3` (CYD2USB)
+  has no native USB; its CH340 bridge enumerates on the host as
+  `/dev/ttyUSB*`. The protocol owns UART0 (the IDF console is moved off
+  it), and device logs are tunneled as `LogRecord` frames rather than raw
+  text. This board provides no HID emulation.
+* **TCP socket** — the simulator (`touchy --sim`).
+
+The host's `touchy_pad.transport_serial` (and Rust `transport_serial`
+behind the `serial` feature) speak the UART layer; pass `--port
+/dev/ttyUSB0` to `touchy`.
+
+### Board capabilities
+
+`SysBoardInfoResponse` advertises what a connected board can do so the
+host adapts at runtime (Stage 65, protocol V6):
+
+* `is_multitouch` — `false` on resistive single-touch panels
+  (`esp32_2432s028rv3`), `true` on the GT911 capacitive boards. The sim
+  trackpad only synthesises multi-finger / non-left gestures when this is
+  set.
+* `has_usb` — `true` when the board can emulate USB HID
+  mouse/keyboard; `false` on UART-only boards.
+
+`touchy board-info` surfaces these (plus the display size) as table rows.
 
 ### Channel semantics
 

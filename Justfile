@@ -349,12 +349,24 @@ firmware-build: build-proto-c build-default-screen
 # the CMakeLists.txt default (jc4827w543).
 #   just firmware-reconfigure                    # use default / $BOARD
 #   just firmware-reconfigure waveshare_s3_lcd_7b
+#
+# The ESP-IDF target chip (esp32 / esp32s3) is read from
+# firmware/boards/<board>/target so each board is self-describing; classic
+# ESP32 boards like esp32_2432s028rv3 build for `esp32`, the rest for `esp32s3`.
 firmware-reconfigure board="":
     #!/usr/bin/env bash
     # {{board}} is expanded by Just; if empty, honour $BOARD env var or fall
     # back to the CMakeLists.txt default.
     _just_board='{{board}}'
     export _BOARD="${_just_board:-${BOARD:-jc4827w543}}"
+    # Read the chip target from the board's `target` file (default esp32s3).
+    _target_file="firmware/boards/${_BOARD}/target"
+    if [ -f "${_target_file}" ]; then
+        _IDF_TARGET="$(tr -d '[:space:]' < "${_target_file}")"
+    else
+        _IDF_TARGET="esp32s3"
+    fi
+    export _IDF_TARGET
     exec bash -c '
         if [ -f "$HOME/.espressif/tools/activate_idf_v6.0.1.sh" ]; then
             source "$HOME/.espressif/tools/activate_idf_v6.0.1.sh" 2>/dev/null
@@ -366,7 +378,7 @@ firmware-reconfigure board="":
             echo "  tried: ~/esp/esp-idf/export.sh" >&2
             exit 1
         fi
-        idf.py -C firmware set-target esp32s3
+        idf.py -C firmware -DBOARD="${_BOARD}" set-target "${_IDF_TARGET}"
         idf.py -C firmware -DBOARD="${_BOARD}" reconfigure
     '
 
@@ -380,21 +392,27 @@ flash: firmware-build
     if [ -z "${TOUCHY_IDF_SOURCED:-}" ]; then
         exec bash -c 'source ~/.espressif/tools/activate_idf_v6.0.1.sh && TOUCHY_IDF_SOURCED=1 exec bash "$1"' bash "$0"
     fi
-    # Pick the first readable+writable ttyACM* under /host/dev/
+    # Pick the first readable+writable ttyACM*/ttyUSB* under /host/dev/.
+    # Native-USB boards enumerate as ttyACM*; UART-bridge boards (CH340 on
+    # esp32_2432s028rv3) enumerate as ttyUSB*.
     port=""
-    for candidate in $(ls /host/dev/ttyACM* 2>/dev/null | sort); do
+    for candidate in $(ls /host/dev/ttyACM* /host/dev/ttyUSB* 2>/dev/null | sort); do
         if [ -r "$candidate" ] && [ -w "$candidate" ]; then
             port="$candidate"
             break
         fi
     done
     if [ -z "$port" ]; then
-        echo "error: no accessible ttyACM* device found under /host/dev/" >&2
+        echo "error: no accessible ttyACM*/ttyUSB* device found under /host/dev/" >&2
         exit 1
     fi
     echo "flashing to $port"
     esptool_py="esptool"
     cd {{justfile_directory()}}/firmware/build
+    # Read the chip target from the build cache so this works for both
+    # esp32s3 (native-USB boards) and esp32 (CYD / UART-bridge boards).
+    chip=$(grep -m1 '^IDF_TARGET:STRING=' CMakeCache.txt | cut -d= -f2)
+    chip="${chip:-esp32s3}"
     mapfile -t flash_args < flash_args
     # flash_args has two lines: flags line, then addr:file pairs per line.
     # Flatten them into a single array of words.
@@ -403,9 +421,10 @@ flash: firmware-build
         read -ra words <<< "$line"
         args+=("${words[@]}")
     done
+    # We used to pass in the following options...
+    # --before default-reset --after hard-reset 
     "$esptool_py" -p "$port" -b 460800 \
-        --before default-reset --after hard-reset \
-        --chip esp32s3 write-flash "${args[@]}"
+        --chip "$chip" write-flash "${args[@]}"
 
 # Produce a single merged firmware binary (bootloader + partition table +
 # app, all at their flash offsets, padded with 0xFF) at
@@ -425,13 +444,15 @@ merge-bin: firmware-build
         exit 1
     fi
     cd {{justfile_directory()}}/firmware/build
+    chip=$(grep -m1 '^IDF_TARGET:STRING=' CMakeCache.txt | cut -d= -f2)
+    chip="${chip:-esp32s3}"
     mapfile -t flash_args < flash_args
     args=()
     for line in "${flash_args[@]}"; do
         read -ra words <<< "$line"
         args+=("${words[@]}")
     done
-    "${esptool_py}" --chip esp32s3 merge-bin -o "${out}" "${args[@]}"
+    "${esptool_py}" --chip "$chip" merge-bin -o "${out}" "${args[@]}"
     echo "wrote {{justfile_directory()}}/firmware/build/${out}"
 
 # End-user flash flow: build → merge → flash the merged image at 0x0.
@@ -444,20 +465,22 @@ flash-merged: merge-bin
         exec bash -c 'source ~/.espressif/tools/activate_idf_v6.0.1.sh && exec bash "$1"' -- "$0"
     fi
     port=""
-    for candidate in $(ls /host/dev/ttyACM* 2>/dev/null | sort); do
+    for candidate in $(ls /host/dev/ttyACM* /host/dev/ttyUSB* 2>/dev/null | sort); do
         if [ -r "$candidate" ] && [ -w "$candidate" ]; then
             port="$candidate"
             break
         fi
     done
     if [ -z "$port" ]; then
-        echo "error: no accessible ttyACM* device found under /host/dev/" >&2
+        echo "error: no accessible ttyACM*/ttyUSB* device found under /host/dev/" >&2
         exit 1
     fi
-    echo "flashing merged image to $port"
+    chip=$(grep -m1 '^IDF_TARGET:STRING=' {{justfile_directory()}}/firmware/build/CMakeCache.txt | cut -d= -f2)
+    chip="${chip:-esp32s3}"
+    echo "flashing merged image to $port (chip: $chip)"
     esptool -p "$port" -b 460800 \
         --before default-reset --after hard-reset \
-        --chip esp32s3 write-flash 0x0 {{justfile_directory()}}/firmware/build/touchy_pad_merged.bin
+        --chip "$chip" write-flash 0x0 {{justfile_directory()}}/firmware/build/touchy_pad_merged.bin
 
 
 # ---------------------------------------------------------------------------

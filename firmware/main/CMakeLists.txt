@@ -6,10 +6,21 @@
 # board's CMakeLists is parsed and its public headers are on our include
 # path.
 
+# The USB/HID stack is only compiled for chips with native USB-OTG. That
+# capability is implied by the IDF target (CONFIG_SOC_USB_OTG_SUPPORTED is
+# set for the esp32s3 but not the classic esp32), so no custom flag is
+# needed. Boards without native USB build a tiny stub that turns the HID
+# emitters into logged no-ops instead.
+if(CONFIG_SOC_USB_OTG_SUPPORTED)
+    set(touchy_usb_src "usb_hid.cpp")
+else()
+    set(touchy_usb_src "usb_hid_stub.cpp")
+endif()
+
 idf_component_register(
     SRCS
         "main.cpp"
-        "usb_hid.cpp"
+        "${touchy_usb_src}"
         "host_api.cpp"
         "fs/fs.cpp"
         "fs/flash_fs.cpp"
@@ -47,5 +58,6 @@ idf_component_register(
         esp_mm
         esp_timer
         esp_app_format
+        esp_driver_uart
         joltwallet__littlefs
 )

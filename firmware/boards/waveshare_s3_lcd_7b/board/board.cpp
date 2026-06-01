@@ -2,6 +2,7 @@
 
 #include "board.h"          // public API (main/board.h)
 #include "board_pins.h"     // private pin map
+#include "platform.h"       // capability descriptor
 
 #include "esp_log.h"
 #include "esp_err.h"
@@ -102,4 +103,14 @@ extern "C" void board_init(void)
     // Turn the backlight on.
     ESP_LOGI(TAG, "Backlight on (CH422G IO%d)", BOARD_CH422G_IO_BACKLIGHT);
     ch422_set_pin(BOARD_CH422G_IO_BACKLIGHT, true);
+}
+
+// Capacitive GT911 multitouch panel on a native-USB ESP32-S3.
+extern "C" const struct Platform *platform_get(void)
+{
+    static const struct Platform p = {
+        .is_multitouch = true,
+        .has_usb = true,
+    };
+    return &p;
 }

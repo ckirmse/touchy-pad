@@ -2215,7 +2215,239 @@ See [here](hardware.md) for specs.  Somethings to note about this board:
   * make a platform.h/.cpp class in the main code.   Boards will instantiate their own correct subclass which callers can access by platform_get().
   * Add a is_multitouch() method or property to that class.  The prior boards will return true, this ESP32-2432S028R board will return false.  Have our sim trackpad class check for that property and only try to do multitouch (or anything needing more than 'left' press/drag) on the older boards. 
   * Add a has_usb() method that indicates that this board has direct USB port access to the host.  The old boards do, this CYD2USB does not.
-  
+
+### Plan (subject to revision)
+
+Board id / directory: **`esp32_2432s028rv3`**. This is the first
+**classic ESP32** target (Xtensa LX6, `set-target esp32`), the first
+board with **no native USB**, and the first with **no PSRAM** — three
+firsts that touch the build system, the USB/HID layer, and the host
+transport. Decisions locked with the user: include protocol-over-UART
+in this stage; declare the IDF target per board (read by Justfile +
+CI); gate USB behind a build flag *and* expose `platform_get()` plus
+new proto capability fields; default the panel to ST7789 (BGR +
+inversion configurable in `board_pins.h`).
+
+#### 0. Why this matters
+
+Every board so far has been ESP32-**S3** with native USB-OTG: the host
+link is the vendor-bulk transport, and HID mouse/keyboard come "for
+free" from TinyUSB. The CYD2USB has none of that — its only host
+connection is a **CH340 UART** (USB VID 0x1a86 / PID 0x7523), so the
+protobuf protocol must ride a hardware UART (Stage 64.3's framing was
+built precisely so this is possible) and HID emulation is simply
+unavailable. The app must therefore compile and run with the entire
+USB/HID stack absent, and the host must learn at runtime which
+capabilities a connected board actually has.
+
+#### 1. Per-board ESP-IDF target (build system)
+
+`firmware/CMakeLists.txt` and `Justfile` currently assume `esp32s3`.
+
+* Each board declares its chip. Add `boards/<board>/target` (a one-line
+  file, e.g. `esp32` / `esp32s3`) — self-describing and trivially
+  readable from both bash and CMake.
+* `just firmware-reconfigure [board]`: read the target from
+  `boards/<board>/target` (fallback `esp32s3`) and pass it to
+  `idf.py set-target <target>` instead of the hardcoded `esp32s3`.
+* CI (`.github/workflows/app-ci.yml`): add `esp32_2432s028rv3` to the
+  `build-firmware` matrix, and install **both** toolchains in the
+  `install-esp-idf` job (`./install.sh esp32,esp32s3`). Cache key is
+  per-IDF-version so this just grows the cached install once.
+* `just flash`: also match `/dev/ttyUSB*` (CH340 enumerates there, not
+  `/dev/ttyACM*`).
+
+#### 2. Board component `boards/esp32_2432s028rv3/`
+
+Mirror the jc4827w543 layout (`board.cpp`, `display.cpp`, `touch.cpp`,
+`board/board_pins.h`, `CMakeLists.txt`, `idf_component.yml`,
+`sdkconfig.defaults`, `target`).
+
+* **`board_pins.h`** — *all* GPIOs from `docs/hardware.md` even if
+  unused now (display SPI, touch SPI, SD SPI, RGB LED, audio, LDR, boot
+  button, free expansion pins), plus `BOARD_LCD_BGR` and
+  `BOARD_LCD_INVERT` toggles for the v3 ST7789 colour-order / inversion
+  quirks.
+* **`display.cpp`** — built-in `esp_lcd_panel_st7789` over
+  `esp_lcd_panel_io_spi` on SPI2_HOST (MOSI 13 / SCK 14 / CS 15 / DC 2),
+  320×240 RGB565, wired to `esp_lvgl_port` exactly like jc4827w543 but
+  SPI instead of QSPI. Honour BGR/invert from `board_pins.h`.
+  Single-buffer in internal SRAM (no PSRAM) — keep the draw buffer small
+  (e.g. 40 lines) to fit the 520 KB budget.
+* **`touch.cpp`** — managed component
+  `espressif/esp_lcd_touch_xpt2046` on a **separate** SPI bus
+  (SPI3_HOST: MOSI 32 / MISO 39 / CLK 25 / CS 33, IRQ 36). Report a
+  single point (`TOUCH_MAX_POINTS` path returns ≤1); resistive, no
+  multitouch.
+* **`board.cpp`** — `board_init()` brings up both SPI buses, panel
+  reset, backlight GPIO (default 21 with the "might be 27" note as a
+  `board_pins.h` constant); `board_get_i2c_bus()` returns NULL (no I2C
+  touch); plus this board's `platform_get()` (see §4).
+* **`sdkconfig.defaults`** — `set-target esp32` implied by `target`;
+  `CONFIG_ESPTOOLPY_FLASHSIZE_4MB`, **no** `CONFIG_SPIRAM`,
+  `CONFIG_TOUCHY_PROTO_OVER_SERIAL=y` on
+  UART0, `CONFIG_TOUCHY_LOG_OVER_PROTO=y` + `CONFIG_TOUCHY_LOG_TO_UART=n`
+  (keep the IDF console off the protocol UART — Stage 64.3's rule),
+  partition table `partitions/4M.csv`. (No USB flag needed — the absence
+  of native USB is already implied by `set-target esp32`.)
+
+#### 3. Make the USB/HID stack optional — keyed off the IDF target
+
+No custom Kconfig flag: native-USB capability is implied by the IDF
+target, which ESP-IDF already exposes as `CONFIG_SOC_USB_OTG_SUPPORTED`
+(set for the esp32s3, unset for the classic esp32). On a no-USB target:
+
+* `main/CMakeLists.txt`: swap `usb_hid.cpp` for `usb_hid_stub.cpp` in
+  `SRCS` (`if(CONFIG_SOC_USB_OTG_SUPPORTED)`), and make the
+  `espressif/esp_tinyusb` dependency conditional via an
+  `idf_component.yml` rule `if: "target in [esp32s2, esp32s3]"`
+  (TinyUSB needs USB-OTG; classic ESP32 has none, so the component must
+  not be required).
+* `host_api.cpp`: `#if CONFIG_SOC_USB_OTG_SUPPORTED` around the TinyUSB
+  includes (`tinyusb.h`/`tusb.h`) and `VendorLink`; the CDC `SerialLink`
+  likewise stays USB-only.
+* **HID emitters become stubs.** `usb_hid.{h,cpp}` keep their
+  signatures; `usb_hid_stub.cpp` (compiled on no-USB targets) provides
+  `usb_hid_mouse_*` / `usb_hid_keyboard_report` that log once-at-most +
+  no-op, so `macros.cpp` and `trackpad_widget.cpp` link unchanged. (Per
+  the project convention: log + sane default, don't crash.)
+* **`host_api_start()` no longer lives inside `usb_hid_init()`.**
+  Decouple: `usb_hid_init()` only does USB; `app_main` calls
+  `host_api_start()` explicitly after transports are configured.
+  `host_api_start()` selects links by config: vendor (+ optional CDC)
+  on native-USB targets, the UART link otherwise.
+
+#### 4. UART host_api link (protocol over UART0)
+
+* New `UartLink : HostApiLink` (in `host_api.cpp`, `#if
+  CONFIG_TOUCHY_PROTO_OVER_SERIAL && !CONFIG_SOC_USB_OTG_SUPPORTED`)
+  backed by
+  `uart_driver_install` + `uart_read_bytes` / `uart_write_bytes` on
+  `UART_NUM_0` at the fixed 115200 baud. `connected()` is always true
+  (a UART has no link-up signal). Reuses the existing
+  `read_frame`/`write_frame` framing verbatim — the whole point of
+  Stage 64.3.
+* Boot-noise tolerance: the ROM/bootloader banner on UART0 at reset is
+  exactly what the MAGIC+CRC resync in `read_frame` already discards, and
+  the host's open-time retry in `touchy_open` re-establishes sync.
+* Device logs reach the host via the Stage 64.1 `LogRecord` tunnel
+  (already enabled), never as raw UART text on the protocol port.
+
+#### 5. `platform.h/.cpp` capability abstraction
+
+* `main/platform.h`: abstract `struct Platform { virtual bool
+  is_multitouch() const; virtual bool has_usb() const; }` and `Platform
+  *platform_get();`.
+* Each board defines a concrete subclass + `platform_get()` in its
+  `board.cpp`: jc4827w543 & waveshare → `{multitouch:true, usb:true}`;
+  esp32_2432s028rv3 → `{multitouch:false, usb:false}`. (Defaults can key
+  off `CONFIG_SOC_USB_OTG_SUPPORTED` / `TOUCH_MAX_POINTS` to avoid drift.)
+* `fill_board_info()` reads `platform_get()` to populate the new proto
+  fields.
+
+#### 6. Proto capability fields + host plumbing
+
+* `proto/touchy.proto`: add `bool is_multitouch = 7;` and `bool has_usb
+  = 8;` to `SysBoardInfoResponse`; add `V6` + move `CURRENT = 6` (adding
+  optional scalar fields is technically wire-compatible, but the project
+  bumps the version on any schema change). Update firmware
+  `TOUCHY_PROTOCOL_VERSION` automatically (it aliases `CURRENT`).
+  Regenerate Python + nanopb bindings via `just build-proto`.
+* Host: surface `is_multitouch` / `has_usb` on the Python
+  `TouchyClient` board-info result and the Rust equivalent.
+* **Sim trackpad**: the host-side trackpad input handler honours
+  `is_multitouch` — only synthesises multi-finger / non-left gestures
+  when the connected device reports multitouch; otherwise restricts to
+  single-point left press/drag. The simulator's own `Platform` reports
+  `{multitouch:true, has_usb:true}` (configurable) so existing sim tests
+  are unaffected.
+
+#### 7. Tests / validation
+
+* **Firmware:** builds for all three boards (`esp32`, two `esp32s3`)
+  flag-on and flag-off; the no-USB path links without TinyUSB.
+* **Host:** existing 143 Python + Rust suites stay green after the proto
+  bump; add a unit test that a board-info with `is_multitouch=false`
+  makes the sim trackpad refuse multi-point input.
+* **Manual hardware (documented, not CI):** flash over UART
+  (`/dev/ttyUSB0`), confirm the built-in default screen renders and
+  single-touch works, then `touchy --port /dev/ttyUSB0 screens push ...`
+  round-trips over the UART transport.
+
+#### 8. Docs to update
+
+* `docs/hardware.md` (mark the board supported, resolve the
+  ST7789/backlight-pin uncertainties once validated), `docs/host-api.md`
+  (UART as a physical layer; capability fields), `proto/touchy.proto`
+  header + `ProtocolVersion`, `AGENTS.md`/`CLAUDE.md` (new board,
+  `ProtocolVersion.CURRENT == 6`, target-implied USB
+  (`CONFIG_SOC_USB_OTG_SUPPORTED`), per-board target),
+  `firmware/README.md` (multi-target build).
+
+#### 9. Out of scope for 65
+
+* SD-card, RGB-LED, audio, LDR drivers (pins defined in `board_pins.h`,
+  no drivers yet).
+* Haptics. BLE-HID as an alternative to USB-HID on this board.
+* The 2.4"/other CYD variants (only `esp32_2432s028rv3` here).
+
+#### Open items to confirm during implementation
+
+* Backlight GPIO (21 vs 27) and ST7789 BGR/inversion flags — resolve on
+  real hardware; exposed as `board_pins.h` constants so flipping them is
+  a one-line change.
+* Whether to keep a temporary "logs on UART0, protocol off" bring-up
+  toggle in the board `sdkconfig.defaults` (commented) for first-light
+  debugging before the protocol takes over the port.
+
+### Status: done
+
+All nine work items above are implemented and validated.
+
+* **Per-board target.** `firmware/boards/<board>/target` (one line, e.g.
+  `esp32`) is read by `just firmware-reconfigure [board]` and passed to
+  `idf.py -DBOARD=<board> set-target <target>`. The `-DBOARD` on the
+  `set-target` line is required — without it `set-target` rewrites the
+  *default* board's sdkconfig and never applies the chip to the target
+  board. `firmware/sdkconfig.<board>` is per-board and gitignored; always
+  `rm -f firmware/sdkconfig firmware/sdkconfig.<board>` before switching
+  chips so a stale target isn't reused.
+* **USB gating.** Keyed off `CONFIG_SOC_USB_OTG_SUPPORTED` (set for
+  esp32s3, unset for classic esp32) — in CMake `if(...)`, in C `#if ...`,
+  and in `idf_component.yml` rules (`if: "target in [esp32s2, esp32s3]"`)
+  so TinyUSB is only required where a USB-OTG core exists.
+* **Board component.** `boards/esp32_2432s028rv3/board/` —
+  `display.cpp` drives ST7789 over SPI2 via `esp_lcd` + `esp_lvgl_port`
+  (double-buffered, 40-line buffers in internal SRAM, RGB565 byte-swap);
+  `touch.cpp` drives XPT2046 over SPI3 via the managed component
+  `atanisoft/esp_lcd_touch_xpt2046 ^1.0.6` (the de-facto community
+  driver; the `espressif/` namespace has no such package), single point,
+  no multitouch. `board_pins.h` carries every GPIO from `hardware.md`
+  plus the ST7789 BGR/INVERT/SWAP/MIRROR and backlight-pin constants.
+  Note: in IDF v6 `esp_lcd_panel_dev_config_t::reset_gpio_num` is
+  `gpio_num_t` — assign the `BOARD_LCD_GPIO_RST` enum directly.
+* **UART transport.** `UartLink` (gated `#if
+  CONFIG_TOUCHY_PROTO_OVER_SERIAL && !CONFIG_SOC_USB_OTG_SUPPORTED`) runs
+  the Stage 64.3 framing over `UART_NUM_0` at 115200; `main` REQUIRES
+  `esp_driver_uart` (IDF v6 split `driver/uart.h` out). One gotcha worth
+  recording: in `sdkconfig.defaults`, `# CONFIG_X is not set` is **not** a
+  comment — it is the `X=n` directive and will silently override an
+  earlier `CONFIG_X=y`; the board's bring-up notes are therefore plain
+  prose, not `# CONFIG_…` lines.
+* **No PSRAM, images still supported.** `RamFs` already prefers
+  `MALLOC_CAP_SPIRAM` and falls back to internal `malloc`, and the
+  `esp_cache_msync` calls are `#if CONFIG_SPIRAM`-gated, so the `R:`
+  ramdisk and image assets work on the CYD bounded by ~520 KB internal
+  SRAM — no code change was needed, only a corrected sdkconfig comment.
+* **Proto + host.** `ProtocolVersion.CURRENT == 6`;
+  `SysBoardInfoResponse` gained `is_multitouch` / `has_usb`. The sim
+  emits them (default true, constructor-configurable to emulate the CYD),
+  `touchy board-info` shows display size + multitouch/usb rows, and the
+  raw proto already surfaces them on `TouchyClient` and the Rust client.
+* **Builds.** All three boards build green — `jc4827w543` (esp32s3),
+  `waveshare_s3_lcd_7b` (esp32s3), `esp32_2432s028rv3` (esp32). Host
+  suite: 145 Python tests pass (two new sim-capability tests).
+
 # Old/Existing projects
 
 In the very early days of this project I looked into these ideas/implementations:

@@ -194,10 +194,6 @@ extern "C" void usb_hid_init(void)
     ESP_ERROR_CHECK(tinyusb_console_init(ITF_NUM_CDC));
 #endif
 #endif
-
-    // Stage 13: start the host_api command/response dispatcher. It owns
-    // the vendor bulk endpoints; the rx-cb below feeds it.
-    host_api_start();
 }
 
 // TinyUSB calls this from its USB task whenever the vendor OUT endpoint
