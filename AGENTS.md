@@ -25,7 +25,7 @@ a StreamDeck-compatibility shim (`TouchyDeck`).
 | `VERSION` | Single-source version (read by Python + CMake) |
 
 ## Implementation status
-All stages 0–24.4, 50.2, 51, 64.1, 64.3, 64.4, 65, and 65.1 are **done**. Latest active wire-format:
+All stages 0–24.4, 50.2, 51, 64.1, 64.3, 64.4, 65, 65.1, and 67 are **done**. Latest active wire-format:
 `Screen.Version.CURRENT == 5`, `SysBoardInfoResponse.ProtocolVersion.CURRENT == 6`.
 Highlights worth remembering:
 
@@ -87,6 +87,13 @@ Highlights worth remembering:
 - Stage 21 (Python CLI for layouts) is implemented as `touchy screens push`,
   consuming the `touchy_pad.api.screens` DSL (`button`, `slider`, `toggle`,
   `image_button`, `trackpad`, `log_line`, layout helpers `row`/`col`/`grid`).
+- Stage 67 lets `host_action(on_event=lambda e: ...)` attach a callback
+  inline. Codes auto-allocate from `_events.AUTO_CODE_BASE` (`0x10000`);
+  manual codes stay below that. The callable is stashed in
+  `app/src/touchy_pad/api/_events.py` keyed by code, then
+  `Touchy.screen_save`/`widget_save` walk the proto tree
+  (`_collect_host_codes`), `harvest()` the matching bindings, and register
+  them via `on_host_event` — so inline callbacks light up on upload.
 - Stage 30 simulator lives in `app/src/touchy_pad/sim/` (Tkinter/PySide6).
   Invoke with `touchy --sim ...` (or `--sim-headless` for CI).
 - Stage 50.2 StreamDeck shim is `touchy_pad.touchydeck.TouchyDeck`;

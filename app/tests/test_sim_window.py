@@ -119,13 +119,14 @@ def test_host_action_pushes_event(qapp, provisioned_fs) -> None:
     qapp.processEvents()
 
     evts = _drain(dev._events)
-    by_code = {e.host_code: e for e in evts}
-    assert 0x100 in by_code, evts
-    assert by_code[0x100].user_data == "ping"
-    assert 0x101 in by_code
-    assert by_code[0x101].value == sl.value()
-    assert 0x102 in by_code
-    assert by_code[0x102].user_data == "enable"
+    # Stage 67: the demo uses auto-allocated host codes (>= 0x10000) wired to
+    # inline ``on_event=`` callbacks, so assert on widget identity / payload
+    # rather than fixed numeric codes.
+    by_widget = {e.user_data: e for e in evts}
+    assert "ping" in by_widget, evts
+    assert "enable" in by_widget, evts
+    # The slider event carries no user_data but does carry the new value.
+    assert any(e.value == sl.value() for e in evts), evts
 
 
 def test_button_press_release_edges_dispatch(qapp, tmp_path) -> None:

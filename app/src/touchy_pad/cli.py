@@ -624,23 +624,10 @@ def screens_demo(ctx: click.Context, listen: bool, as_json: bool) -> None:
         logger.info("loaded screen %r", screen.name)
 
         if listen:
-
-            def on_ping(evt):
-                logger.info("[ping]   widget=%r", evt.user_data)
-
-            def on_level(evt):
-                logger.info("[slider] widget=%r value=%s", evt.user_data, evt.value)
-
-            def on_enable(evt):
-                logger.info("[check]  widget=%r on=%s", evt.user_data, evt.checked)
-
-            def on_smile(evt):
-                logger.info("[smile]  widget=%r", evt.user_data)
-
-            pad.on_host_event(0x100, on_ping)
-            pad.on_host_event(0x101, on_level)
-            pad.on_host_event(0x102, on_enable)
-            pad.on_host_event(0x103, on_smile)
+            # Stage 67: the demo widgets carry inline ``host_action(on_event=...)``
+            # callbacks, registered automatically by ``widget_save`` /
+            # ``screen_save`` above. Nothing left to wire up here — just park
+            # and let the background event thread dispatch them.
             if ctx.obj.get("sim_gui"):
                 # The group's result callback runs QApplication.exec()
                 # right after this returns, which both keeps the

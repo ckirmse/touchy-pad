@@ -2483,6 +2483,48 @@ Open hardware-validation items for the 024 (same as any new CYD): confirm
 backlight GPIO (21 vs 27), BGR/INVERT/SWAP/MIRROR flags, and XPT2046 touch
 calibration on a real panel.
 
+## Stage 67: inline host-event callbacks — DONE
+
+Cleaned up the public Python API so users can attach an event handler
+right where they build a widget, instead of manually juggling numeric
+host codes and a separate `on_host_event` registration:
+
+```python
+s += button("ping", on_click=host_action(on_event=lambda e: print(e.user_data)))
+```
+
+How it works:
+
+- `touchy_pad.api.screens.host_action` gained a keyword-only
+  `on_event` parameter. `code` is now optional. When `on_event` is
+  supplied without an explicit `code`, a unique code is auto-allocated;
+  when both are given the callback binds to the explicit code; the old
+  `host_action(code)` form still works unchanged.
+- Auto codes come from a reserved range starting at
+  `AUTO_CODE_BASE = 0x10000` (a thread-safe `itertools.count`). Manual
+  codes are expected to stay **below** `0x10000` so the ranges never
+  collide; the base is small so the varint-encoded `ActionHost.code`
+  stays compact on the wire.
+- A new tiny, import-cycle-free module
+  `app/src/touchy_pad/api/_events.py` holds the counter and a global
+  `dict[int, callback]` of pending bindings (`alloc_code`,
+  `register_binding`, `harvest`, `_reset` for tests). A protobuf can't
+  carry a Python callable, so the callback is stashed here keyed by code.
+- `Touchy.screen_save` / `Touchy.widget_save` now call
+  `_register_inline_callbacks(msg)`, which walks the serialised proto
+  tree (`_collect_host_codes`, a generic reflection-based recursion that
+  also skips map-entry fields), harvests the pending bindings for exactly
+  the codes that screen/widget references, and registers each via
+  `on_host_event`. So callbacks light up automatically on upload, scoped
+  to the right device.
+- Migrated `build_demo()` and the `touchy demo --listen` CLI handler to
+  the inline style (the demo's ping/slider/checkbox/smiley handlers now
+  live inline as `on_event=` lambdas; the CLI no longer hand-registers
+  `0x100..0x103`). `test_sim_window` asserts on widget identity / payload
+  instead of fixed codes.
+- Docs: `docs/python-api.md` "Event callbacks" now leads with the inline
+  form and keeps explicit codes + `on_host_event` as the lower-level path.
+
 # Old/Existing projects
 
 In the very early days of this project I looked into these ideas/implementations:

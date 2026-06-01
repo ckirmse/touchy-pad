@@ -26,10 +26,14 @@ freely mix DSL helpers with hand-built protobufs.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from pathlib import Path
 
 from .. import _proto
+from . import _events
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "Screen",
@@ -419,15 +423,43 @@ def action(*args, **kwargs) -> _proto.Action:
     raise TypeError("action() requires exactly one of host= or macro=")
 
 
-def host_action(code: int) -> _proto.Action:
-    """Forward the widget event to the host with the given ``host_code``.
+def host_action(
+    code: int | None = None,
+    *,
+    on_event: _events.HostEventCallback | None = None,
+) -> _proto.Action:
+    """Forward the widget event to the host.
+
+    Two styles are supported:
+
+    * **Callback-first (recommended).** Pass ``on_event=`` and let the
+      library allocate a unique ``host_code`` for you::
+
+          button("ping", on_click=host_action(on_event=lambda e: print(e)))
+
+      The callback is registered automatically when the screen / widget
+      containing this action is uploaded via ``pad.screen_save(...)`` /
+      ``pad.widget_save(...)``; no separate ``pad.on_host_event`` call is
+      needed. Auto-allocated codes start at
+      :data:`touchy_pad.api._events.AUTO_CODE_BASE` (``0x10000``).
+
+    * **Explicit code (low level).** Pass a numeric ``code`` (keep it
+      **below** ``0x10000`` to avoid the auto range) and dispatch it
+      yourself with ``pad.on_host_event(code, callback)``. An ``on_event=``
+      callback may still be supplied to bind it to that explicit code.
 
     The host-side :class:`touchy_pad.TouchyClient` dispatches incoming
-    ``LvEvent``\\s on ``host_code``: register a callback with
-    ``client.on_host_event(code, callback)`` to receive them.
+    ``LvEvent``\\s on ``host_code``; the callback receives the full
+    :class:`_proto.LvEvent` (inspect ``user_data``, ``value``,
+    ``checked``, ...).
     """
-    if code < 0 or code > 0xFFFF_FFFF:
-        raise ValueError("host action code must fit in a uint32")
+    if code is None:
+        code = _events.alloc_code(on_event)
+    else:
+        if code < 0 or code > 0xFFFF_FFFF:
+            raise ValueError("host action code must fit in a uint32")
+        if on_event is not None:
+            _events.register_binding(code, on_event)
     return _proto.Action(host=_proto.ActionHost(code=code))
 
 
@@ -1381,19 +1413,38 @@ def build_demo() -> tuple[Screen, list[tuple[str, _proto.Widget]]]:
         row=0,
     )
     showcase += cell(
-        button("ping", text="Ping host", on_click=host_action(0x100)),
+        button(
+            "ping",
+            text="Ping host",
+            on_click=host_action(on_event=lambda e: logger.info("[ping]   widget=%r", e.user_data)),
+        ),
         col=1,
         row=0,
         col_span=3,
     )
     showcase += cell(
-        slider("level", min=0, max=100, value=42, on_change=host_action(0x101)),
+        slider(
+            "level",
+            min=0,
+            max=100,
+            value=42,
+            on_change=host_action(
+                on_event=lambda e: logger.info("[slider] widget=%r value=%s", e.user_data, e.value)
+            ),
+        ),
         col=0,
         row=1,
         col_span=3,
     )
     showcase += cell(
-        checkbox("enable", text="Enabled", checked=True, on_change=host_action(0x102)),
+        checkbox(
+            "enable",
+            text="Enabled",
+            checked=True,
+            on_change=host_action(
+                on_event=lambda e: logger.info("[check]  widget=%r on=%s", e.user_data, e.checked)
+            ),
+        ),
         col=0,
         row=2,
     )
@@ -1401,7 +1452,7 @@ def build_demo() -> tuple[Screen, list[tuple[str, _proto.Widget]]]:
         image_button(
             "smile",
             asset="F:host/images/smiley.png",
-            on_click=host_action(0x103),
+            on_click=host_action(on_event=lambda e: logger.info("[smile]  widget=%r", e.user_data)),
             scale=2.0,
             pressed_scale=2.5,
             style=[

@@ -255,3 +255,55 @@ def test_on_host_event_supports_multiple_callbacks(open_pad):
     time.sleep(0.05)
     assert a == [0x200]
     assert b == [0x200]
+
+
+def test_screen_save_registers_inline_callback(open_pad):
+    """Stage 67: host_action(on_event=...) wires up automatically on upload."""
+    from touchy_pad.api import _events, host_action
+
+    _events._reset()
+    seen: list[object] = []
+    done = threading.Event()
+
+    pad, server = open_pad()
+    s = Screen("inline")
+    s += button(
+        "go",
+        text="Go",
+        on_click=host_action(
+            on_event=lambda e: (seen.append(e.user_data), done.set()),
+        ),
+    )
+    # Capture the auto-allocated code from the built screen.
+    proto = s.to_proto()
+    code = pad._collect_host_codes(proto).pop()
+    assert code >= _events.AUTO_CODE_BASE
+
+    pad.screen_save(s)
+    # After upload the pending binding is harvested (no longer pending).
+    assert _events.harvest({code}) == {}
+
+    server.events.put(_proto.LvEvent(host_code=code, user_data="go"))
+    assert done.wait(timeout=2.0), "inline callback was never invoked"
+    assert seen == ["go"]
+
+
+def test_widget_save_registers_inline_callback(open_pad):
+    """Inline callbacks on a standalone widget are harvested by widget_save."""
+    from touchy_pad.api import _events, host_action
+
+    _events._reset()
+    fired = threading.Event()
+
+    pad, server = open_pad()
+    w = button(
+        "ping",
+        text="Ping",
+        on_click=host_action(on_event=lambda e: fired.set()),
+    )
+    code = pad._collect_host_codes(w).pop()
+    pad.widget_save("ping", w)
+    assert _events.harvest({code}) == {}
+
+    server.events.put(_proto.LvEvent(host_code=code))
+    assert fired.wait(timeout=2.0)

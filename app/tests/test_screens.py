@@ -391,6 +391,54 @@ def test_int_on_click_becomes_host_action():
     assert actions[0].host.code == 0x99
 
 
+def test_host_action_auto_code_in_reserved_range():
+    from touchy_pad.api import _events
+
+    _events._reset()
+    a = host_action(on_event=lambda e: None)
+    b = host_action(on_event=lambda e: None)
+    assert a.host.code >= _events.AUTO_CODE_BASE
+    assert b.host.code >= _events.AUTO_CODE_BASE
+    assert a.host.code != b.host.code
+
+
+def test_host_action_auto_code_without_callback():
+    from touchy_pad.api import _events
+
+    _events._reset()
+    a = host_action()
+    assert a.host.code >= _events.AUTO_CODE_BASE
+    # No callback supplied, so nothing is left pending for that code.
+    assert _events.harvest({a.host.code}) == {}
+
+
+def test_host_action_on_event_registers_binding():
+    from touchy_pad.api import _events
+
+    _events._reset()
+    cb = lambda e: None  # noqa: E731
+    a = host_action(on_event=cb)
+    harvested = _events.harvest({a.host.code})
+    assert harvested == {a.host.code: cb}
+    # Harvest removes it.
+    assert _events.harvest({a.host.code}) == {}
+
+
+def test_host_action_explicit_code_with_callback():
+    from touchy_pad.api import _events
+
+    _events._reset()
+    cb = lambda e: None  # noqa: E731
+    a = host_action(0x42, on_event=cb)
+    assert a.host.code == 0x42
+    assert _events.harvest({0x42}) == {0x42: cb}
+
+
+def test_host_action_rejects_out_of_range_code():
+    with pytest.raises(ValueError):
+        host_action(0x1_0000_0000)
+
+
 def test_action_list_mixes_host_and_macro():
     s = Screen("mix")
     s += button(

@@ -28,10 +28,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Union
 
+from google.protobuf.message import Message as _PbMessage
+
 from .. import _proto
 from ..client import TouchyClient
 from ..transport import PID, VID, Transport
-from . import protobuf
+from . import _events, protobuf
 from .screens import Screen as _DslScreen
 
 logger = logging.getLogger(__name__)
@@ -240,6 +242,7 @@ class Touchy:
             final_name,
             widget_count,
         )
+        self._register_inline_callbacks(msg)
         self._client.file_save(f"F:host/screens/{final_name}.pb", msg.SerializeToString())
         return final_name
 
@@ -256,6 +259,42 @@ class Touchy:
                 count += Touchy._count_widgets(child)
         # Non-layout widgets (button, label, etc.) are leaves.
         return count
+
+    def _register_inline_callbacks(self, msg: _PbMessage) -> None:
+        """Wire up any ``host_action(on_event=...)`` callbacks in *msg*.
+
+        Stage 67: walks the serialised tree for every ``ActionHost.code``
+        it references, harvests the matching pending bindings from
+        :mod:`touchy_pad.api._events`, and registers each via
+        :meth:`on_host_event`. This is what lets inline callbacks light up
+        automatically on upload, scoped to exactly the codes this screen /
+        widget uses and to this device.
+        """
+        codes = self._collect_host_codes(msg)
+        if not codes:
+            return
+        for code, cb in _events.harvest(codes).items():
+            self.on_host_event(code, cb)
+
+    @staticmethod
+    def _collect_host_codes(msg: _PbMessage) -> set[int]:
+        """Recursively collect every ``ActionHost.code`` referenced in *msg*."""
+        codes: set[int] = set()
+        if isinstance(msg, _proto.ActionHost):
+            codes.add(msg.code)
+            return codes
+        for field, value in msg.ListFields():
+            if field.type != field.TYPE_MESSAGE:
+                continue
+            if field.is_repeated:
+                # Skip protobuf map fields (their entries aren't Actions).
+                if field.message_type.GetOptions().map_entry:
+                    continue
+                for item in value:
+                    codes |= Touchy._collect_host_codes(item)
+            else:
+                codes |= Touchy._collect_host_codes(value)
+        return codes
 
     @staticmethod
     def _coerce_screen(screen: ScreenLike) -> _proto.Screen:
@@ -312,6 +351,7 @@ class Touchy:
         stamped.CopyFrom(widget)
         stamped.version = _proto.Widget.Version.CURRENT
         logger.debug("widget_save: %s", path)
+        self._register_inline_callbacks(stamped)
         self._client.file_save(path, stamped.SerializeToString())
         return path
 

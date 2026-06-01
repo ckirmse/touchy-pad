@@ -129,16 +129,46 @@ go = button("paste", text="Paste!", on_press=macro_action([
 
 ## Event callbacks
 
-`Touchy` runs a single background thread that polls the device for
-events; user code registers per-host-code callbacks:
+The easiest way to react to a widget is to attach the callback **inline**
+when you build it, with `host_action(on_event=...)`:
 
 ```python
-def on_ping(evt):
-    print("widget", evt.user_data, "fired")
+from touchy_pad.api import touchy_open, Screen, button, host_action
+
+s = Screen("home")
+s += button(
+    "ping",
+    text="Ping host",
+    on_click=host_action(on_event=lambda e: print("widget", e.user_data, "fired")),
+)
 
 with touchy_open() as pad:
-    pad.on_host_event(0x100, on_ping)
+    pad.screen_save(s)   # callbacks are wired up automatically here
+    pad.screen_load("home")
     # ...other work...
+```
+
+`host_action(on_event=...)` allocates a unique host code for you (from a
+reserved range starting at `0x10000`) and remembers the callback. When the
+screen or widget that references it is uploaded — via `pad.screen_save(...)`
+or `pad.widget_save(...)` — the callback is registered on that `Touchy`
+automatically. No separate `on_host_event` call is needed.
+
+The callback receives the full `LvEvent`; inspect `evt.user_data` (the
+widget id), `evt.value` (sliders), `evt.checked` (toggles / checkboxes),
+and `evt.host_code`.
+
+### Lower-level: explicit codes
+
+You can still manage host codes yourself. Pass an explicit numeric `code`
+to `host_action` (keep it **below** `0x10000` so it never collides with the
+auto-allocated range) and dispatch it with `on_host_event`:
+
+```python
+s += button("ping", on_click=host_action(0x100))
+
+with touchy_open() as pad:
+    pad.on_host_event(0x100, lambda e: print("ping", e.user_data))
 ```
 
 Callbacks run on the poller thread, so:
@@ -147,6 +177,7 @@ Callbacks run on the poller thread, so:
 * protect any shared state with your own lock;
 * multiple callbacks can be registered for the same code; they are
   invoked in registration order.
+
 
 ## Lifecycle
 
@@ -157,12 +188,8 @@ with touchy_open() as pad:
     ...
 ```
 
-If that isn't practical, call `pad.close()` explicitly to stop the
-poller thread and release the USB device.
-
 ## Version compatibility
 
 `touchy_open()` queries the device's USB protocol version on open and
 raises `IncompatibleFirmwareError` if it's older than
-`MINIMUM_FIRMWARE_VERSION`. Update the firmware on the device, or pin
-an older `touchy-pad` release.
+`MINIMUM_FIRMWARE_VERSION`. Update the firmware on the device with "touchy update" if necessary.
