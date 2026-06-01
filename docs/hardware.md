@@ -26,6 +26,11 @@ which caps a full-frame RGB565 redraw (480×272×2 ≈ 261 KB) at roughly
 
 ## ESP32-2432S028Rv3: 2.8" resistive cheap-yellow-display variant (Also called "ESP32-2432S028R v3" or CYD2USB)
 
+### WARNING: Not yet supported
+
+FIXME once home with access to a multimeter to find where MISO is attached to
+XPT2046.  Supposedly it is 39, but tried 12 and not there either.  Need to ohm it out. Until then both of the CYD boards are unsupported.  For the time being I'm leaving the test/debug code in touch.cpp.
+
 > **touchy-pad support: implemented (Stage 65).** Board id
 > `esp32_2432s028rv3` (`firmware/boards/esp32_2432s028rv3/`, IDF target
 > `esp32`). Flash and talk to it over the CH340 UART on `/dev/ttyUSB*`
@@ -117,6 +122,13 @@ USB ports: this board contains both a USB-C and a USB-Micro port but they are el
 > **Note:** The display backlight might be hardwired to GPIO 21. Reusing GPIO 21 for general I/O or I2C SDA will cause the screen to strobe during data transmission.
 
 ## ESP32-2432S024: The 2.4" version of CYD2USB (also called ESP32-2432S024)
+
+### WARNING: Not yet supported
+
+FIXME once home with access to a multimeter to find where MISO is attached to
+XPT2046.  Supposedly it is 39, but tried 12 and not there either.  Need to ohm it out. Until then both of the CYD boards are unsupported.  For the time being I'm leaving the test/debug code in touch.cpp.
+
+### Hardware config
 
 More pinout information here: https://github.com/F1ATB/ESP32-2432S028-2432S024-2432S032-JC2432W328
 

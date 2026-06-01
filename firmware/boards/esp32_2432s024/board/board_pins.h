@@ -28,7 +28,7 @@
 #define BOARD_LCD_PIXEL_CLOCK_HZ        (40 * 1000 * 1000)
 
 #define BOARD_LCD_GPIO_MOSI             GPIO_NUM_13
-#define BOARD_LCD_GPIO_MISO             GPIO_NUM_12     // unused by the panel
+#define BOARD_LCD_GPIO_MISO             GPIO_NUM_NC     // unused by the panel
 #define BOARD_LCD_GPIO_SCK              GPIO_NUM_14
 #define BOARD_LCD_GPIO_CS               GPIO_NUM_15
 #define BOARD_LCD_GPIO_DC               GPIO_NUM_2
@@ -55,7 +55,11 @@
 #define BOARD_TOUCH_PIXEL_CLOCK_HZ      (2 * 1000 * 1000)
 
 #define BOARD_TOUCH_GPIO_MOSI           GPIO_NUM_32
-#define BOARD_TOUCH_GPIO_MISO           GPIO_NUM_39
+/* FIXME once home with access to a multimeter to find where MISO is attached to
+XPT2046.  Supposedly it is 39, but tried 12 and not there either.  Need to ohm it out.
+Until then both of the CYD boards are unsupported.  For the time being I'm leaving the
+test/debug code in touch.cpp. */
+#define BOARD_TOUCH_GPIO_MISO           GPIO_NUM_39 
 #define BOARD_TOUCH_GPIO_SCK            GPIO_NUM_25
 #define BOARD_TOUCH_GPIO_CS             GPIO_NUM_33
 #define BOARD_TOUCH_GPIO_IRQ            GPIO_NUM_36
