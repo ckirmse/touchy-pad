@@ -46,9 +46,9 @@
 
 // Display orientation: landscape (320 wide). swap_xy + mirror_x gives the
 // USB-port-on-the-right landscape used by the CYD reference projects.
-#define BOARD_LCD_SWAP_XY               1
-#define BOARD_LCD_MIRROR_X              0
-#define BOARD_LCD_MIRROR_Y              0
+#define BOARD_LCD_SWAP_XY               0
+#define BOARD_LCD_MIRROR_X              1
+#define BOARD_LCD_MIRROR_Y              1
 
 // ---------- XPT2046 resistive touch (separate SPI bus) ----------
 #define BOARD_TOUCH_SPI_HOST            SPI3_HOST       // VSPI on classic ESP32

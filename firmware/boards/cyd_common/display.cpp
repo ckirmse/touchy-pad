@@ -99,9 +99,6 @@ extern "C" lv_display_t *display_init(void)
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, BOARD_LCD_INVERT_COLOR));
-    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel, BOARD_LCD_SWAP_XY));
-    ESP_ERROR_CHECK(
-        esp_lcd_panel_mirror(panel, BOARD_LCD_MIRROR_X, BOARD_LCD_MIRROR_Y));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
 
     // ----- LVGL port task + display -----
@@ -131,5 +128,13 @@ extern "C" lv_display_t *display_init(void)
         ESP_LOGE(TAG, "lvgl_port_add_disp failed");
         return nullptr;
     }
+
+    // Apply orientation AFTER lvgl_port_add_disp: the port internally calls
+    // esp_lcd_panel_swap_xy / mirror to match disp_cfg.rotation (zero →
+    // identity), which would overwrite anything set beforehand.
+    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel, BOARD_LCD_SWAP_XY));
+    ESP_ERROR_CHECK(
+        esp_lcd_panel_mirror(panel, BOARD_LCD_MIRROR_X, BOARD_LCD_MIRROR_Y));
+
     return disp;
 }
