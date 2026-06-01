@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// XPT2046 resistive-touch bring-up for the ESP32-2432S028Rv3 ("CYD").
+// Shared XPT2046 resistive-touch bring-up for the "Cheap Yellow Display"
+// (CYD2USB) family of classic-ESP32 boards.
 //
-// The XPT2046 hangs off its own dedicated SPI bus (separate from the ST7789
-// display bus), so we initialise that bus here, attach the touch panel-io,
-// create the esp_lcd_touch handle, and register it with esp_lvgl_port. Being
-// resistive it reports a single contact point — TOUCH_MAX_POINTS still bounds
-// the buffer the trackpad widget reads, but only one slot is ever populated.
+// The XPT2046 hangs off its own dedicated SPI bus (separate from the display
+// bus), so we initialise that bus here, attach the touch panel-io, create the
+// esp_lcd_touch handle, and register it with esp_lvgl_port. Being resistive it
+// reports a single contact point — TOUCH_MAX_POINTS still bounds the buffer
+// the trackpad widget reads, but only one slot is ever populated.
+//
+// Every CYD variant wires the XPT2046 identically; the only per-board
+// differences (resolution, orientation flags) come from board_pins.h.
 
 #include "touch.h"
 
@@ -54,7 +58,7 @@ extern "C" esp_lcd_touch_handle_t touch_init(lv_display_t *disp)
     tp_cfg.rst_gpio_num = GPIO_NUM_NC;
     tp_cfg.int_gpio_num = BOARD_TOUCH_GPIO_IRQ;
     // The XPT2046 raw axes are rotated/mirrored relative to the (already
-    // rotated) ST7789 framebuffer; match the display orientation so taps land
+    // rotated) display framebuffer; match the display orientation so taps land
     // under the finger. Tune alongside the BOARD_LCD_* orientation flags.
     tp_cfg.flags.swap_xy  = BOARD_LCD_SWAP_XY;
     tp_cfg.flags.mirror_x = BOARD_LCD_MIRROR_X;

@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// LVGL display bring-up for the ESP32-2432S028Rv3 ("Cheap Yellow Display").
+// Shared LVGL display bring-up for the "Cheap Yellow Display" (CYD2USB) family
+// of classic-ESP32 boards.
 //
-// The 2.8" panel is a standard ST7789 driven over SPI, so unlike the
-// JC4827W543's bespoke QSPI NV3041A path this uses the stock esp_lcd SPI
-// panel-io + esp_lcd_new_panel_st7789, handed to esp_lvgl_port. There is no
-// PSRAM on this module, so the LVGL draw buffers live in internal DMA RAM and
-// are deliberately small (a few dozen lines, ping-ponged).
+// CYD panels are standard SPI controllers (ST7789 on the 2.8" 2432S028Rv3,
+// ILI9341 on the 2.4" 2432S024), driven over the stock esp_lcd SPI panel-io
+// and handed to esp_lvgl_port. The controller is selected per-board in
+// board_pins.h via BOARD_LCD_CONTROLLER_*; everything else (pins, clock,
+// orientation, colour quirks) is identical plumbing. There is no PSRAM on
+// these modules, so the LVGL draw buffers live in internal DMA RAM and are
+// deliberately small (a few dozen lines, ping-ponged).
 
 #include "display.h"
 
@@ -19,6 +22,18 @@
 #include "esp_lcd_panel_vendor.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+
+// Select the panel-controller constructor. ST7789 ships inside the core
+// esp_lcd component; ILI9341 comes from the espressif/esp_lcd_ili9341 managed
+// component (declared in the board's idf_component.yml).
+#if defined(BOARD_LCD_CONTROLLER_ILI9341)
+#  include "esp_lcd_ili9341.h"
+#  define BOARD_LCD_NEW_PANEL esp_lcd_new_panel_ili9341
+#  define BOARD_LCD_CONTROLLER_NAME "ILI9341"
+#else  // default: ST7789
+#  define BOARD_LCD_NEW_PANEL esp_lcd_new_panel_st7789
+#  define BOARD_LCD_CONTROLLER_NAME "ST7789"
+#endif
 
 static const char *TAG = "display";
 
@@ -38,7 +53,8 @@ extern "C" lv_display_t *display_init(void)
     }
 
     // ----- SPI bus for the panel -----
-    ESP_LOGI(TAG, "Configuring ST7789 SPI panel %dx%d @ %d MHz",
+    ESP_LOGI(TAG, "Configuring %s SPI panel %dx%d @ %d MHz",
+             BOARD_LCD_CONTROLLER_NAME,
              BOARD_LCD_H_RES, BOARD_LCD_V_RES,
              BOARD_LCD_PIXEL_CLOCK_HZ / 1000000);
 
@@ -66,10 +82,10 @@ extern "C" lv_display_t *display_init(void)
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(
         (esp_lcd_spi_bus_handle_t)BOARD_LCD_SPI_HOST, &io_cfg, &io_handle));
 
-    // ----- ST7789 panel -----
+    // ----- Panel (ST7789 or ILI9341, selected above) -----
     esp_lcd_panel_handle_t panel = nullptr;
     esp_lcd_panel_dev_config_t panel_cfg = {};
-    // GPIO_NUM_NC (-1) tells esp_lcd "no dedicated reset line" — the ST7789 on
+    // GPIO_NUM_NC (-1) tells esp_lcd "no dedicated reset line" — the panel on
     // this module shares the system reset.
     panel_cfg.reset_gpio_num = BOARD_LCD_GPIO_RST;
 #if BOARD_LCD_BGR_ORDER
@@ -78,7 +94,7 @@ extern "C" lv_display_t *display_init(void)
     panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
 #endif
     panel_cfg.bits_per_pixel = 16;
-    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_cfg, &panel));
+    ESP_ERROR_CHECK(BOARD_LCD_NEW_PANEL(io_handle, &panel_cfg, &panel));
 
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
@@ -106,7 +122,8 @@ extern "C" lv_display_t *display_init(void)
     disp_cfg.monochrome    = false;
     disp_cfg.color_format  = LV_COLOR_FORMAT_RGB565;
     disp_cfg.flags.buff_dma    = true;
-    // ST7789 expects big-endian RGB565 on the wire; LVGL renders little-endian.
+    // These controllers expect big-endian RGB565 on the wire; LVGL renders
+    // little-endian.
     disp_cfg.flags.swap_bytes  = true;
 
     lv_display_t *disp = lvgl_port_add_disp(&disp_cfg);

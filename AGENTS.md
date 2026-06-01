@@ -25,7 +25,7 @@ a StreamDeck-compatibility shim (`TouchyDeck`).
 | `VERSION` | Single-source version (read by Python + CMake) |
 
 ## Implementation status
-All stages 0–24.4, 50.2, 51, 64.1, 64.3, 64.4, and 65 are **done**. Latest active wire-format:
+All stages 0–24.4, 50.2, 51, 64.1, 64.3, 64.4, 65, and 65.1 are **done**. Latest active wire-format:
 `Screen.Version.CURRENT == 5`, `SysBoardInfoResponse.ProtocolVersion.CURRENT == 6`.
 Highlights worth remembering:
 
@@ -40,6 +40,21 @@ Highlights worth remembering:
   chips. `firmware/main/platform.{h,cpp}` exposes `platform_get()` →
   `{is_multitouch, has_usb}`, surfaced over proto as
   `SysBoardInfoResponse.is_multitouch` / `has_usb`.
+
+- **The "CYD" family shares one C++ implementation (Stage 65.1).** All
+  classic-ESP32 CYD boards (`esp32_2432s028rv3` 2.8" ST7789,
+  `esp32_2432s024` 2.4" ILI9341, more coming) compile the *same* sources in
+  `firmware/boards/cyd_common/` (`board.cpp`, `display.cpp`, `touch.cpp`).
+  Each board dir keeps only its `board_pins.h` + a tiny
+  `board/CMakeLists.txt` (which lists `../../cyd_common/*.cpp` and sets
+  `PRIV_INCLUDE_DIRS "."` so the board's own `board_pins.h` wins) +
+  `idf_component.yml`. No symlinks. The panel driver is chosen at compile
+  time from `board_pins.h`: `cyd_common/display.cpp` keys off
+  `BOARD_LCD_CONTROLLER_ILI9341` (pulls the `espressif/esp_lcd_ili9341`
+  managed component, `esp_lcd_new_panel_ili9341`) vs the default
+  `BOARD_LCD_CONTROLLER_ST7789` (in-tree `esp_lcd_new_panel_st7789`); bring-up
+  is otherwise identical. ILI9341 typically wants `BOARD_LCD_INVERT_COLOR=0`
+  where ST7789 wants `1`.
 
 - USB device is a composite class: CDC-ACM + HID (mouse + keyboard via
   report IDs 1/2) + vendor-class bulk pair (command/response) + interrupt-IN
@@ -135,11 +150,13 @@ touches `usb.core.find()` must guard against `NoBackendError`
 ## Hardware
 - Display + touch panel ride a shared I²C-ish interface (board-specific);
   see `firmware/boards/<board>/`. GT911 multitouch on jc4827w543 /
-  waveshare. The CYD (`esp32_2432s028rv3`) is ST7789 over SPI2 +
+  waveshare. The CYD boards (`esp32_2432s028rv3` 2.8" ST7789,
+  `esp32_2432s024` 2.4" ILI9341) are an SPI panel over SPI2 +
   XPT2046 resistive single-touch over SPI3 (managed component
   `atanisoft/esp_lcd_touch_xpt2046`); BGR/INVERT/SWAP/MIRROR + backlight
-  GPIO live in its `board/board_pins.h`. Note `reset_gpio_num` is
-  `gpio_num_t` in IDF v6 — assign the enum directly.
+  GPIO live in each `board/board_pins.h`, and the panel controller is
+  selected there (`BOARD_LCD_CONTROLLER_ST7789` / `_ILI9341`). Note
+  `reset_gpio_num` is `gpio_num_t` in IDF v6 — assign the enum directly.
 - Optional haptics: DRV2605L on a separate I²C bus (not yet wired).
 - USB-OTG controller exposes one IN/OUT bulk pair + one interrupt-IN
   endpoint for the vendor interface (no second IN for events — hence the

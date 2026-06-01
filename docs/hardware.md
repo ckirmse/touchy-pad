@@ -111,14 +111,23 @@ USB ports: this board contains both a USB-C and a USB-Micro port but they are el
 | GPIO | Capability | Suggested Use |
 | :--- | :--- | :--- |
 | **22** | Free (I/O) | I2C SCL |
-| **27** | Free (I/O) | I2C SDA |
+| **21** | Free (I/O) | I2C SDA |
 | **35** | Input Only | Analog/Digital Read (No internal pull-ups) |
 
 > **Note:** The display backlight might be hardwired to GPIO 21. Reusing GPIO 21 for general I/O or I2C SDA will cause the screen to strobe during data transmission.
 
-## ESP32-024: The 2.4" version of CYD2USB (also called ESP32-2432S024)
+## ESP32-2432S024: The 2.4" version of CYD2USB (also called ESP32-2432S024)
 
 More pinout information here: https://github.com/F1ATB/ESP32-2432S028-2432S024-2432S032-JC2432W328
+
+But in short: it should be mostly the [same](hardware.md) as the ESP32-028 except it uses a ILI9341 display controller.  Try to share as much as possible (via sym links or better directory structure) with the 028v3 variant.
+
+> **Status: supported** (`BOARD=esp32_2432s024`, IDF target `esp32`). Builds
+> green; on-hardware bring-up of colour/orientation/touch-calibration still
+> pending. The whole CYD family now shares one C++ implementation in
+> `firmware/boards/cyd_common/` (no symlinks); each board contributes only its
+> `board_pins.h`, which selects the panel driver via
+> `BOARD_LCD_CONTROLLER_ILI9341` (024) or `BOARD_LCD_CONTROLLER_ST7789` (028).
 
 ### Misc tips
 

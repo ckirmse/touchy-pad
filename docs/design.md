@@ -2448,6 +2448,41 @@ All nine work items above are implemented and validated.
   `waveshare_s3_lcd_7b` (esp32s3), `esp32_2432s028rv3` (esp32). Host
   suite: 145 Python tests pass (two new sim-capability tests).
 
+## Stage 65.1: ESP32-2432S024 support
+
+This is a board that is only slightly different from the ESP32-2432S028v3 you've already added support for.  Please refactor so it can share code (there are other 'CYD' devices coming soon).  The only difference vs 028v3 is that it uses a ILI9341 display controller.
+
+**Status: done.** Refactored so the whole CYD family shares one set of
+sources, then added the 2.4" ILI9341 board on top of that:
+
+- All CYD board C++ now lives in `firmware/boards/cyd_common/`
+  (`board.cpp`, `display.cpp`, `touch.cpp`). Each board directory keeps only
+  its `board_pins.h` plus a tiny `board/CMakeLists.txt` and
+  `idf_component.yml`; the shared `.cpp` files are referenced by relative
+  path (`../../cyd_common/*.cpp`) so they compile against each board's own
+  pin map (`PRIV_INCLUDE_DIRS "."` puts the board's `board_pins.h` first).
+  No symlinks — just a shared component plus per-board pin headers.
+- `cyd_common/display.cpp` is controller-agnostic: a board selects its panel
+  driver from `board_pins.h` via `BOARD_LCD_CONTROLLER_ILI9341` /
+  `BOARD_LCD_CONTROLLER_ST7789`. The ILI9341 branch pulls the
+  `espressif/esp_lcd_ili9341` managed component and calls
+  `esp_lcd_new_panel_ili9341`; the default ST7789 branch uses the in-tree
+  `esp_lcd_new_panel_st7789`. Bring-up (reset/init/invert/swap/mirror) is
+  otherwise identical.
+- New board `firmware/boards/esp32_2432s024/` (classic ESP32, `target` =
+  `esp32`, no USB, protocol over the CH340 UART exactly like the 028v3). Its
+  `board_pins.h` mirrors the 028v3 pin map but selects ILI9341 and starts
+  with `BOARD_LCD_INVERT_COLOR=0` (ST7789's invert quirk doesn't apply);
+  colour/orientation flags are flip-on-hardware constants pending validation
+  on a real unit.
+- `esp32_2432s028rv3` now also builds from `cyd_common` (its own `.cpp` files
+  were deleted) and declares `BOARD_LCD_CONTROLLER_ST7789` in `board_pins.h`.
+  Both CYD boards build green for the `esp32` target.
+
+Open hardware-validation items for the 024 (same as any new CYD): confirm
+backlight GPIO (21 vs 27), BGR/INVERT/SWAP/MIRROR flags, and XPT2046 touch
+calibration on a real panel.
+
 # Old/Existing projects
 
 In the very early days of this project I looked into these ideas/implementations:

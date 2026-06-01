@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Board-specific Kconfig defaults for the ESP32-2432S024 ("Cheap Yellow
+# Display", 2.4" CYD2USB variant).
+#
+#   - MCU:     classic ESP32-D0WD-V3 (Xtensa LX6, set-target esp32),
+#              520 KB SRAM, NO PSRAM, 4 MB flash.
+#   - Display: 2.4" 320x240 ILI9341 over SPI (vs ST7789 on the 2432S028Rv3 —
+#              this is the only hardware difference; all C++ is shared via
+#              boards/cyd_common/).
+#   - Touch:   XPT2046 resistive on a separate SPI bus.
+#   - Host link: NO native USB. A CH340 UART bridge (UART0) is the only
+#                connection to the host, so the touchy protocol rides UART0.
+
+# ----- Flash (4 MB, DIO @ 80 MHz; CYD modules are typically DIO) -----
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/4M.csv"
+# Enable the dedicated Boya flash driver — boards with BY25Q64 / BY25Q128 chips
+# otherwise fall back to the generic driver and print a warning at boot.
+CONFIG_SPI_FLASH_SUPPORT_BOYA_CHIP=y
+
+# ----- No PSRAM on this module -----
+# (CONFIG_SPIRAM intentionally left unset.) The 'R:' ramdisk still works —
+# RamFs prefers MALLOC_CAP_SPIRAM but falls back to internal RAM when PSRAM is
+# absent (see fs/ram_fs.cpp), so image assets are supported, just bounded by
+# the ~520 KB internal SRAM instead of PSRAM.
+
+# ----- Host transport: touchy protocol over the CH340 UART (UART0) -----
+# This board has no USB-OTG (CONFIG_SOC_USB_OTG_SUPPORTED is unset for the
+# classic ESP32), so the vendor-bulk link does not exist. The protocol
+# instead rides UART0 via the Stage 65 UartLink.
+CONFIG_TOUCHY_PROTO_OVER_SERIAL=y
+
+# Use default UART settings and log over our protobufs (Stage 64.1 tunnel) so
+# the protocol UART carries only binary frames, never raw console text.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_TOUCHY_LOG_OVER_PROTO=y
+
+# ----- First-light bring-up override (manual; do NOT leave enabled) ---------
+# Before the protocol link is trusted it can be handy to see boot logs on a
+# serial monitor. For that, temporarily edit the options above:
+#   - replace CONFIG_TOUCHY_PROTO_OVER_SERIAL=y with CONFIG_TOUCHY_PROTO_OVER_SERIAL=n
+# That disables the binary protocol so the console UART carries logs only.
+# NEVER ship with that config.
+#
+# NOTE: do not express those overrides here as `# CONFIG_X is not set` lines —
+# in sdkconfig syntax that is the *real* directive for X=n (not a comment) and
+# would silently undo the settings above.

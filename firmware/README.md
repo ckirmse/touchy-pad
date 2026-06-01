@@ -15,9 +15,14 @@ system supports a mix of native-USB (ESP32-S3) and UART-only
 | `waveshare_s3_lcd_7b`   | esp32s3 | [Waveshare ESP32-S3-Touch-LCD-7B](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-7B) (N16R8, 16 MB flash, 8 MB OPI PSRAM) | 800×480 ST7262 16-bit parallel RGB   | GT911 | USB | Builds; tested incomplete |
 | `jc4827w543`            | esp32s3 | "JC4827W543" 4.3-inch ESP32-S3 board (4 MB flash, 8 MB OPI PSRAM)         | 480×272 NV3041A 4-line QSPI IPS      | GT911 | USB | Builds;      |
 | `esp32_2432s028rv3`     | esp32   | "CYD2USB" ESP32-2432S028R v3 (classic ESP32, 4 MB flash, **no PSRAM**)    | 320×240 ST7789 SPI                   | XPT2046 (resistive, single-touch) | UART (CH340 `/dev/ttyUSB*`) | Builds; HW bring-up |
+| `esp32_2432s024`        | esp32   | "CYD2USB" ESP32-2432S024 2.4" (classic ESP32, 4 MB flash, **no PSRAM**)   | 320×240 ILI9341 SPI                  | XPT2046 (resistive, single-touch) | UART (CH340 `/dev/ttyUSB*`) | Builds; HW bring-up |
 
-The default is `jc4827w543`. The CYD board has no native USB: the protobuf
-protocol rides UART0 @ 115200 and there is no HID emulation.
+The default is `jc4827w543`. The CYD boards have no native USB: the protobuf
+protocol rides UART0 @ 115200 and there is no HID emulation. The CYD family
+(`esp32_2432s028rv3`, `esp32_2432s024`, …) shares one set of C++ sources in
+`boards/cyd_common/`; each board contributes only its `board_pins.h`. The
+display controller (ST7789 vs ILI9341) is selected at compile time from
+`board_pins.h`.
 
 What it does today (parity with v1 Stage 10):
 
@@ -67,16 +72,24 @@ firmware/
 │           ├── display.cpp     # NV3041A + LVGL flush_cb
 │           ├── nv3041a.{h,c}   # standalone QSPI panel driver
 │           └── touch.cpp       # GT911 + LVGL indev
-│   └── esp32_2432s028rv3/      # classic-ESP32 CYD2USB, UART-only, no PSRAM
+│   ├── cyd_common/             # shared C++ for the whole "CYD" family
+│   │   ├── board.cpp           # platform_get() {multitouch:false, usb:false}
+│   │   ├── display.cpp         # ST7789/ILI9341 SPI + esp_lvgl_port
+│   │   └── touch.cpp           # XPT2046 resistive + LVGL indev
+│   ├── esp32_2432s028rv3/      # classic-ESP32 CYD2USB 2.8", ST7789
+│   │   ├── target              # one-line IDF chip: "esp32"
+│   │   ├── sdkconfig.defaults  # 4 MB flash, proto-over-UART0, no PSRAM
+│   │   └── board/              # ← ESP-IDF component named `board`
+│   │       ├── CMakeLists.txt     # compiles ../../cyd_common/*.cpp
+│   │       ├── idf_component.yml  # atanisoft/esp_lcd_touch_xpt2046
+│   │       └── board_pins.h    # GPIO map + BOARD_LCD_CONTROLLER_ST7789
+│   └── esp32_2432s024/         # classic-ESP32 CYD2USB 2.4", ILI9341
 │       ├── target              # one-line IDF chip: "esp32"
 │       ├── sdkconfig.defaults  # 4 MB flash, proto-over-UART0, no PSRAM
 │       └── board/              # ← ESP-IDF component named `board`
-│           ├── CMakeLists.txt
-│           ├── idf_component.yml  # atanisoft/esp_lcd_touch_xpt2046
-│           ├── board.cpp       # platform_get() {multitouch:false, usb:false}
-│           ├── board_pins.h    # GPIO map (private)
-│           ├── display.cpp     # ST7789 SPI + esp_lvgl_port
-│           └── touch.cpp       # XPT2046 resistive + LVGL indev
+│           ├── CMakeLists.txt     # compiles ../../cyd_common/*.cpp
+│           ├── idf_component.yml  # esp_lcd_ili9341 + esp_lcd_touch_xpt2046
+│           └── board_pins.h    # GPIO map + BOARD_LCD_CONTROLLER_ILI9341
 └── main/                       # board-agnostic app code
     ├── CMakeLists.txt          # REQUIRES board
     ├── idf_component.yml       # common deps (lvgl, esp_lvgl_port, tinyusb, ...)
@@ -133,6 +146,15 @@ firmware/
    first when switching to a different chip.
 6. Add a row to the table at the top of this file.
 
+> **CYD family:** if the new board is another "Cheap Yellow Display" variant,
+> don't write fresh `board.cpp`/`display.cpp`/`touch.cpp` — reuse the shared
+> sources in `boards/cyd_common/`. Have `board/CMakeLists.txt` compile
+> `../../cyd_common/*.cpp` (with `PRIV_INCLUDE_DIRS "."` so the board's own
+> `board_pins.h` is found first) and contribute only `board_pins.h`. Select
+> the panel driver there via `BOARD_LCD_CONTROLLER_ST7789` or
+> `BOARD_LCD_CONTROLLER_ILI9341`. See `esp32_2432s028rv3` (ST7789) and
+> `esp32_2432s024` (ILI9341) for the two-file pattern.
+
 ---
 
 ## Prerequisites
@@ -159,6 +181,9 @@ cd firmware
 idf.py -DBOARD=waveshare_s3_lcd_7b set-target esp32s3       # 7" Waveshare
 # or
 idf.py -DBOARD=jc4827w543          set-target esp32s3       # 4.3" JC4827W543
+# or (classic-ESP32 CYD boards)
+idf.py -DBOARD=esp32_2432s028rv3   set-target esp32         # 2.8" CYD2USB (ST7789)
+idf.py -DBOARD=esp32_2432s024      set-target esp32         # 2.4" CYD2USB (ILI9341)
 
 # Build, flash, monitor (UART USB-C, not the OTG one).
 idf.py build
