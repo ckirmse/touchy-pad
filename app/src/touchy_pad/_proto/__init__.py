@@ -27,7 +27,6 @@ from .touchy_pb2 import (  # noqa: F401  (re-exported)
     ScreenLoadCmd,
     ScreenSleepTimeoutCmd,
     ScreenWakeCmd,
-    StreamEventsCmd,
     SysBoardInfoGetCmd,
     SysBoardInfoResponse,
     SysRebootBootloaderCmd,

@@ -45,8 +45,8 @@ import "widgets.proto";
 // free without a separate constants file.
 enum Constants {
     CONSTANTS_UNSPECIFIED = 0;
-    USB_VID               = 0x303A;  // 12346 — Espressif-assigned vendor ID
-    USB_PID               = 0x8369;  // 33641 — touchy-pad product ID
+    USB_VID               = 0x303A;  // Espressif-assigned vendor ID
+    USB_PID               = 0x8369;  // touchy-pad product ID
 }
 
 // Generic result code shared by every Response.
@@ -381,9 +381,5 @@ service Touchy {
 
     // ----- Async events -----------------------------------------------
     rpc EventConsume(EventConsumeCmd) returns (Response);
-    rpc StreamEvents(StreamEventsCmd) returns (stream Event);
 }
 
-// Empty request marker for the streaming RPC.
-message StreamEventsCmd {
-}

@@ -48,7 +48,7 @@ Main new features: Works with StreamController app to provide arbitrary user but
 * [ ] add some of the example JSON to the API docs
 * [x] explain opendeck plugin install
 * [x] make opendeck example video
-* [ ] send message to Opendeck geeks (include reverse engineer docs and video)
+* [x] send message to Opendeck geeks (include reverse engineer docs and video)
 * [x] explain StreamController status
 * [x] add a widget handle concept so host can say to just redraw one particular widget (only need to implement for screens/layouts/image)
 * [x] make screen sleep default timeout
@@ -56,11 +56,15 @@ Main new features: Works with StreamController app to provide arbitrary user but
 * [x] Turn off "Expensive debugging flags!" in sdkconfig.defaults
 * [x] cleanup embedding of streamdeck ui into other widgets (via user screens)
 * [x] update python code to be 'finished' for StreamController (make sure press and release events work)
+* [ ] reddit post
+* [ ] support no-touch devices
+* [ ] photo of small board
 
 ## For release Alpha 3
 
 Main new features? Much easier scripting than through StreamController - allow arbitrary Python snippets for button presses/slider moves etc...  Dynamic data displays from host to Touchypad (server stats, ZMK modes, whatever user wants to show)
 
+* [ ] include prebuilt win/os-x exes in the opendeck release zip. "Cross-compiling for every target is the usual sticking point. CI matrices and cargo zigbuild / cross are the standard answers." per https://github.com/geeksville/touchy-pad/blob/main/docs/opendeck-device-plugin.md#3-manifest-essentials
 * [ ] shrink images slightly in opendeck plugin
 * [ ] implement the StreamDeck background graphic API
 * [ ] determine USB security issues (might need to set a secure key for future API operations - to prevent untrusted users from changing macro behavior)
@@ -71,16 +75,16 @@ Main new features? Much easier scripting than through StreamController - allow a
 * [ ] try turning off GPIO matrix for SPI display writes - per https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/spi_master.html#_CPPv416spi_bus_config_t might allow increase to 80Mhz.  "You can use this structure to specify the GPIO pins of the bus. Normally, the driver will use the GPIO matrix to route the signals. An exception is made when all signals either can be routed through the IO_MUX or are -1. In that case, the IO_MUX is used. On ESP32, using GPIO matrix will bring about 25ns of input delay, which may cause incorrect read for >40MHz speeds."
 * [ ] when using ch341 uart try to use 460800 for better speeds
 * [ ] make knobs/dials with gesture overlays (share code with trackpad) ccw/cw/left/up etc...
-* [ ] expose device API via UART (for embedded applications) and wifi/tcp (for arbitary smart signage applications).   Find a good esp32 lib for wifi settings/management/firmware update?
+* [ ] expose device API via wifi/tcp (for arbitary smart signage applications).   Find a good esp32 lib for wifi settings/management/firmware update?
 * [ ] allow setting brightness by putting that GPIO on a hw PWM output
-* [ ] add an animation to demo/test.pb https://lvgl.io/docs/open/9.5/main-modules/animation.html 
+* [x] add an animation to demo/test.pb https://lvgl.io/docs/open/9.5/main-modules/animation.html 
 * [ ] Implement multitouch HID to support multitouch native apps
 * [ ] Stylus support for 'paintbrush mode'
 * [ ] support turn, back, forward, up gestures natively
 * [ ] explain plans w.r.t. 3d printing and knobs on the screen
 * [ ] tactile precut sticker/3d printable case for screen overlay?
 * [ ] figure out best way to mount haptics for best effect
-* [ ] Increase CPU, FLASH and RAM speeds to the max.  Currently the firmware picks slow/safe defaults
+* [x] Increase CPU, FLASH and RAM speeds to the max.  Currently the firmware picks slow/safe defaults
 * [ ] Haptics
 * [ ] Use my auto-populated per-app button standard page generator - Default to use the material design icons
 * [ ] Possibly no need for the full StreamController app, just go straight from per app yaml to an optional Python helper app (use to set icons/shortcuts etc).
