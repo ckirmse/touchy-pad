@@ -33,13 +33,14 @@ def main() -> int:
     args = parser.parse_args()
 
     # The host-side Python protobuf bindings live under the app package;
-    # add them to sys.path so this script is runnable from the repo root
-    # without installing the app first.
+    # add its source root to sys.path so this script is runnable from the
+    # repo root without installing the app first. Import the bindings via
+    # the package (not flat) so their package-relative cross-imports work.
     repo_root = Path(__file__).resolve().parent.parent
-    sys.path.insert(0, str(repo_root / "app" / "src" / "touchy_pad" / "_proto"))
+    sys.path.insert(0, str(repo_root / "app" / "src"))
 
-    import touchy_pb2  # noqa: E402, F401 — registers shared messages
-    import widgets_pb2  # noqa: E402
+    from touchy_pad._proto import touchy_pb2  # noqa: E402, F401 — registers shared messages
+    from touchy_pad._proto import widgets_pb2  # noqa: E402
     from google.protobuf import json_format  # noqa: E402
 
     raw = args.input.read_text(encoding="utf-8")

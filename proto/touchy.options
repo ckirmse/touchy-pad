@@ -23,6 +23,15 @@ touchy.FileWriteCmd.data               type:FT_POINTER
 touchy.SysBoardInfoResponse.firmware_version_str  max_size:32
 touchy.SysBoardInfoResponse.board_name            max_size:32
 
+# Stage 71 — device serial: "txxxxxxxxxxxx" (13 chars: 't' + 12 hex) on
+# real hw, "tsim001" on the simulator. 24 bytes leaves headroom.
+touchy.SysBoardInfoResponse.serial                max_size:24
+
+# Stage 71 — RunActionsCmd carries a host-supplied list of Actions, run
+# device-side as if a local widget fired them. Heap-allocate (FT_POINTER)
+# like every other repeated Action list (see widgets.options).
+touchy.RunActionsCmd.actions                      type:FT_POINTER
+
 # Event payloads — the host-assigned user_data string is typically a short
 # unique identifier; widget_value scalars need no size hint.
 touchy.LvEvent.user_data               max_size:32

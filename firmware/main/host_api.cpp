@@ -13,6 +13,7 @@
 #include "screens.h"
 #include "touchy.pb.h"
 #include "usb_hid.h"
+#include "widgets/widget_actions.h"
 #include "lvgl.h"
 #include "pb_decode.h"
 #include "pb_encode.h"
@@ -395,6 +396,10 @@ static void fill_board_info(touchy_Response *resp)
     const Platform *plat = platform_get();
     v->is_multitouch = plat->is_multitouch;
     v->has_usb       = plat->has_usb;
+
+    // Stage 71: stable MAC-derived serial (matches USB iSerialNumber).
+    strncpy(v->serial, platform_serial(), sizeof(v->serial) - 1);
+    v->serial[sizeof(v->serial) - 1] = '\0';
 }
 
 static void dispatch(const touchy_Command *cmd, touchy_Response *resp)
@@ -515,6 +520,16 @@ static void dispatch(const touchy_Command *cmd, touchy_Response *resp)
         backlight_set_timeout(cmd->cmd.screen_sleep_timeout.timeout_ms);
         resp->code = touchy_ResultCode_RESULT_OK;
         break;
+
+    case touchy_Command_run_actions_tag: {
+        // Stage 71 — run a host-supplied list of Actions as if a local
+        // widget had fired them. `actions` is FT_POINTER (heap), so its
+        // pointer/count live in the repeated-field pair.
+        const auto &ra = cmd->cmd.run_actions;
+        widget_run_actions(ra.actions, ra.actions_count);
+        resp->code = touchy_ResultCode_RESULT_OK;
+        break;
+    }
 
     case touchy_Command_sys_reboot_bootloader_tag:
         ESP_LOGW(TAG, "command tag %u not yet implemented",

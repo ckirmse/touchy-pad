@@ -18,7 +18,8 @@ feature adds a serial-port transport (via `tokio-serial`).
 | Module | Purpose |
 |---|---|
 | `touchy_pad::Touchy` | High-level handle; wraps `Client` + background event poller. |
-| `touchy_pad::client::Client` | One-shot RPC methods (`sys_board_info_get`, `file_open_write`, `screen_load`, …). |
+| `touchy_pad::client::Client` | One-shot RPC methods (`sys_board_info_get`, `file_open_write`, `screen_load`, `run_actions`, …). |
+| `touchy_pad::discover` | `discover()` + `DiscoveredDevice` — unified USB + sim enumeration. |
 | `touchy_pad::transport::Transport` | Async trait — frame in, frame out. Mockable for tests. |
 | `touchy_pad::transport_usb::UsbTransport` | Default `nusb`-backed bulk transport. |
 | `touchy_pad::images` | LVGL `.bin` conversion (`to_lvgl_bin`, `LvFormat`). |
@@ -49,6 +50,46 @@ async fn main() -> anyhow::Result<()> {
     }
     Ok(())
 }
+```
+
+## Discovery (USB + sim)
+
+`touchy_pad::discover()` enumerates every locally reachable device in one
+list — USB devices matching the Touchy vendor/product id **and** a
+simulator entry when `TOUCHY_SIM_URL` is set — so sim devices show up
+alongside hardware:
+
+```rust,no_run
+use touchy_pad::{discover, DiscoveredDevice, Touchy};
+
+# async fn run() -> anyhow::Result<()> {
+for dev in discover().await? {
+    println!("found {}", dev.describe()); // "usb:001:007" or "sim:127.0.0.1:8765"
+    let transport = dev.open().await?;    // USB bulk or TCP, same trait
+    let pad = Touchy::from_transport(transport);
+    let info = pad.client().sys_board_info_get().await?;
+    println!("  serial = {}", info.serial); // stable id, Stage 71
+}
+# Ok(()) }
+```
+
+`DiscoveredDevice` deliberately carries only enough to *open* the
+transport; the canonical stable id is the device's reported `serial`
+(read after opening), not a bus/address tuple.
+
+## Running actions device-side
+
+`client().run_actions(actions)` runs a `Vec<Action>` on the device as if a
+local widget had fired them. `Touchy::show_user_screen(name)` is the
+convenience wrapper that brings an uploaded `F:host/uscr/<name>.pb` body
+to the front of the default chrome:
+
+```rust,no_run
+# use touchy_pad::Touchy;
+# async fn run(pad: &Touchy, page: &touchy_pad::proto::Widget) -> anyhow::Result<()> {
+pad.user_screen_save("opendeck", page).await?;
+pad.show_user_screen("opendeck").await?; // RunActionsCmd → ChangeWidgetRef(page)
+# Ok(()) }
 ```
 
 ## Image conversion

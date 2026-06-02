@@ -27,16 +27,14 @@ use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
-use nusb::DeviceInfo;
 use openaction::OpenActionResult;
 use openaction::device_plugin;
 use openaction::global_events::{GlobalEventHandler, SetBrightnessEvent, SetImageEvent};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
-use touchy_pad::Touchy;
 use touchy_pad::proto::LvEventCode;
 use touchy_pad::proto::lv_event;
-use touchy_pad::transport_usb::{UsbTransport, enumerate, usb_vid_pid};
+use touchy_pad::{DiscoveredDevice, Touchy, discover};
 
 use crate::layout;
 
@@ -47,7 +45,13 @@ const LV_EVENT_RELEASED: u32 = LvEventCode::LvEventReleased as u32;
 /// Nominal key size in pixels used to compute the grid from the device's
 /// reported `display_width` / `display_height`. 96 px gives 5 × 3 on the
 /// 480 × 320 jc4827w543 panel; 800 × 480 yields 8 × 5, etc.
-const KEY_PX: u32 = 96;
+const KEY_PX: u32 = 72;
+
+/// Height in pixels reserved for the default chrome's prev/next top
+/// row (Stage 71). Subtracted from the panel height before computing
+/// how many key rows fit, since the OpenDeck page renders *below* the
+/// chrome.
+const TOP_ROW_HEIGHT: u32 = 32;
 
 /// OpenDeck device-type byte (see `docs/opendeck-device-plugin.md`).
 /// `0` (StreamDeck Original 3×5) is the closest match for a flat
@@ -58,11 +62,12 @@ const DEVICE_TYPE: u8 = 0;
 struct DeviceCtx {
 	pad: Arc<Touchy>,
 	device_id: String,
-	screen_path: String,
 	cols: u8,
 	rows: u8,
-	/// Debounce handle for `screen_load` after a burst of `set_image`s.
-	reload_handle: Mutex<Option<JoinHandle<()>>>,
+	/// Cached per-key image bytes (key → raw bytes as received from
+	/// OpenDeck). The `R:` ramdisk is volatile (wiped on reboot), so we
+	/// keep the bytes here and re-push every asset on each (re)connect.
+	images: Mutex<HashMap<u8, Vec<u8>>>,
 	/// Event-forwarding task; cancelled on detach.
 	event_task: Mutex<Option<JoinHandle<()>>>,
 }
@@ -76,7 +81,12 @@ impl DeviceCtx {
 /// Singleton plugin object — owned by `Box::leak` in `main`.
 #[derive(Clone, Default)]
 pub struct TouchyPlugin {
-	devices: Arc<RwLock<HashMap<String, Arc<DeviceCtx>>>>,
+	/// Attached devices keyed by their *transport-level* discovery key
+	/// (USB bus/addr or sim host:port — see
+	/// [`DiscoveredDevice::describe`]). The OpenDeck-facing device id
+	/// (derived from the hardware serial) lives in each
+	/// [`DeviceCtx::device_id`].
+	handles: Arc<RwLock<HashMap<String, Arc<DeviceCtx>>>>,
 }
 
 impl TouchyPlugin {
@@ -87,8 +97,7 @@ impl TouchyPlugin {
 	/// Background hot-plug loop. Polls every second and diffs against
 	/// the set of devices we've already attached.
 	pub async fn run_hotplug_loop(self: Arc<Self>) {
-		let (vid, pid) = usb_vid_pid();
-		log::info!("hot-plug watcher started — polling for USB {vid:04x}:{pid:04x} every 1s");
+		log::info!("hot-plug watcher started — polling via touchy_pad::discover() every 1s");
 		let mut interval = tokio::time::interval(Duration::from_secs(1));
 		interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 		// Track the previous candidate count so we only log the
@@ -97,46 +106,42 @@ impl TouchyPlugin {
 		let mut last_count: Option<usize> = None;
 		loop {
 			interval.tick().await;
-			let infos = match enumerate(vid, pid).await {
+			let candidates = match discover().await {
 				Ok(v) => v,
 				Err(e) => {
-					log::info!("usb enumerate failed: {e:#}");
+					log::info!("discover failed: {e:#}");
 					last_count = None;
 					continue;
 				}
 			};
-			if last_count != Some(infos.len()) {
-				if infos.is_empty() {
-					log::info!("no Touchy-Pad devices found ({vid:04x}:{pid:04x})");
+			if last_count != Some(candidates.len()) {
+				if candidates.is_empty() {
+					log::info!("no Touchy-Pad devices found");
 				} else {
-					log::info!("found {} Touchy-Pad candidate(s)", infos.len());
-					for info in &infos {
-						log::info!(
-							"  candidate {:04x}:{:04x} bus {} addr {} -> id {}",
-							info.vendor_id(),
-							info.product_id(),
-							info.busnum(),
-							info.device_address(),
-							layout::device_id_for(info.busnum(), info.device_address()),
-						);
+					log::info!("found {} Touchy-Pad candidate(s)", candidates.len());
+					for cand in &candidates {
+						log::info!("  candidate {}", cand.describe());
 					}
 				}
-				last_count = Some(infos.len());
+				last_count = Some(candidates.len());
 			}
-			let mut seen = Vec::with_capacity(infos.len());
-			for info in &infos {
-				let id = layout::device_id_for(info.busnum(), info.device_address());
-				seen.push(id.clone());
-				if !self.devices.read().await.contains_key(&id) {
-					log::info!("new device {id} — attaching");
-					if let Err(e) = self.attach(info, &id).await {
-						log::warn!("attach {id} failed: {e:#}");
+			let mut seen = Vec::with_capacity(candidates.len());
+			for cand in &candidates {
+				// Dedup on the transport-level key (USB bus/addr or
+				// sim host:port); the OpenDeck-facing device id is
+				// derived from the hardware serial inside `attach`.
+				let key = cand.describe();
+				seen.push(key.clone());
+				if !self.handles.read().await.contains_key(&key) {
+					log::info!("new device {key} — attaching");
+					if let Err(e) = self.attach(cand, &key).await {
+						log::warn!("attach {key} failed: {e:#}");
 					}
 				}
 			}
 			// Detach gone devices.
 			let to_drop: Vec<String> = {
-				let map = self.devices.read().await;
+				let map = self.handles.read().await;
 				map.keys().filter(|k| !seen.contains(k)).cloned().collect()
 			};
 			for id in to_drop {
@@ -146,15 +151,19 @@ impl TouchyPlugin {
 		}
 	}
 
-	async fn attach(&self, info: &DeviceInfo, device_id: &str) -> Result<()> {
-		log::info!("attach {device_id}: opening USB transport");
-		let transport = UsbTransport::open_info(info).await.context("open usb transport")?;
-		let pad = Arc::new(Touchy::from_transport(Arc::new(transport)));
+	async fn attach(&self, disc: &DiscoveredDevice, key: &str) -> Result<()> {
+		log::info!("attach {key}: opening transport");
+		let transport = disc.open().await.context("open transport")?;
+		let pad = Arc::new(Touchy::from_transport(transport));
 
-		log::info!("attach {device_id}: querying board info");
+		log::info!("attach {key}: querying board info");
 		let board = pad.client().sys_board_info_get().await.context("sys_board_info_get")?;
+		// Stage 71: the OpenDeck-facing device id is derived from the
+		// hardware serial, so it is stable across ports / re-enumeration.
+		let device_id = layout::device_id_for(&board.serial);
 		log::info!(
-			"attach {device_id}: board '{}', display {}×{}, protocol v{}, multitouch={}, usb={}",
+			"attach {key}: serial '{}' -> {device_id}; board '{}', display {}×{}, protocol v{}, multitouch={}, usb={}",
+			board.serial,
 			board.board_name,
 			board.display_width,
 			board.display_height,
@@ -166,21 +175,29 @@ impl TouchyPlugin {
 			return Err(anyhow!("{device_id} reported zero display dimensions ({}×{})", board.display_width, board.display_height));
 		}
 		let cols = u8::try_from(board.display_width / KEY_PX).context("cols overflow")?;
-		let rows = u8::try_from(board.display_height / KEY_PX).context("rows overflow")?;
+		// The OpenDeck page renders below the chrome's prev/next top
+		// row, so subtract that band before sizing the key grid.
+		let usable_h = board.display_height.saturating_sub(TOP_ROW_HEIGHT);
+		let rows = u8::try_from(usable_h / KEY_PX).context("rows overflow")?;
 		if cols == 0 || rows == 0 {
-			return Err(anyhow!("{device_id} display {}×{} is smaller than one key ({KEY_PX} px)", board.display_width, board.display_height));
+			return Err(anyhow!("{device_id} usable area {}×{} is smaller than one key ({KEY_PX} px)", board.display_width, usable_h));
 		}
 		log::info!("attach {device_id}: grid {cols}×{rows} ({} keys, {KEY_PX}px each)", cols as u32 * rows as u32);
-		let screen_path = layout::screen_path_for(device_id);
-		let screen = layout::build_screen(cols, rows, device_id);
-		log::info!("attach {device_id}: uploading screen to {screen_path}");
-		pad.screen_save(&screen_path, &screen).await.context("screen_save")?;
-		pad.screen_load(&screen_path).await.context("screen_load")?;
+
+		// Upload the page body to the uscr slot and bring it to the
+		// front. Image assets live on the volatile `R:` ramdisk and are
+		// (re)pushed lazily as OpenDeck sends `set_image`; on a fresh
+		// connect there are none yet, so the grid renders empty until
+		// the host repaints — which it does right after registerDevice.
+		let page = layout::build_page(cols, rows);
+		log::info!("attach {device_id}: uploading page body '{}'", layout::PAGE_NAME);
+		pad.user_screen_save(layout::PAGE_NAME, &page).await.context("user_screen_save")?;
+		pad.show_user_screen(layout::PAGE_NAME).await.context("show_user_screen")?;
 
 		// Take the event receiver before we hand the pad off.
 		let mut rx = pad.events().await.ok_or_else(|| anyhow!("events() already taken"))?;
 		log::info!("attach {device_id}: spawning event-forwarding task");
-		let id_for_task = device_id.to_string();
+		let id_for_task = device_id.clone();
 		let event_task = tokio::spawn(async move {
 			while let Some(evt) = rx.recv().await {
 				if let Some(state) = &evt.state
@@ -215,15 +232,14 @@ impl TouchyPlugin {
 
 		let ctx = Arc::new(DeviceCtx {
 			pad,
-			device_id: device_id.to_string(),
-			screen_path,
+			device_id: device_id.clone(),
 			cols,
 			rows,
-			reload_handle: Mutex::new(None),
+			images: Mutex::new(HashMap::new()),
 			event_task: Mutex::new(Some(event_task)),
 		});
 
-		self.devices.write().await.insert(device_id.to_string(), ctx.clone());
+		self.handles.write().await.insert(key.to_string(), ctx.clone());
 
 		// Tell OpenDeck about the new device. NOTE: openaction's
 		// `register_device` silently no-ops (returns Ok) if the outbound
@@ -232,52 +248,36 @@ impl TouchyPlugin {
 		// always set, so a successful return here does mean the
 		// `registerDevice` event hit the socket.
 		log::info!("attach {device_id}: sending registerDevice (name='{}', {cols}×{rows}, type {DEVICE_TYPE})", ctx.name());
-		device_plugin::register_device(device_id.to_string(), ctx.name(), rows, cols, /* encoders */ 0, DEVICE_TYPE)
+		device_plugin::register_device(device_id.clone(), ctx.name(), rows, cols, /* encoders */ 0, DEVICE_TYPE)
 			.await
 			.map_err(|e| anyhow!("register_device: {e:?}"))?;
 		log::info!("attach {device_id}: registered OK as {cols}×{rows}");
 		Ok(())
 	}
 
-	async fn detach(&self, device_id: &str) {
-		log::info!("detach {device_id}: tearing down");
-		let ctx = self.devices.write().await.remove(device_id);
+	async fn detach(&self, key: &str) {
+		log::info!("detach {key}: tearing down");
+		let ctx = self.handles.write().await.remove(key);
 		if let Some(ctx) = ctx {
-			if let Some(h) = ctx.reload_handle.lock().await.take() {
-				log::info!("detach {device_id}: cancelling pending screen reload");
-				h.abort();
-			}
+			let device_id = ctx.device_id.clone();
 			if let Some(h) = ctx.event_task.lock().await.take() {
 				log::info!("detach {device_id}: cancelling event task");
 				h.abort();
 			}
 			ctx.pad.close().await;
-		}
-		log::info!("detach {device_id}: sending deregisterDevice");
-		if let Err(e) = device_plugin::unregister_device(device_id.to_string()).await {
-			log::warn!("unregister_device {device_id}: {e:?}");
-		}
-		log::info!("detach {device_id}: done");
-	}
-
-	async fn ctx_for(&self, device_id: &str) -> Option<Arc<DeviceCtx>> {
-		self.devices.read().await.get(device_id).cloned()
-	}
-
-	async fn schedule_reload(&self, ctx: &Arc<DeviceCtx>) {
-		let mut slot = ctx.reload_handle.lock().await;
-		if let Some(h) = slot.take() {
-			h.abort();
-		}
-		let pad = ctx.pad.clone();
-		let path = ctx.screen_path.clone();
-		let id = ctx.device_id.clone();
-		*slot = Some(tokio::spawn(async move {
-			tokio::time::sleep(Duration::from_millis(100)).await;
-			if let Err(e) = pad.screen_load(&path).await {
-				log::warn!("screen_load after image burst for {id}: {e:#}");
+			log::info!("detach {device_id}: sending deregisterDevice");
+			if let Err(e) = device_plugin::unregister_device(device_id.clone()).await {
+				log::warn!("unregister_device {device_id}: {e:?}");
 			}
-		}));
+			log::info!("detach {device_id}: done");
+		}
+	}
+
+	/// Look up an attached device by its OpenDeck-facing device id
+	/// (`tp-<serial>`), as carried on inbound `set_image` /
+	/// `set_brightness` events.
+	async fn ctx_for(&self, device_id: &str) -> Option<Arc<DeviceCtx>> {
+		self.handles.read().await.values().find(|c| c.device_id == device_id).cloned()
 	}
 
 	async fn handle_set_image(&self, ev: SetImageEvent) -> Result<()> {
@@ -295,26 +295,30 @@ impl TouchyPlugin {
 				}
 				let b64 = data_url.split_once(',').map(|(_, b)| b).unwrap_or(data_url);
 				let bytes = B64.decode(b64.trim()).context("base64 decode")?;
-				let asset = layout::asset_path_for(&ctx.device_id, key);
+				// Cache the raw bytes so we can re-push after a device
+				// reboot wipes the volatile `R:` ramdisk, then write the
+				// asset. The grid already references this path, so no
+				// screen reload is needed — LVGL repaints the cell once
+				// the file lands.
+				ctx.images.lock().await.insert(key, bytes.clone());
+				let asset = layout::asset_path_for(key);
 				ctx.pad.file_save(&asset, &bytes).await.context("file_save")?;
-				self.schedule_reload(&ctx).await;
 			}
 			(Some(pos), None) => {
-				// Clear single key — write a 1px transparent PNG so
-				// LVGL has something to render. Easiest portable
-				// approach: drop the asset and reload.
+				// Clear a single key — forget its cached bytes and drop
+				// the asset file.
 				let key = pos;
-				let asset = layout::asset_path_for(&ctx.device_id, key);
+				ctx.images.lock().await.remove(&key);
+				let asset = layout::asset_path_for(key);
 				let _ = ctx.pad.client().file_delete(&asset).await;
-				self.schedule_reload(&ctx).await;
 			}
 			(None, None) => {
-				// Clear all — drop every cell's asset and reload.
+				// Clear all — forget every cached image and drop assets.
+				ctx.images.lock().await.clear();
 				for k in 0..(ctx.cols * ctx.rows) {
-					let asset = layout::asset_path_for(&ctx.device_id, k);
+					let asset = layout::asset_path_for(k);
 					let _ = ctx.pad.client().file_delete(&asset).await;
 				}
-				self.schedule_reload(&ctx).await;
 			}
 			(None, Some(_)) => {
 				log::debug!("set_image with image but no position — ignored");

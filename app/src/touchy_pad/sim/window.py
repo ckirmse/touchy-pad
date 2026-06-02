@@ -76,6 +76,7 @@ class SimWindow(QtWidgets.QMainWindow):
     # signal hops back to the Qt main thread before re-rendering.
     _screen_changed = QtCore.Signal(object)
     _image_updated = QtCore.Signal(str)  # path of updated image file
+    _run_actions = QtCore.Signal(object)  # list[Action] from RunActionsCmd
 
     def __init__(
         self,
@@ -125,6 +126,8 @@ class SimWindow(QtWidgets.QMainWindow):
         device.set_screen_change_callback(lambda scr: self._screen_changed.emit(scr))
         self._image_updated.connect(self._reload_image, QtCore.Qt.QueuedConnection)
         device.set_image_update_callback(lambda path: self._image_updated.emit(path))
+        self._run_actions.connect(self._run_host_actions, QtCore.Qt.QueuedConnection)
+        device.set_run_actions_callback(lambda actions: self._run_actions.emit(actions))
 
         self._render_screen(device.active_screen)
 
@@ -268,6 +271,16 @@ class SimWindow(QtWidgets.QMainWindow):
         "release": _proto.LV_EVENT_RELEASED,
         "change": _proto.LV_EVENT_VALUE_CHANGED,
     }
+
+    def _run_host_actions(self, actions: list) -> None:
+        """Run a host-supplied list of Actions (Stage 71 ``RunActionsCmd``).
+
+        Fired on the GUI thread via the ``_run_actions`` signal. Each
+        action is dispatched as if a local widget had clicked, so a
+        ``change_widget_ref`` pages the display just like the firmware.
+        """
+        for action in actions:
+            self._dispatch_action(action, widget_id="", kind="click", state={})
 
     def _dispatch_action(
         self, action: _proto.Action, widget_id: str, kind: str, state: dict

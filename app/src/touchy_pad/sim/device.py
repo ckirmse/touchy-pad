@@ -49,6 +49,11 @@ _CURRENT_PROTOCOL = _proto.SysBoardInfoResponse.ProtocolVersion.CURRENT
 _SIM_FW_VERSION = 0
 _SIM_FW_VERSION_STR = "sim"
 
+#: Stable serial reported by the sim (Stage 71). Real hardware derives
+#: this from its MAC as ``"t" + 12 hex``; the sim uses a fixed sentinel
+#: so the host's enumeration id (``tp-<serial>``) is deterministic.
+_SIM_SERIAL = "tsim001"
+
 #: Path to the JSON-encoded default screen the firmware embeds.
 _DEFAULT_SCREEN_JSON = Path(__file__).resolve().parents[4] / "proto" / "default_screen.json"
 
@@ -105,6 +110,7 @@ class SimDevice:
         self._logs: Queue[_proto.LogRecord] = Queue()
         self._on_screen_change = on_screen_change
         self._on_image_update: Callable[[str], None] | None = None
+        self._on_run_actions: Callable[[list[_proto.Action]], None] | None = None
         # Reported back via SysBoardInfoResponse.display_{width,height}.
         # Host adapters (e.g. TouchyDeck) size their UI from this.
         self._display_size = (int(display_size[0]), int(display_size[1]))
@@ -200,6 +206,19 @@ class SimDevice:
         """
         self._on_image_update = cb
 
+    def set_run_actions_callback(self, cb: Callable[[list[_proto.Action]], None] | None) -> None:
+        """Register a callback for ``RunActionsCmd`` (Stage 71).
+
+        The host can ask the device to run a list of Actions as if a
+        local widget had fired them — used to force a page to the front
+        via ``ActionChangeWidgetRef``. The Qt window registers its own
+        action dispatcher here so the displayed page updates; when no
+        callback is set the device handles ``ActionHost`` itself (so
+        headless integrators still observe host events) and ignores the
+        rest.
+        """
+        self._on_run_actions = cb
+
     def push_host_event(
         self,
         host_code: int,
@@ -262,6 +281,7 @@ class SimDevice:
                 display_height=self._display_size[1],
                 is_multitouch=self._is_multitouch,
                 has_usb=self._has_usb,
+                serial=_SIM_SERIAL,
             ),
         )
 
@@ -273,6 +293,29 @@ class SimDevice:
         return _result()
 
     def _cmd_screen_sleep_timeout(self, _msg: _proto.ScreenSleepTimeoutCmd) -> _proto.Response:
+        return _result()
+
+    def _cmd_run_actions(self, msg: _proto.RunActionsCmd) -> _proto.Response:
+        # Stage 71 — run host-supplied Actions as if a local widget fired
+        # them. Delegated to the GUI's action dispatcher when present so
+        # the displayed page updates (e.g. paging via change_widget_ref);
+        # otherwise handle ActionHost inline so headless callers still see
+        # the resulting host events.
+        actions = list(msg.actions)
+        if self._on_run_actions is not None:
+            try:
+                self._on_run_actions(actions)
+            except Exception:  # noqa: BLE001 — keep sim alive on bad data
+                _log.exception("sim: on_run_actions callback raised")
+        else:
+            for action in actions:
+                if action.WhichOneof("kind") == "host":
+                    self.push_host_event(int(action.host.code))
+                else:
+                    _log.info(
+                        "sim: run_actions ignoring %s (no GUI dispatcher)",
+                        action.WhichOneof("kind"),
+                    )
         return _result()
 
     def _cmd_file_delete(self, msg: _proto.FileDeleteCmd) -> _proto.Response:

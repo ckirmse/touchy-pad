@@ -39,6 +39,7 @@
 #![warn(missing_docs)]
 
 pub mod client;
+pub mod discover;
 pub mod error;
 pub mod images;
 pub mod pad;
@@ -49,6 +50,7 @@ pub mod transport_net;
 pub mod transport_serial;
 pub mod transport_usb;
 
+pub use discover::{DiscoveredDevice, discover};
 pub use error::{Result, TouchyError};
 pub use pad::Touchy;
 

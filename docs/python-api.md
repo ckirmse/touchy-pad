@@ -179,9 +179,32 @@ Callbacks run on the poller thread, so:
   invoked in registration order.
 
 
-## Lifecycle
+## Running actions device-side
 
-Always prefer the context-manager form:
+`pad.run_actions(actions)` (on the low-level `TouchyClient`) asks the
+device to execute a list of protobuf `Action`s exactly as if a local
+widget had triggered them. The most common use is retargeting the
+`widget_ref(id="page")` of the default chrome to a uploaded user-screen
+body so it jumps to the front:
+
+```python
+from touchy_pad.api import protobuf
+
+act = protobuf.Action()
+act.device.change_widget_ref.behavior = (
+    protobuf.ActionChangeWidgetRef.Behavior.BY_PATH
+)
+act.device.change_widget_ref.path = "F:host/uscr/opendeck.pb"
+act.device.change_widget_ref.target_id = "page"
+
+with touchy_open() as pad:
+    pad.user_screen_save("opendeck", widget)  # body → F:host/uscr/opendeck.pb
+    pad.run_actions([act])                     # bring it to the front
+```
+
+This works against both real hardware and the simulator (headless too).
+
+## Lifecycle
 
 ```python
 with touchy_open() as pad:

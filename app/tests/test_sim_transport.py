@@ -37,6 +37,38 @@ def test_board_info_capabilities_default_full() -> None:
     assert v.has_usb is True
 
 
+def test_board_info_reports_sim_serial() -> None:
+    """Stage 71 — the sim reports a stable sentinel serial."""
+    with make_tempdir_transport() as t:
+        c = TouchyClient(t)
+        v = c.sys_board_info_get()
+    assert v.serial == "tsim001"
+
+
+def test_run_actions_runs_host_action_headless(tmp_path: pathlib.Path) -> None:
+    """Stage 71 — RunActionsCmd with no GUI dispatcher runs ActionHost inline."""
+    from touchy_pad.sim.device import SimDevice
+    from touchy_pad.sim.fs import SimFs
+
+    dev = SimDevice(SimFs(tmp_path, "sim"))
+    act = _proto.Action(host=_proto.ActionHost(code=0xB001))
+    cmd = _proto.Command(run_actions=_proto.RunActionsCmd(actions=[act]))
+    reply = _proto.Response()
+    reply.ParseFromString(dev.handle_command(cmd.SerializeToString()))
+    assert reply.code == _proto.RESULT_OK
+    # The host action should have queued an LvEvent the host can drain.
+    evt_cmd = _proto.Command(event_consume=_proto.EventConsumeCmd())
+    evt_reply = _proto.Response()
+    evt_reply.ParseFromString(dev.handle_command(evt_cmd.SerializeToString()))
+    assert evt_reply.event_consume.event.host_code == 0xB001
+
+    with make_tempdir_transport() as t:
+        c = TouchyClient(t)
+        v = c.sys_board_info_get()
+    assert v.is_multitouch is True
+    assert v.has_usb is True
+
+
 def test_board_info_capabilities_configurable(tmp_path: pathlib.Path) -> None:
     """Stage 65 — caps are configurable so the sim can emulate the CYD."""
     from touchy_pad.sim.device import SimDevice

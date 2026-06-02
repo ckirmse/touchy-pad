@@ -12,10 +12,11 @@ use prost::Message;
 use tokio::sync::Mutex;
 
 use crate::error::{Result, TouchyError};
+use crate::proto::Action;
 use crate::proto::{Command, LogPriority, LogRecord, LvEvent, ResultCode, command, response};
 use crate::proto::{
-	EventConsumeCmd, FileCloseCmd, FileDeleteCmd, FileOpenWriteCmd, FileWriteCmd, Response, ScreenLoadCmd, ScreenSleepTimeoutCmd, ScreenWakeCmd, SysBoardInfoGetCmd, SysBoardInfoResponse,
-	SysRebootBootloaderCmd,
+	EventConsumeCmd, FileCloseCmd, FileDeleteCmd, FileOpenWriteCmd, FileWriteCmd, Response, RunActionsCmd, ScreenLoadCmd, ScreenSleepTimeoutCmd, ScreenWakeCmd, SysBoardInfoGetCmd,
+	SysBoardInfoResponse, SysRebootBootloaderCmd,
 };
 use crate::transport::Transport;
 
@@ -174,6 +175,20 @@ impl Client {
 		Self::check(
 			self.rpc(Command {
 				cmd: Some(command::Cmd::ScreenLoad(ScreenLoadCmd { path: path.into() })),
+			})
+			.await?,
+		)?;
+		Ok(())
+	}
+
+	/// Run a list of [`Action`]s device-side as if a local widget fired
+	/// them (Stage 71). Used to drive device-local behaviour from the
+	/// host — e.g. forcing a page to the front via an
+	/// `ActionChangeWidgetRef` without a user touch.
+	pub async fn run_actions(&self, actions: Vec<Action>) -> Result<()> {
+		Self::check(
+			self.rpc(Command {
+				cmd: Some(command::Cmd::RunActions(RunActionsCmd { actions })),
 			})
 			.await?,
 		)?;

@@ -8,9 +8,8 @@ LCD touchpad, MIDI controller, anything) to OpenDeck as if it were a
 StreamDeck.
 
 This guide collects what you need to know in one place. It is written
-from the perspective of an external maintainer (the
-[`touchy-opendeck`](../rust/touchy-opendeck) plugin in this repo), and
-is intended to be portable enough to eventually contribute upstream.
+from the perspective of a noob open deck [plugin]((https://github.com/geeksville/touchy-pad/tree/main/rust/touchy-opendeck) developer.  Hopefully it might be useful for people other than just me.  Disclaimer: I asked my AI assistant buddy to maintain/extend this document as 'we' learned things from reverse engineering the example 
+plugin that [@nekename](https://github.com/nekename) pointed me at (because no official docs yet on how to write a device plugin).  
 
 It assumes basic familiarity with the OpenDeck app and with whatever
 toolchain you use to talk to your hardware. Examples are in Rust because
@@ -264,7 +263,7 @@ closest. If your device has no encoders and a single touch grid, `0`
   layouts by ID).
 * Must start with your `DeviceNamespace` (e.g. `"mh"` → `"mh-…"`).
 * Best practice: include serial number, USB bus+address, or a Bluetooth
-  MAC — anything that uniquely identifies one physical unit.
+  MAC — anything that uniquely identifies one physical unit. 
 
 ---
 
@@ -492,3 +491,5 @@ Before submitting a plugin:
 - [ ] Cross-compiled binaries for the targets in `CodePaths`.
 
 Happy hacking.
+
+---

@@ -22,6 +22,7 @@ idf_component_register(
         "main.cpp"
         "${touchy_usb_src}"
         "host_api.cpp"
+        "platform.cpp"
         "fs/fs.cpp"
         "fs/flash_fs.cpp"
         "fs/ram_fs.cpp"
@@ -59,5 +60,6 @@ idf_component_register(
         esp_timer
         esp_app_format
         esp_driver_uart
+        esp_hw_support
         joltwallet__littlefs
 )

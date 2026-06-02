@@ -31,6 +31,14 @@ struct Platform {
 // returned pointer is to static storage and never NULL.
 const struct Platform *platform_get(void);
 
+// Stage 71 — stable device serial derived from the factory MAC
+// (`esp_read_mac`), formatted "txxxxxxxxxxxx" (leading 't' + 12 lowercase
+// hex digits, no separators). Computed once on first call and cached; the
+// returned pointer is to static storage and never NULL. Reported over the
+// host API (`SysBoardInfoResponse.serial`) and as the USB string-descriptor
+// iSerialNumber so the OS and the vendor transport agree.
+const char *platform_serial(void);
+
 #ifdef __cplusplus
 }
 #endif

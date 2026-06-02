@@ -47,3 +47,21 @@ void widget_attach_actions(lv_obj_t *obj,
                            pb_size_t actions_count,
                            lv_event_code_t code,
                            widget_value_fn set_value);
+
+// Stage 71 — run a single Action exactly as if a widget had triggered it.
+// Shared by the LVGL widget event callback and the host-driven
+// RunActionsCmd path. `obj` may be NULL and `widget_id` may be "" for
+// host-sourced actions (the host `set_value` is then `widget_value_none`,
+// which ignores `obj`). Must be called with the LVGL lock held.
+void widget_run_action(const touchy_Action &act,
+                       lv_obj_t *obj,
+                       const char *widget_id,
+                       lv_event_code_t code,
+                       widget_value_fn set_value);
+
+// Stage 71 — run a host-supplied list of Actions (RunActionsCmd), as if a
+// local widget had fired them. Takes the LVGL lock internally, so call it
+// from any task (e.g. the host_api dispatcher). Each action runs with
+// `obj = NULL`, `widget_id = ""`, `code = LV_EVENT_CLICKED` and
+// `widget_value_none`.
+void widget_run_actions(const touchy_Action *actions, pb_size_t actions_count);

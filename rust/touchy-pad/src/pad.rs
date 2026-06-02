@@ -146,6 +146,31 @@ impl Touchy {
 		Ok(())
 	}
 
+	/// Page the default chrome's `widget_ref(id="page")` to a
+	/// previously-saved user screen body (Stage 71).
+	///
+	/// `name` is the bare stem passed to [`user_screen_save`][Self::user_screen_save]
+	/// (e.g. `"opendeck"`). Issues a [`RunActionsCmd`][crate::proto::RunActionsCmd]
+	/// carrying an `ActionChangeWidgetRef` that swaps the chrome's
+	/// `page` ref to `F:host/uscr/<name>.pb` — so the page shows
+	/// without a user touch. The target id (`"page"`) matches the id
+	/// the default chrome assigns its body `widget_ref`.
+	pub async fn show_user_screen(&self, name: &str) -> Result<()> {
+		use crate::USER_SCREENS_DIR;
+		use crate::proto::{Action, ActionChangeWidgetRef, ActionDevice, action, action_change_widget_ref, action_device};
+		let path = format!("{USER_SCREENS_DIR}{name}.pb");
+		let act = Action {
+			kind: Some(action::Kind::Device(ActionDevice {
+				kind: Some(action_device::Kind::ChangeWidgetRef(ActionChangeWidgetRef {
+					behavior: action_change_widget_ref::Behavior::ByPath as i32,
+					target_id: "page".into(),
+					path,
+				})),
+			})),
+		};
+		self.client.run_actions(vec![act]).await
+	}
+
 	/// Activate a previously-uploaded screen.
 	pub async fn screen_load(&self, path: &str) -> Result<()> {
 		self.client.screen_load(path).await

@@ -2983,6 +2983,304 @@ Add/extend sections covering what the reference example taught us:
   (`device_plugin::*` free fns) outbound APIs, and the "register only after
   `plugin_ready`" gotcha.
 
+## Stage 71: touchy-opendeck → uscr, unified enumeration, device serials, RunActions
+
+The `touchy-opendeck` plugin works but needs four refinements. Original
+request:
+
+> The touchydeck tool works pretty well but two refinements:
+>
+> **Change to uscr** — It is still using the old mechanism of writing a
+> 'screen' file to host/s. Instead I want it to write its array of buttons
+> to `host/uscr/opendeck.pb` (this new feature added in stage 68). One
+> wrinkle is that currently there is no way for the host PC to know the
+> vertical height that it has to work with when planning a widget layout —
+> it only knows the display height. So for now (since touchy-opendeck NEEDS
+> to know how much vertical space it has — so it can calculate # of rows of
+> 'opendeck' buttons) — assume vertical space for its screen area of
+> `display_height (from board-info) - TOP_ROW_HEIGHT`. Where TOP_ROW_HEIGHT
+> is a symbolic constant that you set at 32 pixels for now...
+>
+> **Enumeration doesn't see sim devices** — The existing enumeration in this
+> component only looks based on USB vid/pid, instead have it also check for
+> the TOUCHY_SIM_URL env var and if that is set create an appropriate api
+> client to reach that sim device. Preferably move this enumeration into our
+> rust api library so that sim devices show up in the list of devices just
+> like USB or serial devices...
+
+Follow-up tweaks (this stage):
+
+* **RAM-disk images are volatile.** Image assets live on the `R:` ramdisk
+  (good — saves flash wear), so they vanish on a device reboot. The plugin
+  must therefore **rewrite every key image (and, for good measure, the
+  `uscr/opendeck.pb` body) every time it (re)connects** to a device or sim,
+  not just on the first attach.
+* **Every device has a serial; use it as the stable id.** Replace the
+  bus/addr-derived id with a real serial number reported by the device.
+* **Force the page to the front via a new `RunActionsCmd`** instead of the
+  old `screen_load` trick.
+
+### Part 1 — Write the button layout to `host/uscr/opendeck.pb`
+
+Today [`layout::build_screen`](../rust/touchy-opendeck/src/layout.rs) returns
+a full `Screen` (a `LayoutGrid` wrapped in `Screen.active`), uploaded to
+`R:host/s/opendeck_{device_id}.pb` and activated with `screen_save` +
+`screen_load` in [`plugin::attach`](../rust/touchy-opendeck/src/plugin.rs).
+
+Changes:
+
+* `layout.rs`: add `build_page(cols, rows) -> Widget` returning just the
+  `LayoutGrid` widget (the current `active` widget, `version =
+  Version::Current`). The page is now **shared** (one `opendeck.pb`), not
+  per-device, so:
+  * Drop `device_id` from the asset path:
+    `asset_path_for(key) -> "R:host/opendeck/key_{key}.bin"`.
+  * Replace `screen_path_for(device_id)` with `pub const PAGE_NAME:
+    &str = "opendeck";` (on-device path `F:host/uscr/opendeck.pb`).
+* `plugin.rs attach`: upload with `pad.user_screen_save(layout::PAGE_NAME,
+  &page)` (already exists in [`pad.rs`](../rust/touchy-pad/src/pad.rs))
+  instead of `screen_save`/`screen_load`. Remove `DeviceCtx.screen_path`.
+
+### Part 2 — Available vertical space (`TOP_ROW_HEIGHT`)
+
+The host only knows the *display* height, but the default chrome eats the
+top row. Add `const TOP_ROW_HEIGHT: u32 = 32;` in `plugin.rs` and compute:
+
+```rust
+let usable_h = board.display_height.saturating_sub(TOP_ROW_HEIGHT);
+let cols = display_width / KEY_PX;          // unchanged
+let rows = usable_h     / KEY_PX;           // was display_height / KEY_PX
+```
+
+Keep the existing zero-dimension / smaller-than-one-key guards.
+
+### Part 3 — Always rewrite images + page on (re)connect
+
+Because the `R:` ramdisk is wiped on reboot, `attach` must re-push **all**
+state every time it connects, and must not assume OpenDeck will resend
+images:
+
+* After `user_screen_save`, the plugin re-pushes whatever key images it
+  has cached. OpenDeck owns the image bytes (it sends them via
+  `set_image`), so the plugin keeps a per-key `HashMap<u8, Vec<u8>>` of the
+  last bytes it received and, on attach, writes every cached entry back to
+  `R:host/opendeck/key_{k}.bin`. (Before OpenDeck has sent any image the
+  cache is empty and cells render blank — acceptable; OpenDeck repaints on
+  profile select.)
+* The `uscr/opendeck.pb` body is likewise (re)written on every attach.
+* The device/sim **already** auto-redraws a widget when its backing file on
+  the device FS changes, so simply re-saving the `.bin` files is enough to
+  refresh the screen — no explicit reload call needed. `schedule_reload`
+  and its debounce can be deleted along with `screen_load`.
+
+### Part 4 — Device serial numbers + stable ids
+
+All Touchy devices (real or sim) must report a serial, used directly as the
+enumeration stable id.
+
+* **Proto:** add `string serial = 9;` to `SysBoardInfoResponse` in
+  [`proto/touchy.proto`](../proto/touchy.proto) (next free field after
+  `has_usb = 8`). Regenerate Python + nanopb + Rust bindings
+  (`just build-proto`). This is an additive scalar field — bump
+  `ProtocolVersion.CURRENT` to `7` and add a `V7` doc line.
+* **Firmware:** populate `serial` from `esp_read_mac()` formatted as
+  `"t%02x%02x%02x%02x%02x%02x"` (leading `t` + 12 hex digits, no
+  separators). Wire the **same** string into the USB descriptor
+  `iSerialNumber`
+  (`firmware/main/usb_hid.cpp`, the string-descriptor table) so the OS and
+  the vendor transport agree. Compute it once at boot into a shared helper
+  (e.g. `platform_serial()` in `firmware/main/platform.{h,cpp}`) consumed by
+  both `host_api.cpp` (board-info response) and `usb_hid.cpp` (descriptor).
+* **Simulator:** the sim's `sys_board_info_get` returns the constant
+  `"tsim001"` for now (Python sim device + any Rust/host sim shim).
+* **Stable id:** `enumerate`/`discover` use the reported `serial` as the id.
+  touchy-opendeck still prepends its two-char OpenDeck `NAMESPACE`
+  (`"tp"`), so registered ids become `tp-{serial}` (e.g.
+  `tp-tsim001`). Fetching the serial requires opening the transport and
+  calling `sys_board_info_get`, which the watcher already does in `attach`;
+  the hot-plug diff key therefore becomes the serial rather than bus/addr.
+
+### Part 5 — Unified enumeration in the rust api library (incl. sim)
+
+Today [`transport_usb::enumerate(vid, pid)`](../rust/touchy-pad/src/transport_usb.rs)
+returns only `Vec<nusb::DeviceInfo>`; the sim (`TOUCHY_SIM_URL`) is honoured
+only by single-client `open`, never listed. Python already does combined
+discovery in
+[`touchydeck/discovery.py`](../app/src/touchy_pad/touchydeck/discovery.py).
+
+New module `rust/touchy-pad/src/discover.rs` (re-exported from `lib.rs`):
+
+```rust
+pub enum DiscoveredDevice {
+    Usb(nusb::DeviceInfo),
+    Sim { host: String, port: u16 },
+    // (Serial transport: future arm.)
+}
+
+impl DiscoveredDevice {
+    pub fn describe(&self) -> String;                 // for logging
+    pub async fn open(&self) -> Result<Arc<dyn Transport>>; // USB or TCP
+}
+
+/// Enumerate every locally reachable Touchy device: USB (proto vid/pid,
+/// guarded against missing backend) plus a single sim entry when
+/// `TOUCHY_SIM_URL` is set.
+pub async fn discover() -> Result<Vec<DiscoveredDevice>>;
+```
+
+* `Usb::open` → `UsbTransport::open_info`; `Sim::open` →
+  `TcpTransport::connect` (host/port from
+  [`transport_net::sim_url_from_env`](../rust/touchy-pad/src/transport_net.rs)).
+* The **serial** (Part 4) is the canonical stable id, so `discover()`
+  intentionally does **not** invent ids from bus/addr; callers read the
+  serial after opening. (`DiscoveredDevice` only needs enough to *open* the
+  transport.)
+
+touchy-opendeck rewire:
+
+* `run_hotplug_loop` calls `touchy_pad::discover()` instead of
+  `enumerate(vid, pid)`; the diff map is keyed by serial (obtained in
+  `attach`). To keep the 1 Hz poll cheap it diffs on a lightweight key
+  derived from `DiscoveredDevice` (USB bus/addr, sim host/port) to decide
+  *whether to attach*, then resolves the true serial id during `attach`.
+* `attach(dev: &DiscoveredDevice)` opens via `dev.open()` (USB and sim share
+  one path), calls `sys_board_info_get`, derives `device_id =
+  format!("{NAMESPACE}-{}", board.serial)`, then proceeds as today.
+
+### Part 6 — `RunActionsCmd` (run actions as if locally sourced)
+
+Add a new `Command` variant so the host can ask the device/sim to execute a
+list of `Action`s exactly as if a local widget had fired them. This unlocks
+(a) future test automation and (b) — the immediate need — letting the API
+library force the `host/uscr/opendeck` body to the front by running an
+`ActionChangeWidgetRef(BY_PATH, "F:host/uscr/opendeck.pb", target_id="page")`.
+
+* **Proto** ([`proto/touchy.proto`](../proto/touchy.proto)):
+
+  ```proto
+  // Run a list of Actions device-side, exactly as if a local widget
+  // had just triggered them. Enables host-driven automation and lets
+  // the host retarget the active WidgetRef (e.g. show a uscr page).
+  message RunActionsCmd {
+      repeated Action actions = 1;
+  }
+  ```
+
+  Add `RunActionsCmd run_actions = 11;` to `Command.oneof cmd`. `Action`
+  already lives in `widgets.proto`; ensure `touchy.proto` imports it (it
+  already pulls widget types in for `Screen`). Mark `actions` `FT_POINTER`
+  in `touchy.options` (repeated message → heap, per the Stage 17 rule).
+  Response is a plain `Response` with `RESULT_OK` / error.
+
+* **Firmware:** `host_api.cpp` dispatches `run_actions` by iterating the
+  decoded `actions` and feeding each into the **existing** action runner
+  used when a widget fires (the same path `screens.cpp` / `macros.cpp`
+  already call for `ActionHost` / `ActionMacro` / `ActionDevice`). Factor
+  out a `run_action(const touchy_Action&)` entry point if one isn't already
+  cleanly callable. `ActionDevice::ActionChangeWidgetRef` already mutates
+  the live screen's ref, so this immediately works for paging.
+
+* **Simulator:** mirror the same dispatch in the Python/Rust sim action
+  runner so `RunActionsCmd` works headless.
+
+* **Host API:** add `client.run_actions(actions)` (Rust `client.rs`,
+  Python `client.py`) plus a convenience on the high-level pad, e.g.
+  `pad.show_user_screen("opendeck")` →
+  `run_actions([ActionDevice(ActionChangeWidgetRef(BY_PATH,
+  "F:host/uscr/opendeck.pb", target_id="page"))])`. touchy-opendeck calls
+  this after `user_screen_save` so the grid jumps to the front on attach.
+
+* **Docs (be careful here):** document `RunActionsCmd` in
+  [docs/host-api.md](host-api.md) (new command, payload shape, that actions
+  run identically to locally-sourced ones, and the `ActionChangeWidgetRef`
+  paging use case) and in [docs/python-api.md](python-api.md) /
+  [docs/rust-api.md](rust-api.md) for the new client method. Bump the
+  protocol-version note.
+
+### Tests / build / docs
+
+* Rust: `discover.rs` unit tests (sim-from-env set/unset, describe);
+  `layout.rs` tests updated to `build_page` (assert `LayoutGrid` widget +
+  rows reflect the `-32 px` reduction); `cargo test` / `just rust-build`
+  green.
+* Python: sim returns `"tsim001"` serial; `run_actions` round-trip test;
+  `just app-test` green.
+* Firmware: builds for current board with the new serial + `RunActionsCmd`
+  paths.
+* Docs: update [opendeck-device-plugin.md](opendeck-device-plugin.md) (uscr
+  page model, serial-based ids, unified enumeration incl. sim, always-rewrite
+  on reconnect), [host-api.md](host-api.md), [python-api.md](python-api.md),
+  [rust-api.md](rust-api.md), and append a "what was implemented" block here.
+
+### Acceptance
+
+1. With a Touchy-Pad (or sim via `TOUCHY_SIM_URL`) connected, OpenDeck shows
+   the device; its id is `tp-<serial>` and the serial matches both
+   `SysBoardInfoResponse.serial` and the USB `iSerialNumber`.
+2. The button grid lands in `F:host/uscr/opendeck.pb` and is brought to the
+   front via `RunActionsCmd` (no `screen_load`).
+3. Rebooting the device and letting the plugin reconnect re-pushes the page
+   and every cached key image with no user action.
+4. Sim devices appear in `discover()` exactly like USB devices.
+5. `RunActionsCmd` documented in host-api / python-api / rust-api and works
+   for both a real device and the sim.
+
+### Out of scope
+
+* Serial-port transport arm of `DiscoveredDevice` (future).
+* Per-device (vs. shared) uscr pages — one `opendeck.pb` for now.
+* Encoder/dial support.
+
+### What was implemented
+
+Done as planned, with these concrete landing points:
+
+* **Proto.** `RunActionsCmd { repeated Action actions = 1; }` (oneof
+  field `run_actions = 11`) and `string serial = 9` on
+  `SysBoardInfoResponse`; `ProtocolVersion` gained `V7` /
+  `CURRENT = 7`. `touchy.proto` now `import "widgets.proto";` (it needs
+  `Action`). `touchy.options` marks `RunActionsCmd.actions` `FT_POINTER`
+  and caps `serial` at `max_size:24`. Because the new import generates a
+  cross-file reference, `build-proto-py` gained a `sed` step rewriting the
+  flat `import widgets_pb2` to a relative `from . import widgets_pb2`, and
+  `proto/embed_screen_json.py` now imports the bindings via the package.
+  `RunActionsCmd` is re-exported from `app/.../_proto/__init__.py`.
+* **Firmware.** New `firmware/main/platform.cpp` `platform_serial()` derives
+  the serial from `esp_read_mac(…, ESP_MAC_BASE)` as `"t"+12 hex` (cached
+  static); `usb_hid.cpp` feeds it into the `iSerialNumber` string
+  descriptor and `host_api.cpp`'s `fill_board_info()` copies it into
+  `serial`. `widget_actions.{h,cpp}` were refactored to expose
+  `widget_run_action()` (the single-action switch, formerly inline in
+  `widget_event_cb`) and `widget_run_actions(actions, count)` which takes
+  the LVGL port lock and runs each as a synthetic `LV_EVENT_CLICKED`;
+  `host_api.cpp` dispatches `run_actions` through it. `CMakeLists.txt` adds
+  `platform.cpp` + `esp_hw_support`.
+* **Simulator.** `SimDevice` reports `serial = "tsim001"` and handles
+  `RunActionsCmd` via a new `set_run_actions_callback`; the Qt window
+  registers a dispatcher so paging actions repaint, and headless callers
+  fall back to running `ActionHost`s inline (so host events still flow).
+* **Host APIs.** `client.run_actions(actions)` (Python + Rust). Rust
+  `Touchy::show_user_screen(name)` issues a `RunActionsCmd` carrying
+  `ActionChangeWidgetRef(BY_PATH, "F:host/uscr/<name>.pb",
+  target_id="page")`.
+* **Unified discovery.** `rust/touchy-pad/src/discover.rs` adds
+  `DiscoveredDevice { Usb, Sim }` with `describe()` / `open()` and
+  `discover()` (USB + `TOUCHY_SIM_URL` sim), re-exported from `lib.rs`.
+* **touchy-opendeck.** `layout::build_page(cols, rows) -> Widget`,
+  `PAGE_NAME = "opendeck"`, shared `asset_path_for(key) ->
+  R:host/opendeck/key_{key}.bin`, `device_id_for(serial) -> tp-<serial>`.
+  `plugin.rs` now polls `discover()` (diffed on the transport-level
+  `describe()` key), derives the OpenDeck id from the serial, uploads the
+  page via `user_screen_save` + `show_user_screen`, caches received key
+  bytes in a `HashMap<u8, Vec<u8>>` (re-pushed on reconnect since `R:` is
+  volatile), and computes `rows` from `display_height - TOP_ROW_HEIGHT`
+  (32 px). `schedule_reload` / `screen_load` were removed.
+
+Firmware was **not** compiled in the implementing environment (no ESP-IDF
+in PATH); all field names were cross-checked against the regenerated
+`firmware/main/proto/touchy.pb.h`. Rust (`cargo build`/`test`/`clippy`),
+Python (`just app-test`, 160 passing), and lint are all green.
+
 # Old/Existing projects
 
 In the very early days of this project I looked into these ideas/implementations:

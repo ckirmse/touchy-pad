@@ -83,6 +83,29 @@ def test_screen_sleep_timeout_arg_passed(make_client):
     assert seen == {"timeout": 5000}
 
 
+def test_run_actions_passes_actions(make_client):
+    seen = {}
+
+    def server(cmd, _t):
+        assert cmd.WhichOneof("cmd") == "run_actions"
+        seen["actions"] = list(cmd.run_actions.actions)
+        return _proto.Response(code=_proto.RESULT_OK)
+
+    act = _proto.Action(
+        device=_proto.ActionDevice(
+            change_widget_ref=_proto.ActionChangeWidgetRef(
+                behavior=_proto.ActionChangeWidgetRef.BY_PATH,
+                target_id="page",
+                path="F:host/uscr/opendeck.pb",
+            )
+        )
+    )
+    with make_client(server) as c:
+        c.run_actions([act])
+    assert len(seen["actions"]) == 1
+    assert seen["actions"][0].device.change_widget_ref.target_id == "page"
+
+
 def test_xml_save_round_trip(make_client):
     """``file_save`` should drive the streaming write protocol end-to-end."""
     state = {"buf": bytearray(), "path": None, "handle": 0, "closed": False}

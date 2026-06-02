@@ -32,6 +32,10 @@ syntax = "proto3";
 
 package touchy;
 
+// Stage 71 — `Command.run_actions` (RunActionsCmd) carries a list of
+// `Action`s defined in widgets.proto, so pull those widget/action types in.
+import "widgets.proto";
+
 // ---------------------------------------------------------------------------
 // Common types
 // ---------------------------------------------------------------------------
@@ -174,7 +178,25 @@ message Command {
         FileCloseCmd           file_close            = 8;
         SysRebootBootloaderCmd sys_reboot_bootloader = 9;
         SysBoardInfoGetCmd     sys_board_info_get    = 10;
+        RunActionsCmd          run_actions           = 11;
     }
+}
+
+// Run a list of Actions device-side, exactly as if a local widget had just
+// triggered them. The device feeds each Action into the same dispatch path
+// used when a widget's event fires, so ActionMacro / ActionHost /
+// ActionDevice all behave identically to a locally-sourced action.
+//
+// Two motivating uses:
+//   * test automation — drive any device-side behaviour from the host;
+//   * paging — an ActionDevice{change_widget_ref(BY_PATH, path, target_id)}
+//     lets the host retarget the active screen's WidgetRef (e.g. bring a
+//     `host/uscr/<page>.pb` body to the front) without a screen reload.
+//
+// Reply is a bare Response carrying RESULT_OK (or an error code); there is
+// no dedicated response payload.
+message RunActionsCmd {
+    repeated Action actions = 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +221,9 @@ message SysBoardInfoResponse {
                  //           transport, replacing the bare uint32 length prefix
         V6 = 6;  // stage 65: SysBoardInfoResponse gains is_multitouch +
                  //           has_usb capability flags (additive scalar fields)
-        CURRENT = 6;  // alias: always equals the latest defined version
+        V7 = 7;  // stage 71: SysBoardInfoResponse gains `serial`; Command
+                 //           gains RunActionsCmd (both additive)
+        CURRENT = 7;  // alias: always equals the latest defined version
     }
     ProtocolVersion protocol_version = 1;
     uint32 firmware_version = 2;    // monotonically-increasing build number
@@ -221,6 +245,13 @@ message SysBoardInfoResponse {
     // transport). False on classic-ESP32 boards reached only via a UART
     // bridge, where the protocol rides a serial port and HID is unavailable.
     bool has_usb = 8;
+    // Stage 71 — stable device serial. On real hardware this is derived
+    // from the factory MAC, formatted "txxxxxxxxxxxx" (leading 't' + 12
+    // lowercase hex digits, no separators), and is also reported as the
+    // USB string descriptor iSerialNumber so the OS and
+    // the vendor transport agree. The simulator reports a fixed "tsim001".
+    // Host-side enumeration uses this as the device's stable identity.
+    string serial = 9;
 }
 
 // Reply to FileOpenWriteCmd. Carries the handle the host must echo

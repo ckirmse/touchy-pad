@@ -2,6 +2,7 @@
 
 #include "usb_hid.h"
 #include "host_api.h"
+#include "platform.h"        // platform_serial()
 #include "proto/touchy.pb.h"  // touchy_Constants_USB_VID / USB_PID
 
 #include "esp_log.h"
@@ -57,11 +58,13 @@ extern "C" void tud_hid_set_report_cb(uint8_t /*instance*/, uint8_t /*report_id*
 }
 
 // ----- String / device descriptors -----
+// Index 3 (Serial) is filled in at init from platform_serial() so the USB
+// iSerialNumber matches SysBoardInfoResponse.serial (Stage 71).
 static const char *s_string_desc[7] = {
     (const char[]){0x09, 0x04},   // 0: supported language (English)
     "Geeksville",                  // 1: Manufacturer
     "Touchy-Pad",                  // 2: Product
-    "000001",                      // 3: Serial
+    "000001",                      // 3: Serial (replaced in usb_hid_init)
     "Touchy-Pad CDC",              // 4: CDC interface
     "Touchy-Pad HID",              // 5: HID interface
     "Touchy-Pad HostAPI",          // 6: Vendor interface (host_api)
@@ -156,9 +159,14 @@ static const uint8_t s_config_desc[] = {
 
 extern "C" void usb_hid_init(void)
 {
-    ESP_LOGI(TAG, "Starting TinyUSB (%sHID + vendor, VID:PID = 0x%04x:0x%04x)",
+    // Stage 71: report the MAC-derived serial as USB iSerialNumber so it
+    // matches SysBoardInfoResponse.serial. platform_serial() returns a
+    // pointer to cached static storage, valid for the program lifetime.
+    s_string_desc[3] = platform_serial();
+
+    ESP_LOGI(TAG, "Starting TinyUSB (%sHID + vendor, VID:PID = 0x%04x:0x%04x, serial %s)",
              CFG_TUD_CDC ? "CDC-ACM + " : "",
-             s_device_desc.idVendor, s_device_desc.idProduct);
+             s_device_desc.idVendor, s_device_desc.idProduct, s_string_desc[3]);
 
     // esp_tinyusb 2.x: start from the target-default config (full-speed on
     // ESP32-S3), then override only the descriptor pointers we need.

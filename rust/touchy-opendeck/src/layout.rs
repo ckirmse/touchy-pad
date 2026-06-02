@@ -9,13 +9,21 @@
 //! StreamDeck-compat shim, ``HOST_CODE_BASE = 0xA000``): this crate
 //! uses ``0xB000`` so a single device can host both layouts.
 
-use touchy_pad::proto::{Action, ActionHost, GridCell, Image, ImageButton, Layout, LayoutGrid, Screen, Widget, action, widget};
+use touchy_pad::proto::{Action, ActionHost, GridCell, Image, ImageButton, Layout, LayoutGrid, Widget, action, widget};
 
 /// Two-character OpenDeck device-namespace prefix used by this plugin.
 ///
 /// All device IDs we ``register_device`` must start with this prefix —
 /// OpenDeck uses it to route inbound events back to us.
 pub const NAMESPACE: &str = "tp";
+
+/// Bare stem of the user-screen page body this plugin uploads.
+///
+/// Pushed to ``F:host/uscr/opendeck.pb`` via
+/// [`Touchy::user_screen_save`][touchy_pad::Touchy::user_screen_save];
+/// the default chrome's ``widget_ref(id="page")`` displays it. A single
+/// shared page is enough because OpenDeck exposes one Touchy-Pad device.
+pub const PAGE_NAME: &str = "opendeck";
 
 /// Lowest ``ActionHost.code`` assigned to OpenDeck key 0.
 ///
@@ -46,44 +54,39 @@ pub fn key_for_host_code(code: u32) -> Option<u8> {
 	u8::try_from(k).ok()
 }
 
-/// Stable, plugin-namespaced device ID derived from USB bus + address.
+/// Stable, plugin-namespaced device ID derived from the device serial.
 ///
 /// The OpenDeck protocol requires the ID to start with [`NAMESPACE`]
-/// and to be stable across reconnects. ``bus``/``addr`` are stable for
-/// the lifetime of a USB port and a single physical device, so this is
-/// "good enough" — better than enumeration order, not as good as a
-/// hardware serial.
-pub fn device_id_for(bus: u8, addr: u8) -> String {
-	format!("{NAMESPACE}-{bus:02x}{addr:02x}")
+/// and to be stable across reconnects. Stage 71 surfaces a real
+/// hardware serial (`SysBoardInfoResponse.serial`), so the ID is
+/// ``tp-<serial>`` — stable across ports and re-enumerations.
+pub fn device_id_for(serial: &str) -> String {
+	format!("{NAMESPACE}-{serial}")
 }
 
-/// PSRAM ramdisk path holding the encoded layout for ``device_id``.
+/// Ramdisk path for cell ``key``'s image asset.
 ///
-/// One file per device — separate from any user/Python-managed
-/// screens. Lives on ``R:`` because we rewrite it whenever OpenDeck
-/// pushes a new image, and flash wear from per-keypress reloads would
-/// be wasteful.
-pub fn screen_path_for(device_id: &str) -> String {
-	format!("R:host/s/opendeck_{device_id}.pb")
+/// One shared set of assets — there is a single OpenDeck page. Lives
+/// on ``R:`` (volatile PSRAM ramdisk) because we rewrite it on every
+/// (re)connect and per keypress, and flash wear would be wasteful.
+pub fn asset_path_for(key: u8) -> String {
+	format!("R:host/opendeck/key_{key}.bin")
 }
 
-/// PSRAM ramdisk path for cell ``key``'s image asset for ``device_id``.
-pub fn asset_path_for(device_id: &str, key: u8) -> String {
-	format!("R:host/opendeck/{device_id}/key_{key}.bin")
-}
-
-/// Build the device layout: a ``cols × rows`` grid of image buttons,
-/// each wired to ``host_code_for(k)`` on both press and release.
+/// Build the OpenDeck page body: a ``cols × rows`` grid of image
+/// buttons, each wired to ``host_code_for(k)`` on both press and
+/// release. Returned as a bare [`Widget`] for upload via
+/// [`Touchy::user_screen_save`][touchy_pad::Touchy::user_screen_save].
 ///
 /// Keys are numbered left-to-right, top-to-bottom from 0 — matching
 /// StreamDeck convention.
-pub fn build_screen(cols: u8, rows: u8, device_id: &str) -> Screen {
+pub fn build_page(cols: u8, rows: u8) -> Widget {
 	let mut children: Vec<Widget> = Vec::with_capacity(cols as usize * rows as usize);
 	for r in 0..rows {
 		for c in 0..cols {
 			let k = r * cols + c;
 			let code = host_code_for(k);
-			let asset = asset_path_for(device_id, k);
+			let asset = asset_path_for(k);
 			let img = Image { path: asset, ..Default::default() };
 			let act_press = Action {
 				kind: Some(action::Kind::Host(ActionHost { code })),
@@ -106,7 +109,7 @@ pub fn build_screen(cols: u8, rows: u8, device_id: &str) -> Screen {
 			});
 		}
 	}
-	let active = Widget {
+	Widget {
 		id: "opendeck_root".into(),
 		version: widget::Version::Current as i32,
 		kind: Some(widget::Kind::LayoutGrid(LayoutGrid {
@@ -115,10 +118,6 @@ pub fn build_screen(cols: u8, rows: u8, device_id: &str) -> Screen {
 			gap: 4,
 			layout: Some(Layout { children }),
 		})),
-		..Default::default()
-	};
-	Screen {
-		active: Some(active),
 		..Default::default()
 	}
 }
@@ -137,10 +136,9 @@ mod tests {
 	}
 
 	#[test]
-	fn build_screen_has_expected_children() {
-		let s = build_screen(5, 3, "tp-0102");
-		let root = s.active.unwrap();
-		match root.kind.unwrap() {
+	fn build_page_has_expected_children() {
+		let page = build_page(5, 3);
+		match page.kind.unwrap() {
 			widget::Kind::LayoutGrid(g) => {
 				assert_eq!(g.cols, 5);
 				assert_eq!(g.rows, 3);
@@ -148,5 +146,10 @@ mod tests {
 			}
 			_ => panic!("expected LayoutGrid"),
 		}
+	}
+
+	#[test]
+	fn device_id_uses_serial() {
+		assert_eq!(device_id_for("tsim001"), "tp-tsim001");
 	}
 }

@@ -23,6 +23,7 @@ from .touchy_pb2 import (  # noqa: F401  (re-exported)
     LvEvent,
     Response,
     ResultCode,
+    RunActionsCmd,
     ScreenLoadCmd,
     ScreenSleepTimeoutCmd,
     ScreenWakeCmd,

@@ -82,6 +82,16 @@ Commands:
   fallback if nothing has been uploaded).
 * `Screen_Wake` — Turn backlight on.
 * `Screen_Sleep_Timeout(msec)` — Auto sleep after `msec` of inactivity.
+* `Run_Actions(actions)` — Run a list of `Action`s device-side, exactly
+  as if a local widget had just triggered them (Stage 71). The device
+  feeds each `Action` through the same runner used for widget events
+  (`ActionHost` / `ActionMacro` / `ActionDevice`), so e.g. an
+  `ActionDevice(ActionChangeWidgetRef(BY_PATH,
+  "F:host/uscr/opendeck.pb", target_id="page"))` retargets the live
+  `widget_ref(id="page")` and brings a uscr page to the front — the
+  mechanism the API library's `show_user_screen` / touchy-opendeck use
+  instead of `Screen_Load`. Returns a plain `Response` (`RESULT_OK` or
+  error).
 * `Event_Consume` — Pop an event from the device event queue.
 * `Sys_Reboot_Bootloader` — Reboot into bootloader (firmware update).
 * `Sys_Version_Get` — Get the protocol and firmware version info.
@@ -276,7 +286,7 @@ configuration for `bInterfaceClass == 0xFF`. See
 ### Wire framing
 
 Every protobuf message — `Command`, `Response`, or `Event` — is wrapped in
-a self-synchronising frame (Stage 64.3, `ProtocolVersion.CURRENT == 6`):
+a self-synchronising frame (Stage 64.3, `ProtocolVersion.CURRENT == 7`):
 
 ```
 +----------+----------+--------------------+---------+
@@ -324,7 +334,7 @@ behind the `serial` feature) speak the UART layer; pass `--port
 ### Board capabilities
 
 `SysBoardInfoResponse` advertises what a connected board can do so the
-host adapts at runtime (Stage 65, protocol V6):
+host adapts at runtime (Stage 65, protocol V6; serial added in V7):
 
 * `is_multitouch` — `false` on resistive single-touch panels
   (`esp32_2432s028rv3`), `true` on the GT911 capacitive boards. The sim
@@ -332,6 +342,12 @@ host adapts at runtime (Stage 65, protocol V6):
   set.
 * `has_usb` — `true` when the board can emulate USB HID
   mouse/keyboard; `false` on UART-only boards.
+* `serial` — a stable per-device identifier (Stage 71). On real
+  hardware it is derived from the chip's factory MAC as `"t"` + 12
+  lowercase hex digits (no separators, e.g. `t3c8427aa11bb`); the same
+  string is exposed as the USB `iSerialNumber` descriptor so the OS and
+  the vendor transport agree. The simulator reports the constant
+  `tsim001`. Hosts use it as the canonical enumeration id.
 
 `touchy board-info` surfaces these (plus the display size) as table rows.
 

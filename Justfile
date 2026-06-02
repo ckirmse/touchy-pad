@@ -126,6 +126,12 @@ build-proto-py:
         -Iproto \
         --python_out="${_py_out}" \
         proto/touchy.proto proto/widgets.proto proto/preferences.proto
+    # protoc emits flat `import widgets_pb2` for cross-file references
+    # (Stage 71: touchy.proto imports widgets.proto). Rewrite those to
+    # package-relative imports so the committed package imports cleanly
+    # without putting `_proto/` on sys.path.
+    sed -i -E 's/^import (touchy_pb2|widgets_pb2|preferences_pb2) as /from . import \1 as /' \
+        "${_py_out}/touchy_pb2.py" "${_py_out}/widgets_pb2.py" "${_py_out}/preferences_pb2.py"
     echo "wrote ${_py_out}/touchy_pb2.py ${_py_out}/widgets_pb2.py ${_py_out}/preferences_pb2.py"
 
 # Regenerate the embedded C bindings via nanopb iff any proto or options
