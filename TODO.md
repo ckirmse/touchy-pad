@@ -26,44 +26,47 @@ Main new features: works as a touchpad, with some basic ability to add buttons (
 * [x] Make StreamController support proof of concept
   * [x] test current POC
   * [x] make a little video
-  * [ ] explain plans w.r.t. 3d printing and knobs on the screen
   * [x] request feedback/propose distribution
 * [x] ensure no 10ms delay on loop polling
 * [x] Pick a real USB VID/PID for our device via https://github.com/espressif/usb-pids/pull/315
 * [x] fix multitouch gestures - the change to lvgl instead of polling broke them
-* [ ] determine USB security issues (might need to set a secure key for future API operations - to prevent untrusted users from changing macro behavior)
 
 ## For release first public Alpha 2
 
 Main new features: Works with StreamController app to provide arbitrary user buttons
 
 * [ ] add aliexress/etc... links to recommended board
-* [ ] support eink displays in my test devices drawer
 * [x] change DSL to allow callback functions attached to actions.  completely hide "event id" from the api consumer (just map it to the callback)
 * [ ] make stand alone example.py
 * [ ] two main readme points: better touchpad (that's graphical!) with streamdeck like features (that's open source) and an easy developer platform so your desktop python/rust apps can make interactive user interfaces on (very cheap!) LCD/eink displays.
-* [ ] investigate this appstore (or others) https://www.xda-developers.com/someone-created-an-esp32-app-store-and-it-lets-you-flash-apps-straight-from-your-browser/
 * [x] make switchable subscreens by using widgetref?
 * [x] remove Screen.path?  I don't think we need it
 * [x] test https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/lcd/index.html to see if it could help rendering performance - NO
 * [x] investigate [opendeck](docs/opendeck.md) and possibly do a plugin for that instead-of or in-addition-to StreamController.
-* [ ] fix opendeck plugin not enumerating devices - figure out how to debug rust https://code.visualstudio.com/docs/languages/rust#_install-debugging-support
+* [x] fix opendeck plugin not enumerating devices - figure out how to debug rust https://code.visualstudio.com/docs/languages/rust#_install-debugging-support
 * [ ] add opendeck plugin binary to release
 * [ ] add some of the example JSON to the API docs
+* [ ] explain opendeck plugin install
+* [ ] make opendeck example video
+* [ ] send message to Opendeck geeks (include reverse engineer docs and video)
+* [ ] explain StreamController status
 * [x] add a widget handle concept so host can say to just redraw one particular widget (only need to implement for screens/layouts/image)
 * [x] make screen sleep default timeout
 * [x] Add support for F:widgets/foo.pb widget files.  This would allow TouchyDeck to own a R:widgets/deck.pb.  Which could be nested into a F: screen.  So that dynamic StreamDeck emulated stuff could be updated independently of the configurable screens the user has selected.  Probably should add a way for the host to see dimensions of arbitrary widgets in screens/walk the screen list?
 * [ ] Built-in [StreamController](https://streamcontroller.github.io/docs/latest/) support.  Probably via the mock device proof of concept.
 * [x] Turn off "Expensive debugging flags!" in sdkconfig.defaults
-* [ ] cleanup embedding of streamdeck ui into other widgets (via user screens)
-* [ ] update python code to be 'finished' for StreamController (make sure press and release events work)
-* [ ] implement the StreamDeck background graphic API
+* [x] cleanup embedding of streamdeck ui into other widgets (via user screens)
+* [x] update python code to be 'finished' for StreamController (make sure press and release events work)
 
 ## For release Alpha 3
 
 Main new features? Much easier scripting than through StreamController - allow arbitrary Python snippets for button presses/slider moves etc...  Dynamic data displays from host to Touchypad (server stats, ZMK modes, whatever user wants to show)
 
+* [ ] implement the StreamDeck background graphic API
+* [ ] determine USB security issues (might need to set a secure key for future API operations - to prevent untrusted users from changing macro behavior)
 * [ ] Support a few more board types
+* [ ] support eink displays in my test devices drawer
+* [ ] investigate this appstore (or others) https://www.xda-developers.com/someone-created-an-esp32-app-store-and-it-lets-you-flash-apps-straight-from-your-browser/
 * [ ] try turning off GPIO matrix for SPI display writes - per https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/spi_master.html#_CPPv416spi_bus_config_t might allow increase to 80Mhz.  "You can use this structure to specify the GPIO pins of the bus. Normally, the driver will use the GPIO matrix to route the signals. An exception is made when all signals either can be routed through the IO_MUX or are -1. In that case, the IO_MUX is used. On ESP32, using GPIO matrix will bring about 25ns of input delay, which may cause incorrect read for >40MHz speeds."
 * [ ] when using ch341 uart try to use 460800 for better speeds
 * [ ] make knobs/dials with gesture overlays (share code with trackpad) ccw/cw/left/up etc...
@@ -73,6 +76,7 @@ Main new features? Much easier scripting than through StreamController - allow a
 * [ ] Implement multitouch HID to support multitouch native apps
 * [ ] Stylus support for 'paintbrush mode'
 * [ ] support turn, back, forward, up gestures natively
+* [ ] explain plans w.r.t. 3d printing and knobs on the screen
 * [ ] tactile precut sticker/3d printable case for screen overlay?
 * [ ] figure out best way to mount haptics for best effect
 * [ ] Increase CPU, FLASH and RAM speeds to the max.  Currently the firmware picks slow/safe defaults

@@ -130,8 +130,13 @@ build-proto-py:
     # (Stage 71: touchy.proto imports widgets.proto). Rewrite those to
     # package-relative imports so the committed package imports cleanly
     # without putting `_proto/` on sys.path.
-    sed -i -E 's/^import (touchy_pb2|widgets_pb2|preferences_pb2) as /from . import \1 as /' \
-        "${_py_out}/touchy_pb2.py" "${_py_out}/widgets_pb2.py" "${_py_out}/preferences_pb2.py"
+    # proto/fix_proto_imports.py is a standalone script to avoid BSD sed
+    # incompatibility (macOS sed treats -i as needing a backup suffix) and
+    # Just parser issues with embedded multi-line Python strings.
+    "${_py}" proto/fix_proto_imports.py \
+        "${_py_out}/touchy_pb2.py" \
+        "${_py_out}/widgets_pb2.py" \
+        "${_py_out}/preferences_pb2.py"
     echo "wrote ${_py_out}/touchy_pb2.py ${_py_out}/widgets_pb2.py ${_py_out}/preferences_pb2.py"
 
 # Regenerate the embedded C bindings via nanopb iff any proto or options
@@ -291,14 +296,18 @@ rust-doc:
 rust-run *ARGS:
     cd rust && cargo run -p touchy-demo -- {{ARGS}}
 
+# Build the OpenDeck device plugin (debug binary).
+opendeck-build-debug:
+    cd rust && cargo build -p touchy-opendeck
+
 # Build the OpenDeck device plugin (release binary).
-opendeck-build:
+opendeck-build-release:
     cd rust && cargo build -p touchy-opendeck --release
 
 # Package the .sdPlugin folder (with the host-triple binary) into a
 # zip ready to install from OpenDeck's "Install plugin from file…"
 # dialog. Writes to rust/target/touchy-opendeck.sdPlugin.zip.
-opendeck-package:
+opendeck-package: opendeck-build-release
     #!/usr/bin/env bash
     set -euo pipefail
     cd rust
@@ -597,7 +606,7 @@ streamcontroller-run *ARGS:
 
 # Run OpenDeck in Tauri dev mode (hot-reloading frontend + live Rust backend).
 # Requires Rust and Deno to be installed (see .devcontainer/Containerfile).
-opendeck-run:
+opendeck-run: opendeck-build-debug
     #!/usr/bin/env bash
     set -euo pipefail
     export PATH="$HOME/.cargo/bin:$HOME/.deno/bin:$PATH"
