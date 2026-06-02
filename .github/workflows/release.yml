@@ -124,6 +124,40 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
+  # build-rust: compile touchy-opendeck for the host triple and package it as
+  # an .sdPlugin zip, matching the approach used in app-ci.yml.
+  # ---------------------------------------------------------------------------
+  build-rust:
+    name: Build touchy-opendeck plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up shared Python/Poetry/just/proto tooling
+        uses: ./.github/actions/setup-python-poetry-just-proto
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends protobuf-compiler
+
+      - name: Cache cargo build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build and package touchy-opendeck plugin
+        run: just opendeck-package
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: touchy-opendeck-plugin
+          path: rust/target/touchy-opendeck.sdPlugin.zip
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
   # publish-pypi: OIDC trusted publish — only runs after tests pass.
   # ---------------------------------------------------------------------------
   publish-pypi:
@@ -159,7 +193,7 @@ jobs:
   # ---------------------------------------------------------------------------
   upload-release-assets:
     name: Upload firmware to GitHub Release
-    needs: [build-firmware, test-app]
+    needs: [build-firmware, build-rust, test-app]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -171,10 +205,18 @@ jobs:
           merge-multiple: true
           path: firmware-dist/
 
+      - name: Download plugin artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: touchy-opendeck-plugin
+          path: firmware-dist/
+
       - name: List firmware files
         run: ls -lh firmware-dist/
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: firmware-dist/*.bin
+          files: |
+            firmware-dist/*.bin
+            firmware-dist/*.zip
