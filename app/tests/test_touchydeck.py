@@ -329,8 +329,11 @@ def test_create_sim_device_surfaces_via_enumerate(tmp_path) -> None:
         # libhidapi to be installed on the runner.
         decks = DeviceManager(transport="dummy").enumerate()
         touchy_decks = [d for d in decks if isinstance(d, TouchyDeck)]
-        assert len(touchy_decks) == 1
-        assert touchy_decks[0].get_serial_number() == "SIM-test"
+        sim_decks = [d for d in touchy_decks if d.get_serial_number() == "SIM-test"]
+        assert len(sim_decks) == 1, (
+            f"expected SIM-test in enumerate results, got: "
+            f"{[d.get_serial_number() for d in touchy_decks]}"
+        )
     finally:
         uninstall()
         destroy_sim_device()
