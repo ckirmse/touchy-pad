@@ -36,6 +36,19 @@ More installation instructions [here](docs/installing.md).
 I made this little video for the streamcontroller devs showing the current proof-of-concept (click on image to see/hear the video):
 [![Watch the video](https://img.youtube.com/vi/U-vNR_TbUDM/maxresdefault.jpg)](https://youtu.be/U-vNR_TbUDM)
 
+## [OpenDeck](https://github.com/nekename/OpenDeck) plugin
+This project includes a [plugin](rust/touchy-opendeck/) for OpenDeck.  The plugin is young and not yet in the OpenDeck 'store' so you need to [download](https://github.com/geeksville/touchy-pad/releases/latest) a ZIP file if you want to install it.  Download touchy-opendeck.sdPlugin.zip into a temp directory then inside of OpenDeck go to plugins and choose install-from-zip.  You'll end up with something like:
+
+![opendeck install](docs/images/opendeck-plugins.png).
+
+After Touchy-deck plugin is installed, just connect a touchy-deck to your PC and it should show up in OpenDeck similar to a StreamDeck.  You can install custom buttons, bind them to behaviors etc...  The user-interface looks like this:
+
+![opendeck running](docs/images/opendeck-touchy.png)
+
+Or click on this image to see a video showing sample usage of Touchy-pad for OpenDeck:
+
+[![Watch the video](https://img.youtube.com/vi/XhpxpQ5JX18/maxresdefault.jpg)](https://youtu.be/XhpxpQ5JX18)
+
 ## For developers
 
 This project is intended to be 'open' to make it easy for host side code to manage little widgets/behaviors on these great little devices.  No embedded development experience needed.
