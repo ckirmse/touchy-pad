@@ -664,6 +664,8 @@ def screens_demo(ctx: click.Context, listen: bool, as_json: bool) -> None:
         logger.info("sent F:host/uscr/test.pb")
         pad.screen_load(DEFAULT_SCREEN_PATH)
         logger.info("loaded %s", DEFAULT_SCREEN_PATH)
+        pad.show_user_screen("test")
+        logger.info("showing F:host/uscr/test.pb")
 
         if listen:
             # Stage 67: the demo widgets carry inline ``host_action(on_event=...)``

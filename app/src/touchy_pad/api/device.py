@@ -396,6 +396,29 @@ class Touchy:
         self._client.file_save(path, stamped.SerializeToString())
         return path
 
+    def show_user_screen(self, name: str, *, drive: str = "F") -> None:
+        """Bring a previously-saved user-screen page body to the front.
+
+        *name* is the bare stem passed to :meth:`user_screen_save`
+        (e.g. ``"demo"``). The default chrome screen
+        (``F:host/s/default.pb``) renders its body through a
+        ``widget_ref(id="page")``; this retargets that ref to
+        ``{drive}:host/uscr/{name}.pb`` so the page shows immediately,
+        without a user touch and without reloading the screen.
+
+        Mirrors the Rust ``Touchy::show_user_screen``: it issues a
+        single :class:`ActionChangeWidgetRef` (``BY_PATH``) targeting the
+        chrome's ``"page"`` ref via :meth:`TouchyClient.run_actions`.
+        """
+        from ..paths import user_screen_path
+        from .screens import change_widget_ref_action
+
+        if drive not in ("F", "R"):
+            raise ValueError(f"show_user_screen: drive must be 'F' or 'R', got {drive!r}")
+        path = user_screen_path(name) if drive == "F" else f"R:host/uscr/{name}.pb"
+        logger.debug("show_user_screen: %s", path)
+        self._client.run_actions([change_widget_ref_action("page", path)])
+
     # -- event dispatch ----------------------------------------------------
 
     def on_host_event(self, code: int, callback: HostEventCallback) -> None:
