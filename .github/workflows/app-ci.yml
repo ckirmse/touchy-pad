@@ -7,6 +7,7 @@ on:
       - "app/**"
       - "firmware/**"
       - "proto/**"
+      - "rust/**"
       - "Justfile"
       - ".github/workflows/app-ci.yml"
   pull_request:
@@ -14,6 +15,7 @@ on:
       - "app/**"
       - "firmware/**"
       - "proto/**"
+      - "rust/**"
       - "Justfile"
       - ".github/workflows/app-ci.yml"
 
@@ -205,11 +207,45 @@ jobs:
           path: app/dist/*
 
   # ---------------------------------------------------------------------------
+  # build-rust: compile touchy-opendeck and package it as an .sdPlugin zip.
+  # Needs Rust stable + protoc (for prost-build) in addition to the shared
+  # Python/just tooling.
+  # ---------------------------------------------------------------------------
+  build-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up shared Python/Poetry/just/proto tooling
+        uses: ./.github/actions/setup-python-poetry-just-proto
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends protobuf-compiler
+
+      - name: Cache cargo build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build and package touchy-opendeck plugin
+        run: just opendeck-package
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: touchy-opendeck-plugin
+          path: rust/target/touchy-opendeck.sdPlugin.zip
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
   # finalize: download all artifacts produced by the parallel jobs and list
   # them so the run summary shows exactly what was shipped.
   # ---------------------------------------------------------------------------
   finalize:
-    needs: [build-firmware, build-app]
+    needs: [build-firmware, build-app, build-rust]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
