@@ -168,6 +168,8 @@ lv_style_t *build_lv_style(const touchy_Style &s, WidgetStyles *ws)
         lv_style_set_outline_opa(st, (lv_opa_t)(s.outline_opa & 0xFF));
     if (s.has_outline_color) lv_style_set_outline_color(st, color_from_u32(s.outline_color));
     if (s.has_outline_width) lv_style_set_outline_width(st, s.outline_width);
+    if (s.has_transform_scale_x) lv_style_set_transform_scale_x(st, s.transform_scale_x);
+    if (s.has_transform_scale_y) lv_style_set_transform_scale_y(st, s.transform_scale_y);
     if (s.has_transition) {
         lv_style_transition_dsc_t *tr = build_lv_transition(s.transition, ws);
         if (tr) lv_style_set_transition(st, tr);

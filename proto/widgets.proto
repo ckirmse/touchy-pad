@@ -325,6 +325,12 @@ message Style {
     optional uint32 outline_color   = 17;
     // Outline width in pixels.
     optional int32  outline_width   = 18;
+    // Horizontal scale in 1/256 units; 256 = 100% (LV_SCALE_NONE), 192 = 75%.
+    // Maps to `lv_style_set_transform_scale_x`.
+    optional int32  transform_scale_x = 19;
+    // Vertical scale in 1/256 units; 256 = 100% (LV_SCALE_NONE), 192 = 75%.
+    // Maps to `lv_style_set_transform_scale_y`.
+    optional int32  transform_scale_y = 20;
 }
 
 // Single device-side keystroke step inside an `ActionMacro`.
