@@ -2,7 +2,7 @@
 
 # Touchy-pad
 Touchy-pad is an open-source app that turns various cheap ($15-$30) 'aliexpress' displays into:
-* A high end graphical touchpad, with multitouch gestures, scrolling, dragging, etc...
+* A high end graphical USB HID touchpad, with multitouch gestures, scrolling, dragging, keyboard macros, etc...
 * A 'StreamDeck' like graphical macropad via an [OpenDeck](https://github.com/nekename/OpenDeck) plugin.
 * A tool to allow you to run your own custom python (or other language) code on your PC, but attached to cheap-embeddable LCD panels (with no embedded programming required)
 
