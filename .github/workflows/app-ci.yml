@@ -227,7 +227,7 @@ jobs:
           workspaces: rust
 
       - name: Run rust api libary tests
-        run: just rust-test
+        run: cd rust && cargo test --workspace
 
   # ---------------------------------------------------------------------------
   # build-opendeck: cross-build the OpenDeck plugin for every target in the
