@@ -60,7 +60,10 @@ impl UsbTransport {
 				// `/host/dev/bus/usb` instead. Mirror what the Python
 				// `_install_host_dev_fallback` does and open the node by
 				// hand, then hand the fd to nusb via `Device::from_fd`.
-				#[cfg(unix)]
+				// Linux-only: `busnum()` / `Device::from_fd` aren't
+				// available on macOS (also unix), and the fallback path
+				// itself is a Linux container quirk.
+				#[cfg(target_os = "linux")]
 				{
 					match try_open_via_host_dev(info).await {
 						Some(Ok(d)) => d,
@@ -68,7 +71,7 @@ impl UsbTransport {
 						None => return Err(TouchyError::Usb(format!("open: {e}"))),
 					}
 				}
-				#[cfg(not(unix))]
+				#[cfg(not(target_os = "linux"))]
 				{
 					return Err(TouchyError::Usb(format!("open: {e}")));
 				}
@@ -197,7 +200,7 @@ impl Transport for UsbTransport {
 /// Returns `None` if the fallback root doesn't exist (so the caller
 /// surfaces the original error), `Some(Ok)` on success, or
 /// `Some(Err)` if the fallback was attempted but failed.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 async fn try_open_via_host_dev(info: &DeviceInfo) -> Option<Result<nusb::Device>> {
 	use std::fs::OpenOptions;
 	use std::os::fd::OwnedFd;

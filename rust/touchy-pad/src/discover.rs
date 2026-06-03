@@ -50,7 +50,7 @@ impl DiscoveredDevice {
 	pub fn describe(&self) -> String {
 		match self {
 			DiscoveredDevice::Usb(info) => {
-				format!("usb:{:03}:{:03}", info.busnum(), info.device_address())
+				format!("usb:{}:{:03}", info.bus_id(), info.device_address())
 			}
 			DiscoveredDevice::Sim { host, port } => format!("sim:{host}:{port}"),
 		}

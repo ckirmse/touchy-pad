@@ -15,11 +15,10 @@
 	"CodePaths": {
 		"x86_64-unknown-linux-gnu": "x86_64-unknown-linux-gnu/bin/touchy-opendeck",
 		"aarch64-unknown-linux-gnu": "aarch64-unknown-linux-gnu/bin/touchy-opendeck",
-		"x86_64-apple-darwin": "x86_64-apple-darwin/bin/touchy-opendeck",
 		"aarch64-apple-darwin": "aarch64-apple-darwin/bin/touchy-opendeck",
 		"x86_64-pc-windows-msvc": "x86_64-pc-windows-msvc/bin/touchy-opendeck.exe"
 	},
 	"CodePathLin": "x86_64-unknown-linux-gnu/bin/touchy-opendeck",
-	"CodePathMac": "x86_64-apple-darwin/bin/touchy-opendeck",
+	"CodePathMac": "aarch64-apple-darwin/bin/touchy-opendeck",
 	"CodePathWin": "x86_64-pc-windows-msvc/bin/touchy-opendeck.exe"
 }
