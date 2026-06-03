@@ -99,6 +99,8 @@ pub fn build_page(cols: u8, rows: u8) -> Widget {
 					row: r as u32,
 					..Default::default()
 				})),
+				grow_x: 1,
+				grow_y: 1,
 				kind: Some(widget::Kind::ImageButton(ImageButton {
 					released: Some(img),
 					on_press: vec![act_press],
