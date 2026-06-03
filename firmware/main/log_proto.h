@@ -28,6 +28,9 @@ void log_proto_start(void);
 //
 // On success *out is fully populated, including any folded num_dropped
 // counter from records discarded since the previous successful pop.
+// The caller owns the heap-allocated out->message pointer; transfer it
+// to a pb_release()-managed struct (e.g. a PbMessage<touchy_Response>
+// field) or call free(out->message) when done.
 bool log_proto_pop(touchy_LogRecord *out);
 
 #ifdef __cplusplus

@@ -37,10 +37,11 @@ touchy.RunActionsCmd.actions                      type:FT_POINTER
 touchy.LvEvent.user_data               max_size:32
 
 # Stage 64.1 — tunneled device log records. `message` is the formatted
-# ESP_LOG line minus the trailing newline; 80 bytes covers typical
-# `ESP_LOGI(TAG, "fmt", ...)` output without bloating the static TX
-# buffer. Longer lines are silently truncated at this boundary on the
-# firmware side (anything past byte 79 is dropped).
-# `tag` mirrors the ESP_LOG TAG (a short module name).
-touchy.LogRecord.message               max_size:80
+# ESP_LOG line minus the trailing newline. FT_POINTER means nanopb
+# heap-allocates exactly what is needed, so there is no fixed truncation
+# cap; `s_vprintf` in log_proto.cpp uses a LOG_PROTO_LINE_BUF-sized
+# stack buffer for the raw vsnprintf call and then malloc-copies the
+# parsed body into the record. `tag` mirrors the ESP_LOG TAG (a short
+# module name).
+touchy.LogRecord.message               type:FT_POINTER
 touchy.LogRecord.tag                   max_size:16

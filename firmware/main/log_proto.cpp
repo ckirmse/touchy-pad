@@ -18,6 +18,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <atomic>
 
@@ -26,11 +27,13 @@
 // target in Stage 64.2.
 #define LOG_PROTO_QUEUE_DEPTH 32
 
-// Max formatted line we accept. Matches touchy_LogRecord.message[]
-// (160) minus one byte for the truncation marker the wire ellipsis
-// uses. Lines longer than this are truncated at the boundary.
-#define LOG_PROTO_MSG_MAX (sizeof(((touchy_LogRecord *)0)->message))
-#define LOG_PROTO_TAG_MAX (sizeof(((touchy_LogRecord *)0)->tag))
+// Stack buffer for the raw vsnprintf output in s_vprintf (includes the
+// full "X (ts) TAG: body" ESP-IDF prefix). Lines longer than this are
+// still truncated, but 256 bytes covers virtually every real log line.
+// The message field is FT_POINTER so the queue stores a malloc'd copy
+// sized exactly to the parsed body — no fixed cap on the wire payload.
+#define LOG_PROTO_LINE_BUF 256
+#define LOG_PROTO_TAG_MAX  (sizeof(((touchy_LogRecord *)0)->tag))
 
 static QueueHandle_t s_queue;                   // touchy_LogRecord items
 static vprintf_like_t s_prev_vprintf;           // chain to UART/CDC
@@ -134,12 +137,14 @@ static inline void in_emit_clear(void)
 static void enqueue(const touchy_LogRecord *rec)
 {
     touchy_LogRecord copy = *rec;
-    uint32_t dropped = s_pending_dropped.exchange( 0);
+    uint32_t dropped = s_pending_dropped.exchange(0);
     copy.num_dropped = dropped;
 
     if (xQueueSend(s_queue, &copy, 0) != pdTRUE) {
         // Queue full — drop this record and re-fold the dropped count
         // (plus 1 for the record we just lost) into the pending bucket.
+        // Free the heap string that was malloc'd for this record.
+        free(copy.message);
         s_pending_dropped.fetch_add(dropped + 1);
     }
 }
@@ -181,7 +186,7 @@ static int s_vprintf(const char *fmt, va_list ap)
         return written;
     }
 
-    char line[LOG_PROTO_MSG_MAX + 32];   // headroom for the ESP prefix
+    char line[LOG_PROTO_LINE_BUF];   // raw vsnprintf output including ESP prefix
     int n = vsnprintf(line, sizeof(line), fmt, ap);
     if (n < 0) {
         s_pending_dropped.fetch_add(1);
@@ -195,21 +200,23 @@ static int s_vprintf(const char *fmt, va_list ap)
     const char *body;
     parse_esp_log_prefix(line, &prio, &tag, &body);
 
+    // Heap-allocate the message body (FT_POINTER field). enqueue()
+    // transfers ownership to the queue; it frees on drop.
+    size_t body_len = strlen(body);
+    char *msg_buf = (char *)malloc(body_len + 1);
+    if (!msg_buf) {
+        s_pending_dropped.fetch_add(1);
+        in_emit_clear();
+        return written;
+    }
+    memcpy(msg_buf, body, body_len + 1);
+
     touchy_LogRecord rec = touchy_LogRecord_init_zero;
     rec.priority     = prio;
     rec.timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
     strncpy(rec.tag, tag, LOG_PROTO_TAG_MAX - 1);
     rec.tag[LOG_PROTO_TAG_MAX - 1] = '\0';
-    // Truncate over-long bodies silently — anything past the wire
-    // budget is dropped (Stage 64.1: keep records small to bound the
-    // host RX/TX buffer cost).
-    size_t body_len = strlen(body);
-    if (body_len >= LOG_PROTO_MSG_MAX) {
-        memcpy(rec.message, body, LOG_PROTO_MSG_MAX - 1);
-        rec.message[LOG_PROTO_MSG_MAX - 1] = '\0';
-    } else {
-        memcpy(rec.message, body, body_len + 1);
-    }
+    rec.message      = msg_buf;
 
     enqueue(&rec);
 

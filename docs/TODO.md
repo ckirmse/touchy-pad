@@ -59,16 +59,17 @@ Main new features: Works with StreamController app to provide arbitrary user but
 * [ ] reddit post
 * [ ] support no-touch devices
 * [ ] photo of small board
+* [ ] include prebuilt win/os-x exes in the opendeck release zip. "Cross-compiling for every target is the usual sticking point. CI matrices and cargo zigbuild / cross are the standard answers." per https://github.com/geeksville/touchy-pad/blob/main/docs/opendeck-device-plugin.md#3-manifest-essentials
 
 ## For release Alpha 3
 
 Main new features? Much easier scripting than through StreamController - allow arbitrary Python snippets for button presses/slider moves etc...  Dynamic data displays from host to Touchypad (server stats, ZMK modes, whatever user wants to show)
 
-* [ ] include prebuilt win/os-x exes in the opendeck release zip. "Cross-compiling for every target is the usual sticking point. CI matrices and cargo zigbuild / cross are the standard answers." per https://github.com/geeksville/touchy-pad/blob/main/docs/opendeck-device-plugin.md#3-manifest-essentials
 * [ ] shrink images slightly in opendeck plugin
 * [ ] implement the StreamDeck background graphic API
 * [ ] determine USB security issues (might need to set a secure key for future API operations - to prevent untrusted users from changing macro behavior)
 * [ ] Support a few more board types
+* [ ] Allow setting a persistent device pref for 'min-log-level' logs with lower pri than this will not be queued for the host, just drop em.  default threshold is ERROR. Update python cli to add a "set-log-level FOO" cmd.
 * [ ] support eink displays in my test devices drawer
 * [ ] investigate this appstore (or others) https://www.xda-developers.com/someone-created-an-esp32-app-store-and-it-lets-you-flash-apps-straight-from-your-browser/
 * [ ] Built-in [StreamController](https://streamcontroller.github.io/docs/latest/) support.  Probably via the mock device proof of concept.
