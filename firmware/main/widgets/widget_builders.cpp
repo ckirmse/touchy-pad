@@ -396,6 +396,9 @@ void apply_image_attrs(lv_obj_t *img, const touchy_Image &im)
     apply_image_src_from_path(img, im.path, &dsc);
     if (im.has_scale)    lv_image_set_scale(img, (uint16_t)im.scale);
     if (im.has_rotation) lv_image_set_rotation(img, im.rotation);
+    lv_image_set_align(img, im.has_align
+                       ? (lv_image_align_t)im.align
+                       : LV_IMAGE_ALIGN_CENTER);
     // Register this image for in-place updates if it has a real path.
     if (im.path[0] != '\0') {
         PlainImageBinding b;
@@ -467,6 +470,8 @@ struct ImageButtonSrc {
     uint16_t  scale;
     bool      has_rotation;
     int32_t   rotation;
+    bool      has_align;
+    touchy_Image_Align align;
 };
 struct ImageButtonState {
     lv_obj_t       *img_child;
@@ -515,6 +520,8 @@ void image_button_src_init(ImageButtonSrc &dst, const touchy_Image &im)
     dst.scale        = (uint16_t)im.scale;
     dst.has_rotation = im.has_rotation;
     dst.rotation     = im.rotation;
+    dst.has_align    = im.has_align;
+    dst.align        = im.align;
     dst.wire_path    = strdup(im.path);
 
     auto *dsc = new (std::nothrow) lv_image_dsc_t{};
@@ -544,6 +551,8 @@ bool image_button_src_reload(ImageButtonSrc &dst)
     uint16_t scale     = dst.scale;
     bool  has_rotation = dst.has_rotation;
     int32_t rotation   = dst.rotation;
+    bool  has_align    = dst.has_align;
+    touchy_Image_Align align = dst.align;
 
     free(dst.path);
     delete dst.dsc;
@@ -565,6 +574,8 @@ bool image_button_src_reload(ImageButtonSrc &dst)
     dst.scale        = scale;
     dst.has_rotation = has_rotation;
     dst.rotation     = rotation;
+    dst.has_align    = has_align;
+    dst.align        = align;
     return true;
 }
 
@@ -588,6 +599,9 @@ void image_button_apply(lv_obj_t *img,
     else if (fallback.has_scale) lv_image_set_scale(img, fallback.scale);
     if (state.has_rotation)         lv_image_set_rotation(img, state.rotation);
     else if (fallback.has_rotation) lv_image_set_rotation(img, fallback.rotation);
+    if (state.has_align)              lv_image_set_align(img, (lv_image_align_t)state.align);
+    else if (fallback.has_align)      lv_image_set_align(img, (lv_image_align_t)fallback.align);
+    else                              lv_image_set_align(img, LV_IMAGE_ALIGN_CENTER);
     lv_obj_invalidate(img);
 }
 
@@ -627,7 +641,9 @@ lv_obj_t *build_image_button(lv_obj_t *parent, const touchy_Widget &w)
     lv_obj_t *img = lv_image_create(btn);
     lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(img, lv_pct(100), lv_pct(100));
-    lv_image_set_align(img, LV_IMAGE_ALIGN_STRETCH);
+    // Alignment will be set by image_button_apply via the released Image proto
+    // field; default to CENTER (overriding LVGL's top-left default).
+    lv_image_set_align(img, LV_IMAGE_ALIGN_CENTER);
 
     const touchy_ImageButton &ib = w.kind.image_button;
     const touchy_Image &released = ib.released;

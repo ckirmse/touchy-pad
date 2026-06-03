@@ -570,7 +570,30 @@ message Checkbox {
     repeated Action on_change = 3;
 }
 
+
+
 message Image {
+    // Alignment of an image within its bounding box. Mirrors lv_image_align_t.
+    // Numeric values match the LVGL enum so the firmware can cast directly.
+    // The value 10 (_LV_IMAGE_ALIGN_AUTO_TRANSFORM) is an internal LVGL marker
+    // and is intentionally omitted.
+    enum Align {
+        IMAGE_ALIGN_DEFAULT      = 0;   // LVGL default (top-left for unscaled images)
+        IMAGE_ALIGN_TOP_LEFT     = 1;
+        IMAGE_ALIGN_TOP_MID      = 2;
+        IMAGE_ALIGN_TOP_RIGHT    = 3;
+        IMAGE_ALIGN_BOTTOM_LEFT  = 4;
+        IMAGE_ALIGN_BOTTOM_MID   = 5;
+        IMAGE_ALIGN_BOTTOM_RIGHT = 6;
+        IMAGE_ALIGN_LEFT_MID     = 7;
+        IMAGE_ALIGN_RIGHT_MID    = 8;
+        IMAGE_ALIGN_CENTER       = 9;
+        IMAGE_ALIGN_STRETCH      = 11;  // fill widget area, ignoring aspect ratio
+        IMAGE_ALIGN_TILE         = 12;  // tile to fill widget area
+        IMAGE_ALIGN_CONTAIN      = 13;  // fit within area, keeping aspect ratio
+        IMAGE_ALIGN_COVER        = 14;  // fill area, keeping aspect ratio (may crop)
+    }
+
     // Drive-prefixed LVGL path to a previously-uploaded image, e.g.
     // "F:host/images/avatar.bin" (persistent flash) or
     // "R:host/images/avatar.bin" (transient PSRAM). Passed verbatim to
@@ -591,6 +614,9 @@ message Image {
     // Mapped to `lv_image_set_rotation`. When unset, no rotation is
     // applied (LVGL default).
     optional int32 rotation = 3;
+    // Alignment within the widget's bounding box.
+    // Mapped to `lv_image_set_align`. When unset, CENTER is used.
+    optional Align align = 4;
 }
 
 // Clickable image. Like `Button` (with `on_click` actions) but renders an

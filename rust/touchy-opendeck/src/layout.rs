@@ -9,7 +9,7 @@
 //! StreamDeck-compat shim, ``HOST_CODE_BASE = 0xA000``): this crate
 //! uses ``0xB000`` so a single device can host both layouts.
 
-use touchy_pad::proto::{Action, ActionHost, GridCell, Image, ImageButton, Layout, LayoutGrid, Style, Widget, action, widget};
+use touchy_pad::proto::{Action, ActionHost, GridCell, Image, ImageButton, Layout, LayoutGrid, Style, Widget, action, image, widget};
 
 /// Two-character OpenDeck device-namespace prefix used by this plugin.
 ///
@@ -87,7 +87,7 @@ pub fn build_page(cols: u8, rows: u8) -> Widget {
 			let k = r * cols + c;
 			let code = host_code_for(k);
 			let asset = asset_path_for(k);
-			let img = Image { path: asset, ..Default::default() };
+			let img = Image { path: asset, align: Some(image::Align::ImageAlignStretch as i32), ..Default::default() };
 			let act_press = Action {
 				kind: Some(action::Kind::Host(ActionHost { code })),
 			};
