@@ -25,3 +25,12 @@ clap = { version = "4.5", features = ["derive"] }
 futures = "0.3"
 libc = "0.2"
 async-trait = "0.1"
+
+# Release profile tuned for distributed binaries (the OpenDeck plugin is
+# shipped to end users). `strip` drops debug symbols for a much smaller
+# binary; thin LTO + a single codegen unit trade a little build time for
+# a faster, smaller artifact.
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

@@ -206,19 +206,14 @@ jobs:
           path: app/dist/*
 
   # ---------------------------------------------------------------------------
-  # build-rust: compile touchy-opendeck and package it as an .sdPlugin zip.
-  # Needs Rust stable + protoc (for prost-build) in addition to the shared
-  # Python/just tooling.
+  # test-rust: run the touchy-pad Rust library test suite. The plugin binaries
+  # themselves are cross-built and packaged by the reusable build-opendeck
+  # workflow below.
   # ---------------------------------------------------------------------------
-  build-rust:
+  test-rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
-      - name: Set up shared Python/Poetry/just/proto tooling
-        uses: ./.github/actions/setup-python-poetry-just-proto
-        with:
-          install-app-deps: 'true'
 
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -234,22 +229,20 @@ jobs:
       - name: Run rust api libary tests
         run: just rust-test
 
-      - name: Build and package touchy-opendeck plugin
-        run: just opendeck-package
-
-      - name: Upload plugin artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: touchy-opendeck-plugin
-          path: rust/target/touchy-opendeck.sdPlugin.zip
-          if-no-files-found: error
+  # ---------------------------------------------------------------------------
+  # build-opendeck: cross-build the OpenDeck plugin for every target in the
+  # manifest and package the multi-platform .sdPlugin zip. Shared with
+  # release.yml via the reusable workflow.
+  # ---------------------------------------------------------------------------
+  build-opendeck:
+    uses: ./.github/workflows/build-opendeck.yml
 
   # ---------------------------------------------------------------------------
   # finalize: download all artifacts produced by the parallel jobs and list
   # them so the run summary shows exactly what was shipped.
   # ---------------------------------------------------------------------------
   finalize:
-    needs: [build-firmware, build-app, build-rust]
+    needs: [build-firmware, build-app, test-rust, build-opendeck]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts

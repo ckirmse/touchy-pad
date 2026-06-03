@@ -306,7 +306,7 @@ opendeck-build-release: _rust-sync-version
 
 # Package the .sdPlugin folder (with the host-triple binary) into a
 # zip ready to install from OpenDeck's "Install plugin from file…"
-# dialog. Writes to rust/target/touchy-opendeck.sdPlugin.zip.
+# dialog. Writes to rust/target/com.geeksville.touchypad.sdPlugin.zip.
 opendeck-package: opendeck-build-release
     #!/usr/bin/env bash
     set -euo pipefail
@@ -321,9 +321,9 @@ opendeck-package: opendeck-build-release
     out="touchy-opendeck/com.geeksville.touchypad.sdPlugin"
     mkdir -p "$out/$triple/bin"
     cp "${bin}${ext}" "$out/$triple/bin/touchy-opendeck${ext}"
-    rm -f target/touchy-opendeck.sdPlugin.zip
-    (cd touchy-opendeck && python3 -m zipfile -c ../target/touchy-opendeck.sdPlugin.zip com.geeksville.touchypad.sdPlugin)
-    echo "wrote rust/target/touchy-opendeck.sdPlugin.zip"
+    rm -f target/com.geeksville.touchypad.sdPlugin.zip
+    (cd touchy-opendeck && python3 -m zipfile -c ../target/com.geeksville.touchypad.sdPlugin.zip com.geeksville.touchypad.sdPlugin)
+    echo "wrote rust/target/com.geeksville.touchypad.sdPlugin.zip"
 
 # ---------------------------------------------------------------------------
 # Versioning

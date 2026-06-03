@@ -1,0 +1,144 @@
+name: Build OpenDeck plugin
+
+# Reusable workflow (called via `uses:` from app-ci.yml and release.yml)
+# that cross-builds the `touchy-opendeck` device plugin for every target
+# listed in the plugin manifest's CodePaths, lays the per-target binaries
+# out in the .sdPlugin directory, and packages a single installable zip.
+#
+# Best practices applied:
+#   * Build each target *natively* on its own runner (incl. the free
+#     GitHub-hosted Linux/macOS arm64 runners) — no fragile cross-compile
+#     toolchains. `nusb` is pure-Rust, so there is no libusb to link.
+#   * Strip + LTO release binaries (see rust/Cargo.toml [profile.release]).
+#   * Ad-hoc codesign the macOS binaries so Gatekeeper doesn't flag them
+#     as "damaged" when users install an unsigned plugin.
+#   * Preserve the unix executable bit through packaging by zipping with
+#     the `zip` CLI rather than Python's zipfile module.
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: Name for the uploaded .sdPlugin.zip artifact.
+        required: false
+        type: string
+        default: touchy-opendeck-plugin
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # build: one native runner per Rust target triple. Each cell builds the
+  # release binary, ad-hoc signs it on macOS, stages it under
+  # <target>/bin/touchy-opendeck[.exe], and uploads it as a per-target
+  # artifact for the package job to collect.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-13 # Intel runner
+          - target: aarch64-apple-darwin
+            os: macos-latest # Apple Silicon runner
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache cargo build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        working-directory: rust
+        run: cargo build -p touchy-opendeck --release --target ${{ matrix.target }}
+
+      - name: Stage binary into <target>/bin/
+        shell: bash
+        run: |
+          set -euo pipefail
+          ext=""
+          case "${{ matrix.target }}" in
+            *windows*) ext=".exe" ;;
+          esac
+          bin="rust/target/${{ matrix.target }}/release/touchy-opendeck${ext}"
+          # Ad-hoc sign macOS binaries so Gatekeeper accepts the unsigned
+          # plugin without the user having to clear the quarantine xattr.
+          case "${{ matrix.target }}" in
+            *apple-darwin*) codesign --force --sign - "${bin}" ;;
+          esac
+          dest="staging/${{ matrix.target }}/bin"
+          mkdir -p "${dest}"
+          cp "${bin}" "${dest}/touchy-opendeck${ext}"
+
+      - name: Upload per-target binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: opendeck-bin-${{ matrix.target }}
+          path: staging
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # package: collect every per-target binary, drop them next to the
+  # manifest/icons in the .sdPlugin directory, and zip the whole thing into
+  # one installable artifact. `zip` preserves the unix exec bit.
+  # ---------------------------------------------------------------------------
+  package:
+    name: Package .sdPlugin zip
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download all per-target binaries
+        uses: actions/download-artifact@v7
+        with:
+          pattern: opendeck-bin-*
+          merge-multiple: true
+          path: binaries
+
+      - name: Assemble and zip the .sdPlugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          plugin_dir="rust/touchy-opendeck/com.geeksville.touchypad.sdPlugin"
+          # Lay the per-target trees (<target>/bin/touchy-opendeck[.exe])
+          # next to manifest.json + icons/.
+          cp -r binaries/* "${plugin_dir}/"
+          # Make sure the unix binaries are executable before zipping.
+          find "${plugin_dir}" -type f -name 'touchy-opendeck' -exec chmod +x {} +
+          mkdir -p rust/target
+          rm -f rust/target/com.geeksville.touchypad.sdPlugin.zip
+          ( cd rust/touchy-opendeck && \
+            zip -r -y "${GITHUB_WORKSPACE}/rust/target/com.geeksville.touchypad.sdPlugin.zip" \
+              com.geeksville.touchypad.sdPlugin )
+          echo "Packaged plugin contents:"
+          unzip -l rust/target/com.geeksville.touchypad.sdPlugin.zip
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: rust/target/com.geeksville.touchypad.sdPlugin.zip
+          if-no-files-found: error

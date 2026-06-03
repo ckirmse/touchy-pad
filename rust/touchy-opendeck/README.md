@@ -102,7 +102,7 @@ just opendeck-package       # bundle the .sdPlugin folder into a zip
 
 The package recipe writes the binary into
 `com.geeksville.touchypad.sdPlugin/<target-triple>/bin/` and zips that
-folder into `rust/target/touchy-opendeck.sdPlugin.zip`. For
+folder into `rust/target/com.geeksville.touchypad.sdPlugin.zip`. For
 cross-target builds (Linux × macOS × Windows × aarch64) you'll want
 something like `cargo-zigbuild` or a CI matrix; the manifest already
 advertises all five common triples.
