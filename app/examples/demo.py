@@ -124,9 +124,10 @@ def main() -> None:
         #    all we have to do here is keep the program alive.
         print("\nPage is live -- tap things on the device! Press Ctrl-C to quit.\n")
         try:
-            import threading
+            import time
 
-            threading.Event().wait()  # block forever (until Ctrl-C)
+            while True:
+                time.sleep(1)
         except KeyboardInterrupt:
             print("\nBye!")
 
