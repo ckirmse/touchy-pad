@@ -9,7 +9,7 @@
 //! StreamDeck-compat shim, ``HOST_CODE_BASE = 0xA000``): this crate
 //! uses ``0xB000`` so a single device can host both layouts.
 
-use touchy_pad::proto::{Action, ActionHost, GridCell, Image, ImageButton, Layout, LayoutGrid, Widget, action, widget};
+use touchy_pad::proto::{Action, ActionHost, GridCell, Image, ImageButton, Layout, LayoutGrid, Style, Widget, action, widget};
 
 /// Two-character OpenDeck device-namespace prefix used by this plugin.
 ///
@@ -101,6 +101,9 @@ pub fn build_page(cols: u8, rows: u8) -> Widget {
 				})),
 				grow_x: 1,
 				grow_y: 1,
+				// Dark-grey fill for cells with no image assigned.
+				// When an image is loaded it renders on top and hides this.
+				styles: vec![Style { bg_color: Some(0x101010), ..Default::default() }],
 				kind: Some(widget::Kind::ImageButton(ImageButton {
 					released: Some(img),
 					on_press: vec![act_press],
