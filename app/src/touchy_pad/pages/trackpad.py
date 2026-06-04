@@ -44,7 +44,7 @@ def build(background_image: str | None = None) -> tuple[str, _proto.Widget]:
     # a local lv_obj_set_style_bg_opa(LV_OPA_TRANSP) that those other widget
     # types set internally.
     container += cell(
-        spacer("pad_bg", style=style(bg_color=0x1A1A2E, radius=16, border_w=2)),
+        spacer("pad_bg", style=style(bg_color=0x1A1A2E, radius=16)),
         col=0,
         row=0,
         grow_x=1,
@@ -52,9 +52,9 @@ def build(background_image: str | None = None) -> tuple[str, _proto.Widget]:
     )
 
     if background_image is not None:
-        # Single image layer fills the cell.
+        # Single image layer fills the cell. but we want rounded corners
         container += cell(
-            image("pad_bg", asset=background_image),
+            image("pad_bg", asset=background_image, style=style(radius=16)),
             col=0,
             row=0,
             grow_x=1,
