@@ -1136,7 +1136,7 @@ Add `ghcr.io/devcontainers/features/rust:1` to install rustup + cargo
 * `cargo publish` to crates.io — the metadata will be ready but we
   hold off shipping until the API has stabilised.
 
-## Stage 80: development environment improvements
+## Someday
 * Support running a sim on the linux host?
 * Use https://lvgl.io/docs/open/debugging/gdb_plugin to faciltiate debugging
 
@@ -3331,6 +3331,161 @@ back-compat shim). `Widget.Version.CURRENT` bumped 19→20; the transport
 
 Validated: `just build-proto`, `just app-test` (160 passed), `just app-lint`
 (clean).
+
+## Stage 80: GIF support — DONE
+
+**Goal.** Let an animated GIF be used anywhere an `Image` widget can — most
+visibly as a `touchpad image URL` background — without inventing a new
+protobuf widget or a new host file format. A `.gif` source is uploaded to
+the device filesystem *as-is* (no LVGL-bin conversion) and the firmware
+renders it with LVGL's `lv_gif` widget when the image path ends in `.gif`.
+
+**Why no new protobuf variant.** GIFs reuse the existing `Image` message
+(`proto/widgets.proto`, `path`/`scale`/`rotation`/`align`). The path
+extension (`.gif`) is the discriminator on both sides. `lv_gif` is a thin
+wrapper around `lv_image`, so scale/rotation/align still apply. This keeps
+`Widget.Version` unchanged and avoids touching the DSL `image()` factory's
+signature.
+
+### Reference
+* Widget guide: https://lvgl.io/docs/open/9.5/widgets/gif
+* API: https://lvgl.io/docs/open/9.5/API/widgets/gif/lv_gif_h.html
+
+The vendored `lvgl__lvgl` managed component already ships
+`lv_gif_set_src` / `lv_gif_set_color_format` /
+`lv_gif_set_auto_pause_invisible`
+(`firmware/managed_components/lvgl__lvgl/src/widgets/gif/lv_gif.c`), so no
+component bump is needed — only the Kconfig switch.
+
+### 1. Firmware — enable the decoder
+* `LV_USE_GIF` is currently `0` everywhere (LVGL template default + every
+  `firmware/sdkconfig.<board>`). Add `CONFIG_LV_USE_GIF=y` to
+  `firmware/sdkconfig.defaults` so all boards pick it up, and refresh the
+  per-board `sdkconfig.<board>` copies (the `# CONFIG_LV_USE_GIF is not set`
+  line flips to `CONFIG_LV_USE_GIF=y`). `lv_gif` depends on the in-tree GIF
+  decoder; no `LV_USE_LODEPNG`-style extra needed. RamFs already keeps the
+  raw GIF bytes alive, so the decoder reads straight from `R:`/`F:`.
+  **Gotcha (repo memory):** in `sdkconfig.defaults`,
+  `# CONFIG_X is not set` is the `X=n` directive — set the positive form
+  explicitly. Verify the on-device heap impact (RGB565 frame buffer ≈
+  `w*h*2` bytes; 180×180 ≈ 65 KB — fits CYD internal RAM).
+
+### 2. Firmware — render `.gif` as `lv_gif`
+* `firmware/main/widgets/widget_builders.cpp`: in `build_image()` (and the
+  pressed/released slots of `build_image_button()` if reused), branch on
+  `path_ends_with(w.kind.image.path, ".gif")`:
+  * create `lv_gif_create(parent)` instead of `lv_image_create`;
+  * **before** setting the source, call
+    `lv_gif_set_color_format(obj, LV_COLOR_FORMAT_RGB565)` (smaller RAM
+    buffers, matches the panel) and
+    `lv_gif_set_auto_pause_invisible(obj, true)` (stop animating when the
+    page is hidden — important for the `widget_ref` page flipper);
+  * set src via `lv_gif_set_src(obj, to_lvgl_path(path).c_str())` using the
+    existing `to_lvgl_path()` helper (drive-prefix → LVGL `F:/…`). The
+    Stage-52 mmap fast path in `apply_image_src_from_path()` is **skipped**
+    for GIFs (it only handles `lv_image_dsc_t` LVGL-bin blobs).
+  * scale/rotation/align: `lv_gif` exposes the underlying image via the same
+    `lv_image_set_scale/rotation/align` setters (a gif *is* an image), so
+    reuse `apply_image_attrs` minus the src step. Confirm at build time that
+    these compile against `lv_gif_t`.
+* Factor the "is this a gif" check into one helper so the plain-image and
+  widget-ref rebuild paths (`ActiveRef`) agree.
+
+### 3. Host — upload GIFs unconverted
+* `app/src/touchy_pad/api/lvgl_image.py`:
+  * GIF is already in `_IMAGE_MAGICS` (`GIF87a`/`GIF89a`) and
+    `_CONVERTIBLE_EXTS`. Add an `is_gif(data)` / `looks_like_gif(path)`
+    helper.
+  * `rewrite_to_bin_path()` must **not** rewrite `.gif` → `.bin` (the device
+    keeps the `.gif` extension as its discriminator). Special-case `.gif` to
+    pass through unchanged, and drop it from the set of extensions that get
+    rewritten.
+* `app/src/touchy_pad/client.py` `file_save()`: when the payload is a GIF,
+  skip `to_lvgl_bin()` and the path rewrite — write the raw bytes. If
+  `max_width`/`max_height` are set and the GIF exceeds them, rescale **every
+  frame** (preserving the animation, duration, loop, and disposal) via
+  `PIL.ImageSequence` and re-encode as GIF, then upload that. If no
+  size limit is given, upload byte-for-byte. Keep the existing
+  `needs_image_conversion` transport guard.
+* `app/src/touchy_pad/api/screens.py` `_fill_image()`: today it always calls
+  `rewrite_to_bin_path(asset)`. With the `.gif` pass-through above this
+  becomes correct automatically (`F:host/…/x.gif` stays `…/x.gif`), so the
+  DSL `image(asset="…/foo.gif")` and the trackpad background just work.
+
+### 4. CLI — `touchpad image URL` with GIFs
+* `app/src/touchy_pad/cli.py` `touchpad_image()` already fetches arbitrary
+  bytes and calls `pad.file_save(_USER_BG_IMG_PATH, data, max_width=180,
+  max_height=180)`. Two changes:
+  * `_USER_BG_IMG_PATH` is hard-coded to `…/user-background.bin`. Pick the
+    on-device extension from the fetched bytes: `.gif` for GIF sources,
+    `.bin` otherwise (so the firmware's extension check fires). Pass the
+    chosen path to both `file_save()` and `_do_write_trackpad()`.
+  * The 180×180 cap then flows through the GIF frame-rescale path in (3).
+* Verify the fetched-bytes UA workaround (Cloudflare 403 fix) still applies.
+
+### 5. Simulator
+* `app/src/touchy_pad/sim/widgets.py` `_load_pixmap()` already falls through
+  to `QPixmap.loadFromData()`, which renders the *first* GIF frame — good
+  enough for a static preview. Optional polish: use `QMovie` for animation
+  in `_build_image` when the asset ends in `.gif`. Minimum bar: the sim
+  must not crash and should show frame 0. Ensure the `.bin`→source-ext
+  candidate list in `_load_pixmap` keeps `.gif`.
+
+### 6. Tests
+* `app/tests/test_lvgl_image.py`: add cases that `looks_like_supported_image`
+  accepts a tiny GIF, that `rewrite_to_bin_path("F:…/a.gif")` returns the
+  `.gif` path unchanged, and that a GIF is **not** run through `to_lvgl_bin`.
+* `app/tests/test_client.py` (or `test_images.py`): a fake-transport
+  `file_save` of a small multi-frame GIF writes the raw GIF bytes to a
+  `.gif` path (no conversion); with `max_width`/`max_height` smaller than the
+  GIF it still decodes as an animated GIF with the same frame count, scaled.
+* Build a small animated test GIF helper (mirror `make_smiley_png`) if a
+  fixture is needed.
+
+### Validation
+`just build-proto` (no proto change expected), `just app-test`,
+`just app-lint`, and a `just firmware-build` for one S3 board + one CYD board
+to confirm `LV_USE_GIF` links and the heap budget holds. Manual smoke test:
+`touchy touchpad image <gif-url>` then reload the default screen.
+
+### What was implemented
+
+Done as planned, with these concrete landing points:
+
+* **Firmware Kconfig.** `CONFIG_LV_USE_GIF=y` added to
+  `firmware/sdkconfig.defaults` and flipped on in every per-board
+  `sdkconfig.<board>`. LVGL allocates the GIF frame buffer via its CLIB
+  malloc, which prefers PSRAM on boards that have it (~65 KB for a
+  180×180 RGB565 frame).
+* **Firmware render — no copy-paste.** `widget_builders.cpp` gained
+  `path_is_gif()` (case-insensitive `.gif` suffix, gated `#if LV_USE_GIF`).
+  `build_image()` only differs in the object class
+  (`lv_gif_create` vs `lv_image_create`); the GIF-specific setup —
+  `lv_gif_set_color_format(RGB565)` (before src, to avoid a framebuffer
+  realloc) + `lv_gif_set_auto_pause_invisible(true)` + `lv_gif_set_src` —
+  lives in the **shared** `apply_image_src_from_path()`. So scale/rotation/
+  align (`apply_image_attrs`) and the Stage 60 reload-on-overwrite registry
+  (`widget_image_registry_notify`) both work for GIFs unchanged.
+* **Host.** `api/lvgl_image.py`: new `is_gif()` / `rescale_gif()`; `.gif`
+  removed from `_CONVERTIBLE_EXTS` so `rewrite_to_bin_path()` preserves it.
+  `client.file_save()` detects GIFs and uploads them verbatim (no
+  `to_lvgl_bin`), rescaling every frame via `PIL.ImageSequence` only when
+  `max_width`/`max_height` is given. `screens.py::_fill_image()` keeps `.gif`
+  paths automatically via the pass-through.
+* **CLI.** `touchpad image URL` picks `…/user-background.gif` for GIF
+  sources (else `…/user-background.bin`), passing the chosen path to both
+  `file_save()` and `_do_write_trackpad()`. The 180×180 cap flows through
+  `rescale_gif`.
+* **Simulator.** Unchanged — `_load_pixmap` already falls through to
+  `QPixmap.loadFromData()`, which renders the GIF's first frame as a static
+  preview; the `.bin`→source-ext candidate list still includes `.gif`.
+* **Tests.** `test_lvgl_image.py` (GIF detection, `.gif` path passthrough,
+  frame-preserving rescale) and `test_client.py` (GIF uploaded verbatim to a
+  `.gif` path). `just app-test` 165 passing, `just app-lint` clean.
+
+Firmware was **not** compiled in the implementing environment (no ESP-IDF in
+PATH); the `lv_gif_*` APIs were verified present in the vendored
+`lvgl__lvgl` component and exported via the `lvgl.h` umbrella.
 
 # Old/Existing projects
 
