@@ -557,19 +557,26 @@ def _do_screen_init(pad) -> None:
     """Write the default chrome screen + baseline trackpad page.
 
     Uploads ``F:host/s/default.pb`` (the persistent prev/next chrome with
-    a ``widget_ref(id="page")`` body) and the baseline ``trackpad`` page
-    into ``F:host/uscr/`` so the device has a usable layout out of the
-    box. Shared by ``touchy init`` and ``screen demo``.
+    a ``widget_ref(id="page")`` body), the Touchy-Pad logo image, and the
+    baseline ``trackpad`` page into ``F:host/uscr/`` so the device has a
+    usable layout out of the box. Shared by ``touchy init`` and ``screen demo``.
     """
-    from .api.screens import build_default_screen, build_user_pages
+    from .api.images import make_touchy_png
+    from .api.screens import build_default_screen
+    from .pages import trackpad as _trackpad_page
     from .paths import DEFAULT_SCREEN_PATH
+
+    _TOUCHY_IMG_PATH = "F:host/images/touchy.png"
 
     pad.screen_save(build_default_screen())
     logger.info("sent %s", DEFAULT_SCREEN_PATH)
 
-    pages = dict(build_user_pages())
-    trackpad = pages["trackpad"]
-    pad.user_screen_save("trackpad", trackpad)
+    touchy_png = make_touchy_png()
+    pad.file_save(_TOUCHY_IMG_PATH, touchy_png)
+    logger.info("sent %s (%d bytes source)", _TOUCHY_IMG_PATH, len(touchy_png))
+
+    _, trackpad_widget = _trackpad_page.build(background_image=_TOUCHY_IMG_PATH)
+    pad.user_screen_save("trackpad", trackpad_widget)
     logger.info("sent F:host/uscr/trackpad.pb")
 
     pad.screen_load(DEFAULT_SCREEN_PATH)

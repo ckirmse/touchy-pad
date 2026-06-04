@@ -8,6 +8,7 @@ from ..api.screens import (
     Layer,
     cell,
     grid,
+    image,
     label,
     ripple_animation,
     spacer,
@@ -16,40 +17,56 @@ from ..api.screens import (
 )
 
 
-def build() -> tuple[str, _proto.Widget]:
+def build(background_image: str | None = None) -> tuple[str, _proto.Widget]:
     """Return ``("trackpad", widget)`` for the full-bleed multitouch trackpad page.
 
-    A 1×1 grid stacks three LVGL children in the same cell so draw order
-    provides layering without any custom drawing inside the trackpad widget:
+    A 1×1 grid stacks LVGL children in the same cell so draw order provides
+    layering without any custom drawing inside the trackpad widget.
+
+    If *background_image* is a device filepath (e.g. ``"F:host/images/touchy.png"``),
+    an :func:`~touchy_pad.api.screens.image` widget is used as the background
+    layer.  Otherwise the default two-layer background is used:
 
     1. A :func:`~touchy_pad.api.screens.spacer` filled with the dark
        background colour (``0x1a1a2e``).
     2. A dim hint :func:`~touchy_pad.api.screens.label` ("Touch here"),
        content-sized and centred by the grid default.
-    3. The :func:`~touchy_pad.api.screens.trackpad` on top with a transparent
-       background — it is drawn last so it receives all touch events.
+
+    The final layer is always the :func:`~touchy_pad.api.screens.trackpad`
+    with a transparent background — it is drawn last so it receives all touch
+    events.
     """
     container = Layer(layout=grid(cols=1, rows=1))
 
-    # Layer 1 — dark background fill.  A spacer is used instead of a label or
-    # layout widget because build_spacer() calls lv_obj_remove_style_all(),
-    # which lets the user-supplied bg_color style take effect without fighting
-    # a local lv_obj_set_style_bg_opa(LV_OPA_TRANSP) that those other widget
-    # types set internally.
-    container += cell(
-        spacer("pad_bg", style=style(bg_color=0x1A1A2E)),
-        col=0,
-        row=0,
-        grow_x=1,
-        grow_y=1,
-    )
+    if background_image is not None:
+        # Single image layer fills the cell.
+        container += cell(
+            image("pad_bg", asset=background_image),
+            col=0,
+            row=0,
+            grow_x=1,
+            grow_y=1,
+        )
+    else:
+        # Layer 1 — dark background fill.  A spacer is used instead of a label
+        # or layout widget because build_spacer() calls lv_obj_remove_style_all(),
+        # which lets the user-supplied bg_color style take effect without fighting
+        # a local lv_obj_set_style_bg_opa(LV_OPA_TRANSP) that those other widget
+        # types set internally.
+        container += cell(
+            spacer("pad_bg", style=style(bg_color=0x1A1A2E)),
+            col=0,
+            row=0,
+            grow_x=1,
+            grow_y=1,
+        )
 
-    # Layer 2 — dim hint text, content-sized and centred by the grid default.
-    container += cell(
-        label("pad_hint", text="Touch here", font_size=30, style=style(text_color=0x334466)),
-        col=0,
-        row=0,
-    )
+        # Layer 2 — dim hint text, content-sized and centred by the grid default.
+        container += cell(
+            label("pad_hint", text="Touch here", font_size=30, style=style(text_color=0x334466)),
+            col=0,
+            row=0,
+        )
 
     # Layer 3 — transparent trackpad on top; snarfs all touch events because
     # LVGL dispatches input to the topmost (last-drawn) object.
