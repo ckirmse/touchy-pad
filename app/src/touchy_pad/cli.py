@@ -553,6 +553,25 @@ def screen_load(path: str) -> None:
         c.screen_load(path)
 
 
+_TOUCHY_IMG_PATH = "F:host/images/touchy.png"
+_USER_BG_IMG_PATH = "F:host/images/user-background.bin"
+
+
+def _do_write_trackpad(pad, background_image: str) -> None:
+    """Upload the trackpad page body using *background_image* as the backdrop.
+
+    Writes ``F:host/uscr/trackpad.pb`` referencing *background_image* (a
+    device-side drive-prefixed path that must already exist on the device).
+    Does **not** upload the image file itself — the caller is responsible for
+    that.  Does **not** reload any screen.
+    """
+    from .pages import trackpad as _trackpad_page
+
+    _, trackpad_widget = _trackpad_page.build(background_image=background_image)
+    pad.user_screen_save("trackpad", trackpad_widget)
+    logger.info("sent F:host/uscr/trackpad.pb (background=%s)", background_image)
+
+
 def _do_screen_init(pad) -> None:
     """Write the default chrome screen + baseline trackpad page.
 
@@ -563,10 +582,7 @@ def _do_screen_init(pad) -> None:
     """
     from .api.images import make_touchy_png
     from .api.screens import build_default_screen
-    from .pages import trackpad as _trackpad_page
     from .paths import DEFAULT_SCREEN_PATH
-
-    _TOUCHY_IMG_PATH = "F:host/images/touchy.png"
 
     pad.screen_save(build_default_screen())
     logger.info("sent %s", DEFAULT_SCREEN_PATH)
@@ -575,9 +591,7 @@ def _do_screen_init(pad) -> None:
     pad.file_save(_TOUCHY_IMG_PATH, touchy_png, max_width=128, max_height=128)
     logger.info("sent %s (%d bytes source)", _TOUCHY_IMG_PATH, len(touchy_png))
 
-    _, trackpad_widget = _trackpad_page.build(background_image=_TOUCHY_IMG_PATH)
-    pad.user_screen_save("trackpad", trackpad_widget)
-    logger.info("sent F:host/uscr/trackpad.pb")
+    _do_write_trackpad(pad, _TOUCHY_IMG_PATH)
 
     pad.screen_load(DEFAULT_SCREEN_PATH)
     logger.info("loaded %s", DEFAULT_SCREEN_PATH)
@@ -705,6 +719,51 @@ def init() -> None:
                 str(info.protocol_version),
             )
         _do_screen_init(pad)
+
+
+# ---------------------------------------------------------------------------
+# Touchpad — trackpad-specific management
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def touchpad() -> None:
+    """Manage the touchpad settings."""
+
+
+@touchpad.command("image")
+@click.argument("url")
+def touchpad_image(url: str) -> None:
+    """Set a custom background image for the trackpad page.
+
+    Fetches the image at URL, scales it to fit within 180×180 px (preserving
+    aspect ratio), converts it to LVGL's native format, and saves it to
+    ``F:host/images/user-background.bin`` on the device.  The trackpad page
+    (``F:host/uscr/trackpad.pb``) is then regenerated to reference the new
+    image.  Reload the default screen afterwards to see the change.
+
+    URL must be an http or https address pointing at a supported image
+    (PNG, JPEG, BMP, GIF, or WebP).
+    """
+    import urllib.request
+
+    if not url.lower().startswith(("http://", "https://")):
+        raise click.BadParameter("URL must start with http:// or https://", param_hint="URL")
+
+    logger.info("fetching %s …", url)
+    # cloudflare blocks python by default
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; touchy-pad/1.0)"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 – scheme validated above
+        image_data = resp.read()
+    logger.info("fetched %d bytes", len(image_data))
+
+    with _open_pad() as pad:
+        pad.file_save(_USER_BG_IMG_PATH, image_data, max_width=180, max_height=180)
+        logger.info("sent %s", _USER_BG_IMG_PATH)
+        _do_write_trackpad(pad, _USER_BG_IMG_PATH)
 
 
 def main() -> None:

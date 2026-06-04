@@ -35,6 +35,12 @@ touchy screen <subcommand> [args…]
 | `touchy screen push SCRIPT [--load NAME] [--dry-run]` | Compile a Python screen-definition script and upload every `Screen` it defines. Optionally activate one of them immediately with `--load`. |
 | `touchy screen demo [--listen] [--json]` | Upload and optionally run the built-in demo screen. |
 
+### `touchy touchpad` subcommands
+
+| Subcommand | Description |
+|-----------|-------------|
+| `touchy touchpad image URL` | Fetch an image from URL, scale it to ≤ 180×180 px, and set it as the trackpad page background. |
+
 ## Python library
 
 `TouchyClient` in `touchy_pad.client` is the high-level API:

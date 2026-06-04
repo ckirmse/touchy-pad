@@ -250,6 +250,9 @@ app-build: build-proto-py
 app-run *ARGS: build-proto-py
     env -u VIRTUAL_ENV poetry run --directory app touchy {{ARGS}}
 
+app-touchpad-image: build-proto-py
+    env -u VIRTUAL_ENV poetry run --directory app touchy touchpad image https://www.geeksville.com/robots.png
+    
 # ---------------------------------------------------------------------------
 # Rust library + demo (rust/) — pure-Rust async client.
 # ---------------------------------------------------------------------------
