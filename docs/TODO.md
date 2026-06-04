@@ -4,7 +4,10 @@
 Main new features? Much easier scripting than through StreamController - allow arbitrary Python snippets for button presses/slider moves etc...  Dynamic data displays from host to Touchypad (server stats, ZMK modes, whatever user wants to show)
 
 * [x] move background drawing out of trackpad widget.  that was a mistake. 
-* [ ] allow arbitrary image backgrounds for standard trackpad layout.  for now use the touchy icon.
+* [x] allow arbitrary image backgrounds for standard trackpad layout.  for now use the touchy icon.
+* [ ] investigate hang on setting large gifs
+* [ ] make sure plugin is solid
+* [ ] add reddit link for support
 * [ ] support no-touch devices
 * [ ] add photo of the small board
 * [ ] add some of the example JSON to the API docs
@@ -23,9 +26,13 @@ Main new features? Much easier scripting than through StreamController - allow a
 * [x] add an animation to demo/test.pb https://lvgl.io/docs/open/9.5/main-modules/animation.html 
 * [ ] Implement multitouch HID to support multitouch native apps
 * [ ] Stylus support for 'paintbrush mode'
-* [ ] support turn, back, forward, up gestures natively
+* [ ] support turn, back, forward, up gestures natively.  be careful to not confuse with drags.  add various slope/min-dist/max-time thresholds.
+* [ ] use gestures for left/right screen switching instead of buttons at top.
 * [ ] explain plans w.r.t. 3d printing and knobs on the screen
 * [x] Increase CPU, FLASH and RAM speeds to the max.  Currently the firmware picks slow/safe defaults
+* [ ] make a registry of uploaded uscr files.  
+* [ ] Extend those uscrs with triggers of "show when app X is in foreground".  Adopt that as the standard 'better than streamdeck' replacement.  so people can make screens with guis that do interesting things for any foreground app.
+* [ ] make a 'builder' to help users with making new uscrs - walk them through running apps, icon selection etc...
 
 # Alpha 4
 
@@ -95,3 +102,7 @@ Main new features: Works with StreamController app to provide arbitrary user but
 * [x] update python code to be 'finished' for StreamController (make sure press and release events work)
 * [x] reddit post
 * [x] include prebuilt win/os-x exes in the opendeck release zip. "Cross-compiling for every target is the usual sticking point. CI matrices and cargo zigbuild / cross are the standard answers." per https://github.com/geeksville/touchy-pad/blob/main/docs/opendeck-device-plugin.md#3-manifest-essentials
+
+# Rejected ideas
+
+* [ ] NOT POSSIBLE - reddit api busted - publish release notes to reddit https://github.com/meysam81/reddit-scheduled-submit 
