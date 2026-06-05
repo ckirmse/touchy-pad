@@ -467,10 +467,15 @@ static void dispatch(const touchy_Command *cmd, touchy_Response *resp)
         // rendering that destination, its decoder holds the file open
         // and the rename fails with EBUSY. Release that handle first;
         // the screens_notify_file_changed() below re-applies the source.
+        ESP_LOGD(TAG, "file_close: handle=%u commit=%d path='%s'",
+                 (unsigned)fc.handle, (int)fc.commit,
+                 s_active_write_path.c_str());
         if (fc.commit && !s_active_write_path.empty()) {
             screens_prepare_file_overwrite(s_active_write_path.c_str());
         }
         bool ok = fs_close_write(fc.handle, fc.commit);
+        ESP_LOGD(TAG, "file_close: fs_close_write -> %d (path='%s')",
+                 (int)ok, s_active_write_path.c_str());
         if (ok && fc.commit && !s_active_write_path.empty()) {
             // Hand the freshly-committed file to the screen registry;
             // it's a no-op for anything outside `*:host/s/*.pb`.
@@ -479,8 +484,14 @@ static void dispatch(const touchy_Command *cmd, touchy_Response *resp)
             // references this path picks up the new bytes. Cheap when
             // nothing references it (a path-comparison walk over the
             // currently-displayed widget tree), expensive — one full
-            // screen reload — when something does.
+            // screen reload — when something does. The reload is
+            // deferred onto the LVGL task (lv_async_call), so this
+            // returns immediately and the host_api task stays free to
+            // service event_consume polls (draining the log tunnel)
+            // while the rebuild runs.
             screens_notify_file_changed(s_active_write_path.c_str());
+            ESP_LOGD(TAG, "file_close: notify scheduled for '%s'",
+                     s_active_write_path.c_str());
         }
         s_active_write_path.clear();
         resp->code = ok ? touchy_ResultCode_RESULT_OK

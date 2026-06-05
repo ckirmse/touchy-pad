@@ -39,6 +39,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <string>
 #include <vector>
@@ -73,6 +74,20 @@ std::map<std::string, std::vector<uint8_t>> &registry()
     // Heap-allocated through static-init so we don't pay the cost on boards
     // that never use the screen system.
     static auto *m = new std::map<std::string, std::vector<uint8_t>>();
+    return *m;
+}
+
+// Guards every access to registry() and g_default_screen_path. Stage 55's
+// notify path now reloads the active screen on the LVGL task (deferred via
+// lv_async_call), so screens_load() — which reads the registry — can run
+// there concurrently with screens_register_from_file() writing it from the
+// host_api dispatch task as the host streams in the next upload. Without
+// this, a registry()[key].assign() reallocating a vector that screens_load
+// is mid-decode on is a use-after-free. Plain (non-recursive) mutex: no
+// path re-enters it while held.
+std::mutex &registry_mutex()
+{
+    static auto *m = new std::mutex();
     return *m;
 }
 
@@ -357,19 +372,22 @@ bool screens_register_from_file(const char *path)
     }
 
     std::string key(path);
-    registry()[key].assign(raw, raw + len);
-    delete[] raw;
 
     // Boot-default selection (Stage 68): the canonical prev/next chrome
     // `host/s/default.pb` always wins as the screens_load(NULL) target,
     // even if it's discovered after some other screen. Failing that, the
     // first screen to land becomes the default. Subsequent non-default
     // uploads don't reshuffle it (host can always pick by path).
-    if (ends_with(key.c_str(), HOST_SCREENS_PREFIX DEFAULT_SCREEN_FILE)) {
-        g_default_screen_path = key;
-    } else if (g_default_screen_path.empty()) {
-        g_default_screen_path = key;
+    {
+        std::lock_guard<std::mutex> guard(registry_mutex());
+        registry()[key].assign(raw, raw + len);
+        if (ends_with(key.c_str(), HOST_SCREENS_PREFIX DEFAULT_SCREEN_FILE)) {
+            g_default_screen_path = key;
+        } else if (g_default_screen_path.empty()) {
+            g_default_screen_path = key;
+        }
     }
+    delete[] raw;
 
     ESP_LOGI(TAG, "registered screen '%s' (%u bytes)",
              path, (unsigned)len);
@@ -382,8 +400,13 @@ bool screens_load(const char *path)
     // the first registered screen, or — if nothing is registered — a
     // built-in fallback compiled in from proto/default_screen.json.
     if (!path || !*path) {
-        if (!g_default_screen_path.empty()) {
-            return screens_load(g_default_screen_path.c_str());
+        std::string def;
+        {
+            std::lock_guard<std::mutex> guard(registry_mutex());
+            def = g_default_screen_path;
+        }
+        if (!def.empty()) {
+            return screens_load(def.c_str());
         }
         ESP_LOGI(TAG, "loading built-in default screen");
         std::vector<uint8_t> bytes(
@@ -397,13 +420,21 @@ bool screens_load(const char *path)
         return load_decoded(std::move(holder), "<built-in>");
     }
 
-    auto it = registry().find(path);
-    if (it == registry().end()) {
-        ESP_LOGE(TAG, "screen '%s' not registered", path);
-        return false;
+    // Copy the encoded bytes out of the registry under the lock so the
+    // decode below can't race a concurrent screens_register_from_file()
+    // reallocating this entry's vector on the host_api task.
+    std::vector<uint8_t> bytes;
+    {
+        std::lock_guard<std::mutex> guard(registry_mutex());
+        auto it = registry().find(path);
+        if (it == registry().end()) {
+            ESP_LOGE(TAG, "screen '%s' not registered", path);
+            return false;
+        }
+        bytes = it->second;
     }
 
-    auto holder = decode_screen(it->second);
+    auto holder = decode_screen(bytes);
     if (!holder) {
         ESP_LOGE(TAG, "out of memory decoding screen '%s'", path);
         return false;
@@ -419,6 +450,7 @@ const char *screens_current_path(void)
 
 void screens_clear(void)
 {
+    std::lock_guard<std::mutex> guard(registry_mutex());
     registry().clear();
     g_default_screen_path.clear();
     ESP_LOGI(TAG, "screen registry cleared");
@@ -513,12 +545,21 @@ bool active_screen_references_path(const std::string &path)
 void screens_prepare_file_overwrite(const char *path)
 {
     if (!path || !*path) return;
+    ESP_LOGD(TAG, "prepare_file_overwrite: '%s' (lock+release gif)", path);
     lvgl_port_lock(0);
     widget_image_registry_release_gif(path);
     lvgl_port_unlock();
 }
 
-void screens_notify_file_changed(const char *path)
+// The actual notify work. Runs on the LVGL task (scheduled via
+// lv_async_call from screens_notify_file_changed) so the in-place
+// image reload and any full screen rebuild happen on the same thread
+// that drives rendering — never on the host_api dispatch task, which
+// must stay free to answer event_consume polls (and so drain the
+// Stage 64.1 log tunnel). Already runs under the LVGL port lock held
+// by lv_timer_handler; the inner lvgl_port_lock() calls below are
+// harmless recursive takes.
+static void notify_file_changed_impl(const char *path)
 {
     if (!path || !*path) return;
     std::string key(path);
@@ -567,4 +608,36 @@ void screens_notify_file_changed(const char *path)
     // g_current_path under the lock.
     std::string p = g_current_path;
     screens_load(p.c_str());
+}
+
+void screens_notify_file_changed(const char *path)
+{
+    if (!path || !*path) return;
+
+    // Defer the actual work onto the LVGL task via lv_async_call. The
+    // caller is the host_api dispatch task (inside the FileClose
+    // handler); doing the reload here inline would (a) block that task
+    // for the duration of a full screen rebuild — during which it can't
+    // service event_consume, so every ESP_LOGD the rebuild emits piles
+    // up undelivered in the Stage 64.1 log queue and is lost if the
+    // device reboots mid-rebuild — and (b) mutate the LVGL widget tree
+    // from a non-LVGL task. Running on the LVGL task fixes both. The
+    // FileClose handler returns RESULT_OK immediately; the visual
+    // update lands a frame later. lv_async_call dispatches in FIFO
+    // order, so back-to-back uploads still reload in upload order.
+    char *path_copy = strdup(path);
+    if (!path_copy) {
+        ESP_LOGE(TAG, "notify_file_changed: OOM duplicating '%s'", path);
+        return;
+    }
+    if (lv_async_call(
+            [](void *p) {
+                char *pp = static_cast<char *>(p);
+                notify_file_changed_impl(pp);
+                free(pp);
+            },
+            path_copy) != LV_RESULT_OK) {
+        ESP_LOGE(TAG, "notify_file_changed: lv_async_call failed for '%s'", path);
+        free(path_copy);
+    }
 }

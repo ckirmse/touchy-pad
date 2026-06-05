@@ -238,9 +238,33 @@ extern "C" bool log_proto_pop(touchy_LogRecord *out)
     return xQueueReceive(s_queue, out, 0) == pdTRUE;
 }
 
+extern "C" bool touchy_logs_flush(uint32_t timeout_ms)
+{
+    // Nothing to flush if the tunnel never started.
+    if (!s_queue) return true;
+
+    const TickType_t start = xTaskGetTickCount();
+    const TickType_t budget = pdMS_TO_TICKS(timeout_ms);
+    for (;;) {
+        // "Consumed by host" == popped off the queue by the host_api
+        // dispatcher in response to an event_consume poll. Once the
+        // queue is empty every record has been handed to the encoder
+        // and written to the wire.
+        if (uxQueueMessagesWaiting(s_queue) == 0) return true;
+
+        if ((TickType_t)(xTaskGetTickCount() - start) >= budget) {
+            return false;   // host not draining fast enough
+        }
+        // Yield long enough for the host's ~20 Hz poll loop to make
+        // progress without busy-spinning.
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+}
+
 #else // CONFIG_TOUCHY_LOG_OVER_PROTO
 
 extern "C" void log_proto_start(void) {}
 extern "C" bool log_proto_pop(touchy_LogRecord *out) { (void)out; return false; }
+extern "C" bool touchy_logs_flush(uint32_t timeout_ms) { (void)timeout_ms; return true; }
 
 #endif // CONFIG_TOUCHY_LOG_OVER_PROTO
