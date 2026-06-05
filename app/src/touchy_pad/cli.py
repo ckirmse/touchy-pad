@@ -217,17 +217,45 @@ def _after_subcommand(ctx: click.Context, _result, **_kwargs) -> None:
     stays interactive until the user closes it or hits Ctrl+C.
     """
     if ctx.obj.get("listen") and not ctx.obj.get("sim_gui"):
-        # Park the main thread: open a fresh client and stream device
-        # logs (dispatched transparently via event_consume) + host events.
         logger.info("streaming device logs and events (Ctrl-C to stop)\u2026")
-        client = _client()
+        conn = ctx.obj.pop("live_conn", None)
+        if conn is None:
+            # Bare `--listen` with no subcommand that opened a
+            # connection — open one now.
+            _stream_events(_client())
+            return
+        # Reuse the exact connection the subcommand already opened
+        # instead of closing it and re-opening (re-enumerating the USB
+        # device in the same process transiently fails right after a
+        # heavy upload — see _keep_alive_for_listen). `conn` carries a
+        # stashed `_real_close` because its own `close()` was no-op'd so
+        # the subcommand's `with` block wouldn't tear it down.
+        from .api.device import Touchy
+
+        real_close = getattr(conn, "_real_close", conn.close)
+        if isinstance(conn, Touchy):
+            # A Touchy already has a background thread streaming device
+            # logs (→ `touchy_pad.device` logger) and dispatching host
+            # events. Just park the main thread until interrupted.
+            import time
+
+            try:
+                while True:
+                    time.sleep(0.2)
+            except KeyboardInterrupt:
+                pass
+            finally:
+                real_close()
+            return
+        # A plain TouchyClient (no background thread): drive the event
+        # stream from the main thread.
         try:
-            for evt in client.stream_events():
+            for evt in conn.stream_events():
                 logger.info("host-event code=0x%x", evt.host_code)
         except KeyboardInterrupt:
             pass
         finally:
-            client.close()
+            real_close()
         return
 
     if not ctx.obj.get("sim_gui"):
@@ -308,19 +336,55 @@ class _SharedSimTransport(Transport):
 def _client() -> TouchyClient:
     t = _make_transport()
     if t is not None:
-        return TouchyClient(t)
+        return _keep_alive_for_listen(TouchyClient(t))
     try:
-        return TouchyClient.open()
+        return _keep_alive_for_listen(TouchyClient.open())
     except DeviceNotFoundError as e:
         logger.error("%s", e)
         sys.exit(2)
+
+
+def _keep_alive_for_listen(conn):
+    """Stash a freshly-opened connection so the ``--listen`` phase reuses it.
+
+    When the top-level ``--listen`` flag is set, the subcommand's
+    ``with _client()/_open_pad()`` block would normally close the USB
+    transport on the way out — and the post-subcommand listen phase
+    would then have to re-open it. Re-enumerating the same device inside
+    one process right after a heavy upload transiently fails (libusb
+    keeps returning "not found" even though the device never rebooted),
+    whereas a brand-new process connects fine.
+
+    So instead of closing and re-opening, we keep the *same* connection
+    alive: stash it on the click context and neutralise its ``close()``
+    (preserving the real one as ``_real_close``) so the subcommand's
+    ``with`` block leaves it open for :func:`_after_subcommand`.
+    """
+    ctx = click.get_current_context(silent=True)
+    if ctx is None or not ctx.obj or not ctx.obj.get("listen"):
+        return conn
+    ctx.obj["live_conn"] = conn
+    conn._real_close = conn.close
+    conn.close = lambda: None  # type: ignore[method-assign]
+    return conn
+
+
+def _stream_events(client: TouchyClient) -> None:
+    """Park the main thread streaming device logs + host events."""
+    try:
+        for evt in client.stream_events():
+            logger.info("host-event code=0x%x", evt.host_code)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        getattr(client, "_real_close", client.close)()
 
 
 def _open_pad():
     """Counterpart to :func:`_client` that goes through the high-level API."""
     from .api import touchy_open
 
-    return touchy_open(transport=_make_transport())
+    return _keep_alive_for_listen(touchy_open(transport=_make_transport()))
 
 
 @cli.command("simulator")
