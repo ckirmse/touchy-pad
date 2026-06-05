@@ -108,8 +108,14 @@ CONFIG_LV_USE_GIF=y
 # *emitted at runtime* (DEFAULT_LEVEL). The Stage 80 GIF reload probes
 # and any other ESP_LOGD diagnostics are invisible unless both are >= 4;
 # with the default INFO the compiler strips ESP_LOGD bodies entirely.
+
+# Turn these flags on to see LOGD records.  
 CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
-CONFIG_LOG_DEFAULT_LEVEL_DEBUG=y
+
+# WARNING: for some reason turning this on makes the boot fail sometimes
+#CONFIG_LOG_DEFAULT_LEVEL_DEBUG=y
+
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
 # ----- Custom partition table (filename supplied per-board) -----
 CONFIG_PARTITION_TABLE_CUSTOM=y
