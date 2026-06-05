@@ -265,6 +265,19 @@ app-touchpad-image *ARGS:
 app-touchpad-gif *ARGS:
     just app-run {{ARGS}} touchpad gif 
 
+# Decode a coredump backtrace from the firmware logs. Forward the raw hex PCs as args:
+app-backtrace *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # activate_idf_v6.0.1.sh's is_sourced() checks ${0##*/} against "bash"|"sh"|etc.
+    # Just's temp-script has a random name, so sourcing fails. Re-exec under a new
+    # bash that passes "bash" as $0 so is_sourced() returns true. Use a marker env
+    # var (not IDF_PATH) to break the re-exec loop.
+    if [ -z "${TOUCHY_IDF_SOURCED:-}" ]; then
+        exec bash -c 'source ~/.espressif/tools/activate_idf_v6.0.1.sh && TOUCHY_IDF_SOURCED=1 exec bash "$1"' bash "$0"
+    fi
+    xtensa-esp32s3-elf-addr2line -pfiaC -e firmware/build/touchy_pad_v2.elf {{ARGS}}
+
 # ---------------------------------------------------------------------------
 # Rust library + demo (rust/) — pure-Rust async client.
 # ---------------------------------------------------------------------------
@@ -433,6 +446,7 @@ firmware-reconfigure board="":
         idf.py -C firmware -DBOARD="${_BOARD}" set-target "${_IDF_TARGET}"
         idf.py -C firmware -DBOARD="${_BOARD}" reconfigure
     '
+
 # Erase the flash filesystem
 flash-erase: 
     #!/usr/bin/env bash
