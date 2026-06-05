@@ -5,7 +5,7 @@ Main new features? Much easier scripting than through StreamController - allow a
 
 * [x] move background drawing out of trackpad widget.  that was a mistake. 
 * [x] allow arbitrary image backgrounds for standard trackpad layout.  for now use the touchy icon.
-* [ ] investigate hang on setting large gifs
+* [x] investigate hang on setting large gifs
 * [ ] make sure plugin is solid
 * [ ] add reddit link for support
 * [ ] support no-touch devices
@@ -21,7 +21,7 @@ Main new features? Much easier scripting than through StreamController - allow a
 * [ ] investigate this appstore (or others) https://www.xda-developers.com/someone-created-an-esp32-app-store-and-it-lets-you-flash-apps-straight-from-your-browser/
 * [ ] Built-in [StreamController](https://streamcontroller.github.io/docs/latest/) support.  Probably via the mock device proof of concept.
 * [ ] try turning off GPIO matrix for SPI display writes - per https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/spi_master.html#_CPPv416spi_bus_config_t might allow increase to 80Mhz.  "You can use this structure to specify the GPIO pins of the bus. Normally, the driver will use the GPIO matrix to route the signals. An exception is made when all signals either can be routed through the IO_MUX or are -1. In that case, the IO_MUX is used. On ESP32, using GPIO matrix will bring about 25ns of input delay, which may cause incorrect read for >40MHz speeds."
-* [ ] when using ch341 uart try to use 460800 for better speeds
+* [x] when using ch341 uart try to use 460800 for better speeds
 * [ ] make knobs/dials with gesture overlays (share code with trackpad) ccw/cw/left/up etc...
 * [ ] allow setting brightness by putting that GPIO on a hw PWM output
 * [x] add an animation to demo/test.pb https://lvgl.io/docs/open/9.5/main-modules/animation.html 

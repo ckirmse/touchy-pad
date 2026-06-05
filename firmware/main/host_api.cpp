@@ -216,7 +216,7 @@ static SerialLink s_serial_link;
 #define HOST_API_UART_NUM UART_NUM_0
 #endif
 #ifndef HOST_API_UART_BAUD
-#define HOST_API_UART_BAUD 115200
+#define HOST_API_UART_BAUD 460800
 #endif
 
 struct UartLink : HostApiLink {
