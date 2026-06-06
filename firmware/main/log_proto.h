@@ -18,9 +18,20 @@
 extern "C" {
 #endif
 
-// Initialise the log queue and hook esp_log_set_vprintf() so subsequent
-// ESP_LOG* / printf calls are also queued for the host. Idempotent.
+// Create the host log queue. Idempotent. This does NOT yet hook
+// esp_log_set_vprintf(): during early boot the ESP-IDF default vprintf
+// stays in place, so no tunnel code runs in the interrupts-disabled
+// init paths. log_proto_pop()/touchy_logs_flush() are safe to call after
+// this (they just see an empty queue).
 void log_proto_start(void);
+
+// Open the host log tunnel: install the esp_log_set_vprintf() hook so
+// eligible ESP_LOG* lines are queued for the host. Call this once, late
+// in boot, after all driver / flash / display bring-up is complete.
+// Before it, the stock ESP-IDF console path is used unmodified so a log
+// flood from interrupts-disabled init paths can't crash the device.
+// Idempotent; no-op when the proto tunnel is compiled out.
+void log_proto_enable(void);
 
 // Pop the next pending log record into *out. Returns true on success,
 // false if the queue is empty. Non-blocking, callable only from a
@@ -28,9 +39,8 @@ void log_proto_start(void);
 //
 // On success *out is fully populated, including any folded num_dropped
 // counter from records discarded since the previous successful pop.
-// The caller owns the heap-allocated out->message pointer; transfer it
-// to a pb_release()-managed struct (e.g. a PbMessage<touchy_Response>
-// field) or call free(out->message) when done.
+// out->message is a fixed-size inline buffer (FT_STATIC) copied by
+// value — there is no heap ownership to transfer or free.
 bool log_proto_pop(touchy_LogRecord *out);
 
 // Stage 82 — set the minimum log priority that gets queued for the host.

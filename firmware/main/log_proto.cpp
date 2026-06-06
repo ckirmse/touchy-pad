@@ -29,14 +29,23 @@
 
 // Stack buffer for the raw vsnprintf output in s_vprintf (includes the
 // full "X (ts) TAG: body" ESP-IDF prefix). Lines longer than this are
-// still truncated, but 256 bytes covers virtually every real log line.
-// The message field is FT_POINTER so the queue stores a malloc'd copy
-// sized exactly to the parsed body — no fixed cap on the wire payload.
+// truncated. `message` is now FT_STATIC (a fixed-size inline char[] in
+// touchy_LogRecord), so the parsed body is copied straight into the
+// record with no heap activity — see the Stage 64.1 note in
+// proto/touchy.options for why malloc() must never run in this hook.
 #define LOG_PROTO_LINE_BUF 256
-#define LOG_PROTO_TAG_MAX  (sizeof(((touchy_LogRecord *)0)->tag))
 
 static QueueHandle_t s_queue;                   // touchy_LogRecord items
 static vprintf_like_t s_prev_vprintf;           // chain to UART/CDC
+
+// Boot-stability gate. Until log_proto_enable() flips this true (late in
+// boot, after all driver/flash/display bring-up), s_vprintf forwards to
+// UART only and skips ALL of: the thread-local re-entrancy guard,
+// vsnprintf, and the FreeRTOS queue. Early-boot init logs from contexts
+// with interrupts disabled, where those operations are unsafe and a DEBUG
+// log flood intermittently crashes the device. Atomic: read from arbitrary
+// task contexts, written once from app_main.
+static std::atomic<bool> s_ready{false};
 
 // Re-entrancy guard: set on entry to s_vprintf, cleared on exit. If a
 // log emission triggers a downstream log emission (e.g. an ESP_LOGE
@@ -140,7 +149,9 @@ static inline void in_emit_clear(void)
 }
 
 // Enqueue a fully-formed record, folding any pending dropped counter
-// into it on success. Bumps the dropped counter on failure.
+// into it on success. Bumps the dropped counter on failure. The record
+// (including its inline message buffer) is copied by value into the
+// queue — there is no heap ownership to track.
 static void enqueue(const touchy_LogRecord *rec)
 {
     touchy_LogRecord copy = *rec;
@@ -150,8 +161,6 @@ static void enqueue(const touchy_LogRecord *rec)
     if (xQueueSend(s_queue, &copy, 0) != pdTRUE) {
         // Queue full — drop this record and re-fold the dropped count
         // (plus 1 for the record we just lost) into the pending bucket.
-        // Free the heap string that was malloc'd for this record.
-        free(copy.message);
         s_pending_dropped.fetch_add(dropped + 1);
     }
 }
@@ -174,6 +183,14 @@ static int s_vprintf(const char *fmt, va_list ap)
         va_end(ap_copy);
     }
 #endif
+
+    // Boot-stability gate: until the tunnel is explicitly enabled late in
+    // boot, do nothing beyond the UART chain above. This keeps the unsafe
+    // queue / thread-local / vsnprintf work out of early-boot init paths
+    // that run with interrupts disabled.
+    if (!s_ready.load(std::memory_order_relaxed)) {
+        return written;
+    }
 
     // ISR context: cannot safely vsnprintf into our buffer (stack
     // size unknown) and cannot block on the queue. Bump the dropped
@@ -214,23 +231,14 @@ static int s_vprintf(const char *fmt, va_list ap)
         return written;
     }
 
-    // Heap-allocate the message body (FT_POINTER field). enqueue()
-    // transfers ownership to the queue; it frees on drop.
-    size_t body_len = strlen(body);
-    char *msg_buf = (char *)malloc(body_len + 1);
-    if (!msg_buf) {
-        s_pending_dropped.fetch_add(1);
-        in_emit_clear();
-        return written;
-    }
-    memcpy(msg_buf, body, body_len + 1);
-
+    // Copy the parsed body straight into the record's inline buffer
+    // (FT_STATIC). No malloc here — this hook can run with interrupts
+    // disabled during early boot, where heap calls are illegal.
     touchy_LogRecord rec = touchy_LogRecord_init_zero;
     rec.priority     = prio;
     rec.timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
-    strncpy(rec.tag, tag, LOG_PROTO_TAG_MAX - 1);
-    rec.tag[LOG_PROTO_TAG_MAX - 1] = '\0';
-    rec.message      = msg_buf;
+    snprintf(rec.tag,     sizeof(rec.tag),     "%s", tag);
+    snprintf(rec.message, sizeof(rec.message), "%s", body);
 
     enqueue(&rec);
 
@@ -243,12 +251,25 @@ extern "C" void log_proto_set_min_level(touchy_LogPriority level)
     s_min_level.store((int)level, std::memory_order_relaxed);
 }
 
-extern "C" void log_proto_start(void)
+extern "C" void log_proto_enable(void)
 {
-    if (s_queue) return;
-    s_queue = xQueueCreate(LOG_PROTO_QUEUE_DEPTH, sizeof(touchy_LogRecord));
+    // Install our vprintf hook only now, late in boot. Until this point
+    // the ESP-IDF default vprintf runs directly with none of our code in
+    // the path (no chain indirection, no atomic load, no queue/TLS work),
+    // so the early-boot init paths that log with interrupts disabled stay
+    // on the stock console path that ESP-IDF is known to tolerate.
+    if (s_ready.exchange(true, std::memory_order_relaxed)) return;
     if (!s_queue) return;
     s_prev_vprintf = esp_log_set_vprintf(s_vprintf);
+}
+
+extern "C" void log_proto_start(void)
+{
+    // Create the queue early so log_proto_pop()/flush are safe to call,
+    // but do NOT install the vprintf hook yet — that happens in
+    // log_proto_enable() once boot is past the unsafe early-init phase.
+    if (s_queue) return;
+    s_queue = xQueueCreate(LOG_PROTO_QUEUE_DEPTH, sizeof(touchy_LogRecord));
 }
 
 extern "C" bool log_proto_pop(touchy_LogRecord *out)
@@ -283,6 +304,7 @@ extern "C" bool touchy_logs_flush(uint32_t timeout_ms)
 #else // CONFIG_TOUCHY_LOG_OVER_PROTO
 
 extern "C" void log_proto_start(void) {}
+extern "C" void log_proto_enable(void) {}
 extern "C" bool log_proto_pop(touchy_LogRecord *out) { (void)out; return false; }
 extern "C" bool touchy_logs_flush(uint32_t timeout_ms) { (void)timeout_ms; return true; }
 extern "C" void log_proto_set_min_level(touchy_LogPriority level) { (void)level; }

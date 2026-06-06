@@ -112,9 +112,12 @@ extern "C" void app_main(void)
     // subsystem that might query them.
     Prefs::instance().begin();
 
-    // Stage 82: apply the persisted log threshold now that prefs are loaded
-    // so the host log tunnel honours it from here on.
-    log_proto_set_min_level((touchy_LogPriority)Prefs::instance().min_log_level());
+    // FIXME - in early boot for some reason we often crash if DEBUG logs are enabled.  leave the the default
+    // level at at least INFO level until late boot
+    touchy_LogPriority log_level = (touchy_LogPriority)Prefs::instance().min_log_level();
+    log_proto_set_min_level(log_level >= touchy_LogPriority_LOG_PRIORITY_INFO 
+        ? log_level 
+        : touchy_LogPriority_LOG_PRIORITY_INFO);
 
     // Stage 82: optional early-boot delay. The transports (USB vendor link /
     // serial) are already up from host_api_start() above, so a host can
@@ -149,9 +152,14 @@ extern "C" void app_main(void)
     backlight_init(Prefs::instance().screen_timeout_ms());
 
     lv_display_t *disp = display_init();
+
     esp_lcd_touch_handle_t tp = touch_init(disp);
 #endif
     (void)disp;  // handle not needed past bring-up (LVGL tracks the default)
+
+    // enable storing log records from this point forward (enabling before this can cause hangs if DEBUG logging is enabled
+    // via CONFIG_LOG_DEFAULT_LEVEL_DEBUG=y)
+    log_proto_enable();
 
     // display_init() calls lv_init() which clears LVGL's FS driver
     // linked list. (Re)register our 'R:' driver now so host-uploaded
@@ -197,6 +205,11 @@ extern "C" void app_main(void)
     }
 
     ESP_LOGI(TAG, "Ready");
+
+    // FIXME - in early boot for some reason we often crash if DEBUG logs are enabled.  leave the the default
+    //level at at least INFO level until late boot
+    log_proto_set_min_level(log_level);
+
     // Nothing else to do here — host_api dispatches screen loads driven
     // by the host CLI, Trackpad widgets inside loaded screens react to
     // LVGL touch events on the LVGL task, and TinyUSB runs in its own
