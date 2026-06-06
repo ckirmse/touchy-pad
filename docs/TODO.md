@@ -7,6 +7,7 @@ Main new features? Much easier scripting than through StreamController - allow a
 * [x] allow arbitrary image backgrounds for standard trackpad layout.  for now use the touchy icon.
 * [x] investigate hang on setting large gifs
 * [x] board-info improvements, include free RAM, PSRAM and flash-file-system numbers
+* [ ] add auto discovery of uart based touchys
 * [ ] properly warn user if selected gif/file is too large to use (based on ram size)
 * [ ] make sure opendeck plugin is solid
 * [ ] add a reddit link for support/discussion
@@ -24,20 +25,20 @@ Main new features? Much easier scripting than through StreamController - allow a
 * [ ] try turning off GPIO matrix for SPI display writes - per https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/spi_master.html#_CPPv416spi_bus_config_t might allow increase to 80Mhz.  "You can use this structure to specify the GPIO pins of the bus. Normally, the driver will use the GPIO matrix to route the signals. An exception is made when all signals either can be routed through the IO_MUX or are -1. In that case, the IO_MUX is used. On ESP32, using GPIO matrix will bring about 25ns of input delay, which may cause incorrect read for >40MHz speeds."
 * [x] when using ch341 uart try to use 460800 for better speeds
 * [ ] make knobs/dials with gesture overlays (share code with trackpad) ccw/cw/left/up etc...
+* [ ] use gestures for left/right screen switching instead of buttons at top.
+* [ ] support turn, back, forward, up gestures natively.  be careful to not confuse with drags.  add various slope/min-dist/max-time thresholds.
 * [ ] allow setting brightness by putting that GPIO on a hw PWM output
 * [x] add an animation to demo/test.pb https://lvgl.io/docs/open/9.5/main-modules/animation.html 
 * [ ] Implement multitouch HID to support multitouch native apps
-* [ ] Stylus support for 'paintbrush mode'
-* [ ] support turn, back, forward, up gestures natively.  be careful to not confuse with drags.  add various slope/min-dist/max-time thresholds.
-* [ ] use gestures for left/right screen switching instead of buttons at top.
 * [ ] explain plans w.r.t. 3d printing and knobs on the screen
 * [x] Increase CPU, FLASH and RAM speeds to the max.  Currently the firmware picks slow/safe defaults
-* [ ] make a registry of uploaded uscr files.  
-* [ ] Extend those uscrs with triggers of "show when app X is in foreground".  Adopt that as the standard 'better than streamdeck' replacement.  so people can make screens with guis that do interesting things for any foreground app.
-* [ ] make a 'builder' to help users with making new uscrs - walk them through running apps, icon selection etc...
 
 # Alpha 4
 
+* [ ] make a registry of uploaded uscr files.  
+* [ ] Extend those uscrs with triggers of "show when app X is in foreground".  Adopt that as the standard 'better than streamdeck' replacement.  so people can make screens with guis that do interesting things for any foreground app.
+* [ ] make a 'builder' to help users with making new uscrs - walk them through running apps, icon selection etc...
+* [ ] Stylus support for 'paintbrush mode'
 * [ ] Built-in [StreamController](https://streamcontroller.github.io/docs/latest/) support.  Probably via the mock device proof of concept.
 * [ ] expose device API via wifi/tcp (for arbitary smart signage applications).   Find a good esp32 lib for wifi settings/management/firmware update?
 * [ ] Haptics (figure out best way to mount haptics for best effect)
