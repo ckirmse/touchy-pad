@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Board-specific deps for Elecrow ESP32-S3 7" (all variants).
+dependencies:
+  # GT911 capacitive multi-touch driver (esp_lcd_touch wrapper).
+  espressif/esp_lcd_touch_gt911: "^1.1.0"
+  # NOTE: PCA9557 IO expander is driven directly from board.cpp via the
+  # i2c_master driver; no external component needed.
