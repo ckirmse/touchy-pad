@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Board-specific Kconfig defaults for Elecrow ESP32-S3 7" (v2, v3, Advance).
+# Standard module: ESP32-S3-WROOM-1-N4R8 (4 MB QIO flash, 8 MB octal PSRAM).
+# If your device has 8 or 16 MB flash, switch to partitions/8M.csv or
+# partitions/16M.csv and set the matching FLASHSIZE option.
+
+# ----- Flash (4 MB, QIO @ 80 MHz) -----
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/4M.csv"
+
+# ----- PSRAM (8 MB, octal SPI @ 80 MHz) -----
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
+# ----- Host transport: touchy protocol over serial (UART fallback) -----
+# GPIO19/20 (USB D+/D-) are also the I2C bus for PCA9557 and GT911,
+# so native USB is not usable.  Use UART0 via the USB-UART bridge instead.
+CONFIG_TOUCHY_PROTO_OVER_SERIAL=y
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_TOUCHY_LOG_OVER_PROTO=y

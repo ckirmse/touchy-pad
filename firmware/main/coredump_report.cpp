@@ -63,10 +63,15 @@ void coredump_report_check_and_log(void)
     // vaddr is the classic use-after-free / null-deref signature.
     ESP_LOGE(TAG, "exc_cause=%" PRIu32 " exc_vaddr=0x%08" PRIx32,
              summary->ex_info.exc_cause, summary->ex_info.exc_vaddr);
+#else
+    // RISC-V: log mcause (trap cause) and mtval (fault address / bad insn).
+    ESP_LOGE(TAG, "mcause=0x%08" PRIx32 " mtval=0x%08" PRIx32,
+             summary->ex_info.mcause, summary->ex_info.mtval);
 #endif
 
-    // Pack the whole backtrace onto one log line so it costs a single
-    // tunnel record (the queue is shallow at boot). addr2line-ready.
+    // Pack backtrace info into one log line.
+#if __XTENSA__
+    // Xtensa can reconstruct a full PC backtrace on-device.
     const esp_core_dump_bt_info_t &bt = summary->exc_bt_info;
     char line[256];
     int off = snprintf(line, sizeof(line), "backtrace%s:",
@@ -77,6 +82,12 @@ void coredump_report_check_and_log(void)
     ESP_LOGE(TAG, "%s", line);
     ESP_LOGE(TAG, "decode: xtensa-esp32s3-elf-addr2line -pfiaC -e "
                   "firmware/build/touchy_pad_v2.elf <PCs above>");
+#else
+    // RISC-V: on-device backtrace unavailable without DWARF; log stack dump
+    // size for host-side GDB analysis.
+    ESP_LOGE(TAG, "stack dump: %" PRIu32 " bytes (decode with GDB + ELF)",
+             summary->exc_bt_info.dump_size);
+#endif
 
     free(summary);
 

@@ -32,7 +32,7 @@
 #include "tinyusb.h"
 #include "tusb.h"
 #endif
-#if CONFIG_TOUCHY_PROTO_OVER_SERIAL && !CONFIG_SOC_USB_OTG_SUPPORTED
+#if CONFIG_TOUCHY_PROTO_OVER_SERIAL && (!CONFIG_SOC_USB_OTG_SUPPORTED || !CONFIG_TINYUSB_CDC_COUNT)
 #include "driver/uart.h"
 #endif
 
@@ -181,7 +181,7 @@ struct VendorLink : HostApiLink {
 static VendorLink s_vendor_link;
 #endif  // CONFIG_SOC_USB_OTG_SUPPORTED
 
-#if CONFIG_TOUCHY_PROTO_OVER_SERIAL && CONFIG_SOC_USB_OTG_SUPPORTED
+#if CONFIG_TOUCHY_PROTO_OVER_SERIAL && CONFIG_SOC_USB_OTG_SUPPORTED && CONFIG_TINYUSB_CDC_COUNT
 struct SerialLink : HostApiLink {
     const char *name() const override { return "serial"; }
     // tud_cdc_connected() tracks DTR; pyserial asserts it on open.
@@ -208,9 +208,9 @@ struct SerialLink : HostApiLink {
 };
 
 static SerialLink s_serial_link;
-#endif  // CONFIG_TOUCHY_PROTO_OVER_SERIAL && CONFIG_SOC_USB_OTG_SUPPORTED
+#endif  // CONFIG_TOUCHY_PROTO_OVER_SERIAL && CONFIG_SOC_USB_OTG_SUPPORTED && CONFIG_TINYUSB_CDC_COUNT
 
-#if CONFIG_TOUCHY_PROTO_OVER_SERIAL && !CONFIG_SOC_USB_OTG_SUPPORTED
+#if CONFIG_TOUCHY_PROTO_OVER_SERIAL && (!CONFIG_SOC_USB_OTG_SUPPORTED || !CONFIG_TINYUSB_CDC_COUNT)
 // Hardware-UART transport for chips with no native USB (Stage 65). The
 // CH340 bridge on boards like the esp32_2432s028rv3 is wired to UART0, so we
 // reuse the console UART at the standard protocol baud. The IDF console must
@@ -279,7 +279,7 @@ static void uart_link_init(UartLink *link)
     xTaskCreatePinnedToCore(uart_rx_pump_task, "uart_rx", 2048, link,
                             tskIDLE_PRIORITY + 2, nullptr, tskNO_AFFINITY);
 }
-#endif  // CONFIG_TOUCHY_PROTO_OVER_SERIAL && !CONFIG_SOC_USB_OTG_SUPPORTED
+#endif  // CONFIG_TOUCHY_PROTO_OVER_SERIAL && (!CONFIG_SOC_USB_OTG_SUPPORTED || !CONFIG_TINYUSB_CDC_COUNT)
 
 // ---------------------------------------------------------------------------
 // Framing helpers (blocking on the dispatcher task)
@@ -646,15 +646,16 @@ extern "C" void host_api_start(void)
                             &s_vendor_link, tskIDLE_PRIORITY + 4, nullptr, 1);
 #endif
 
-#if CONFIG_TOUCHY_PROTO_OVER_SERIAL && CONFIG_SOC_USB_OTG_SUPPORTED
+#if CONFIG_TOUCHY_PROTO_OVER_SERIAL && CONFIG_SOC_USB_OTG_SUPPORTED && CONFIG_TINYUSB_CDC_COUNT
     // Serial (USB-CDC ACM) dispatcher — same protocol, second link.
     s_serial_link.rx_sem = xSemaphoreCreateBinary();
     xTaskCreatePinnedToCore(host_api_task, "host_api_ser", 10 * 1024,
                             &s_serial_link, tskIDLE_PRIORITY + 4, nullptr, 1);
 #endif
 
-#if CONFIG_TOUCHY_PROTO_OVER_SERIAL && !CONFIG_SOC_USB_OTG_SUPPORTED
-    // Hardware-UART dispatcher — the only host link on no-USB chips.
+#if CONFIG_TOUCHY_PROTO_OVER_SERIAL && (!CONFIG_SOC_USB_OTG_SUPPORTED || !CONFIG_TINYUSB_CDC_COUNT)
+    // Hardware-UART dispatcher — for no-USB chips and S3 boards where USB pins
+    // are unavailable (e.g. shared with I2C, so CDC cannot be used).
     s_uart_link.rx_sem = xSemaphoreCreateBinary();
     uart_link_init(&s_uart_link);
     xTaskCreatePinnedToCore(host_api_task, "host_api_uart", 10 * 1024,
@@ -673,7 +674,7 @@ extern "C" void host_api_on_rx(void)
 }
 #endif
 
-#if CONFIG_TOUCHY_PROTO_OVER_SERIAL && CONFIG_SOC_USB_OTG_SUPPORTED
+#if CONFIG_TOUCHY_PROTO_OVER_SERIAL && CONFIG_SOC_USB_OTG_SUPPORTED && CONFIG_TINYUSB_CDC_COUNT
 extern "C" void host_api_on_cdc_rx(void)
 {
     if (s_serial_link.rx_sem) {

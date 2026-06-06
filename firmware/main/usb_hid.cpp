@@ -136,27 +136,54 @@ enum {
                        + TUD_HID_DESC_LEN \
                        + TUD_VENDOR_DESC_LEN)
 
+// Full-speed configuration (used by FS-only controllers and as the FS
+// alternate config on HS-capable devices like the ESP32-P4).
 static const uint8_t s_config_desc[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CFG_TOTAL_LEN, 0, 100),
-#if CFG_TUD_CDC    
+#if CFG_TUD_CDC
     // CDC-ACM: notification EP, bulk OUT, bulk IN, 64-byte packet size.
     TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 4, EPNUM_CDC_NOTIF, 8,
                        EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 #endif
     // HID composite (mouse + keyboard): IN EP, 16-byte max packet, 10 ms poll.
-    // 16 bytes is plenty for the largest report (8-byte keyboard report +
-    // 1-byte report ID prefix).
     TUD_HID_DESCRIPTOR(ITF_NUM_HID, 5, HID_ITF_PROTOCOL_NONE,
                        sizeof(s_hid_report_descriptor),
                        EPNUM_HID, 16, 10),
-    // Vendor (host_api): bulk OUT (command) + bulk IN (response). The bulk
-    // pair carries length-prefixed Command and Response frames; events are
-    // polled by the host via EventConsumeCmd on the same bulk pair (the
-    // ESP32-S3 USB-OTG controller only has 5 IN endpoints, leaving no
-    // budget for a dedicated interrupt-IN event mailbox). See
-    // docs/host-api.md.
+    // Vendor (host_api): bulk OUT (command) + bulk IN (response).
     TUD_VENDOR_DESCRIPTOR(ITF_NUM_VENDOR, 6, EPNUM_VENDOR_OUT, EPNUM_VENDOR_IN, 64),
 };
+
+#if CONFIG_IDF_TARGET_ESP32P4
+// High-speed configuration for the P4's USB 2.0 HS controller.
+// USB 2.0 spec requires HS bulk endpoints to use 512-byte max packet size.
+// Descriptor length is identical to the FS config (wMaxPacketSize is a field
+// value, not part of the descriptor structure length).
+static const uint8_t s_hs_config_desc[] = {
+    TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CFG_TOTAL_LEN, 0, 100),
+#if CFG_TUD_CDC
+    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 4, EPNUM_CDC_NOTIF, 8,
+                       EPNUM_CDC_OUT, EPNUM_CDC_IN, 512),
+#endif
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID, 5, HID_ITF_PROTOCOL_NONE,
+                       sizeof(s_hid_report_descriptor),
+                       EPNUM_HID, 16, 10),
+    TUD_VENDOR_DESCRIPTOR(ITF_NUM_VENDOR, 6, EPNUM_VENDOR_OUT, EPNUM_VENDOR_IN, 512),
+};
+
+// Device Qualifier: required for HS-capable devices to describe the device
+// as it would appear at full speed (queried by a HS host during enumeration).
+static const tusb_desc_device_qualifier_t s_device_qualifier = {
+    .bLength            = sizeof(tusb_desc_device_qualifier_t),
+    .bDescriptorType    = TUSB_DESC_DEVICE_QUALIFIER,
+    .bcdUSB             = 0x0200,
+    .bDeviceClass       = 0xEF,
+    .bDeviceSubClass    = 0x02,
+    .bDeviceProtocol    = 0x01,
+    .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
+    .bNumConfigurations = 0x01,
+    .bReserved          = 0x00,
+};
+#endif  // CONFIG_IDF_TARGET_ESP32P4
 
 extern "C" void usb_hid_init(void)
 {
@@ -176,6 +203,10 @@ extern "C" void usb_hid_init(void)
     tusb_cfg.descriptor.string             = s_string_desc;
     tusb_cfg.descriptor.string_count       = sizeof(s_string_desc) / sizeof(s_string_desc[0]);
     tusb_cfg.descriptor.full_speed_config  = s_config_desc;
+#if CONFIG_IDF_TARGET_ESP32P4
+    tusb_cfg.descriptor.high_speed_config  = s_hs_config_desc;
+    tusb_cfg.descriptor.qualifier          = &s_device_qualifier;
+#endif
     ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
 
 #if CFG_TUD_CDC

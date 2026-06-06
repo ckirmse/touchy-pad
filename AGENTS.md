@@ -1,7 +1,8 @@
 # touchy-pad — AI Agent Guide
 
 Open-source multitouch USB touchpad / button matrix with a built-in
-customisable LCD (ESP32-S3, jc4827w543 or waveshare_s3_lcd_7b boards).
+customisable LCD (ESP32-S3 and ESP32-P4; boards: jc4827w543, waveshare_s3_lcd_7b,
+elecrow_s3_lcd_7, elecrow_s3_lcd_7_adv, elecrow_p4_lcd_7).
 The host-side companion is a Python package (`touchy-pad`) that ships a
 CLI (`touchy`), a high-level API, a Tkinter/PySide6 device simulator, and
 a StreamDeck-compatibility shim (`TouchyDeck`).

@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Board-specific deps for Elecrow ESP32-S3 7" Advance (shared with elecrow_s3_lcd_7).
+dependencies:
+  espressif/esp_lcd_touch_gt911: "^1.1.0"

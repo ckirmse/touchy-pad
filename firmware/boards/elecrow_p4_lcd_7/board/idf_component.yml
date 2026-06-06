@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Board-specific deps for Elecrow CrowPanel Advanced 7" ESP32-P4.
+dependencies:
+  # GT911 capacitive multi-touch driver.
+  espressif/esp_lcd_touch_gt911: "^1.1.0"
+  # EK79007 MIPI-DSI panel bridge driver.
+  espressif/esp_lcd_ek79007: "^2"
