@@ -126,11 +126,12 @@ jobs:
           BOARD: ${{ matrix.board }}
         run: |
           source "$HOME/esp/esp-idf/export.sh"
-          # Derive --chip from the generated sdkconfig so this works for every
-          # board (esp32, esp32s3, esp32p4) without an explicit lookup table.
-          chip="$(sed -n 's/^CONFIG_IDF_TARGET="\(.*\)"$/\1/p' firmware/build/sdkconfig)"
+          # Derive --chip from the generated sdkconfig.json so this works for
+          # every board (esp32, esp32s3, esp32p4) without an explicit lookup
+          # table. ESP-IDF writes this file to build/config/ after configure.
+          chip="$(python3 -c "import json,sys; print(json.load(open('firmware/build/config/sdkconfig.json'))['IDF_TARGET'])")"
           if [ -z "${chip}" ]; then
-            echo "error: could not read CONFIG_IDF_TARGET from firmware/build/sdkconfig" >&2
+            echo "error: could not read IDF_TARGET from firmware/build/config/sdkconfig.json" >&2
             exit 1
           fi
           echo "merging for chip=${chip}"
