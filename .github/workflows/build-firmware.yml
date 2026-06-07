@@ -1,0 +1,156 @@
+name: Build firmware (reusable)
+
+# Reusable workflow that builds firmware for every supported board and uploads
+# each one as `firmware-<board>` containing a single flashable `<board>.bin`
+# (bootloader + partition-table + app merged via esptool).
+#
+# Called from both `.github/workflows/app-ci.yml` (PR/push CI) and
+# `.github/workflows/release.yml` (release asset publishing). Centralising
+# the matrix here keeps the two callers in sync — adding a board, bumping
+# the IDF version, or fixing the merge command only happens once.
+
+on:
+  workflow_call:
+    outputs:
+      idf-version:
+        description: "ESP-IDF version used to build firmware."
+        value: ${{ jobs.install-esp-idf.outputs.idf-version }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # install-esp-idf: clone + install the ESP-IDF toolchain once and save it to
+  # the Actions cache.  All parallel build-firmware matrix cells depend on this
+  # job completing first so they get a guaranteed cache hit and skip the heavy
+  # install step entirely.
+  # ---------------------------------------------------------------------------
+  install-esp-idf:
+    runs-on: ubuntu-latest
+    env:
+      IDF_VERSION: "v6.0.1"
+    outputs:
+      idf-version: ${{ env.IDF_VERSION }}
+    steps:
+      - name: Cache ESP-IDF toolchain
+        id: cache-idf
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.espressif
+            ~/esp/esp-idf
+          key: ${{ runner.os }}-esp-idf-${{ env.IDF_VERSION }}-esp32-esp32s3-esp32p4
+          # This item is very expensive to fetch, so try to always keep it cached.
+          # One caveat worth knowing: save-always: true means if the ESP-IDF
+          # install step itself fails partway through (corrupted clone, network
+          # blip), the broken partial installation gets cached. The existing
+          # validity check ([ -f export.sh ] || exit 1) guards against this — a
+          # broken install fails fast before the post-job save runs, so the bad
+          # state never makes it into cache. If you ever get a mysteriously
+          # broken cache, actions/cache has a UI to manually delete cache
+          # entries by key.
+          save-always: true
+
+      - name: Install libusb
+        if: steps.cache-idf.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libusb-1.0-0
+
+      - name: Install ESP-IDF toolchain
+        if: steps.cache-idf.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/esp"
+          if [ -d "$HOME/esp/esp-idf" ] && [ ! -f "$HOME/esp/esp-idf/export.sh" ]; then
+            rm -rf "$HOME/esp/esp-idf"
+          fi
+          git clone --branch "${IDF_VERSION}" --single-branch \
+            https://github.com/espressif/esp-idf.git "$HOME/esp/esp-idf"
+          cd "$HOME/esp/esp-idf"
+          # Install all required architectures: most boards are esp32s3,
+          # esp32_2432s028rv3 / esp32_2432s024 (CYD) are classic esp32, and
+          # elecrow_p4_lcd_7 uses esp32p4.
+          ./install.sh esp32,esp32s3,esp32p4
+          [ -f "$HOME/esp/esp-idf/export.sh" ] || \
+            { echo "error: ESP-IDF installation incomplete - export.sh not found" >&2; exit 1; }
+
+  # ---------------------------------------------------------------------------
+  # build-firmware: matrix over all supported boards.  Runs in parallel once
+  # install-esp-idf has populated the cache.  Each cell restores the toolchain
+  # from cache (fast), configures and builds the firmware, then merges
+  # bootloader + partition-table + app into a single flashable `<board>.bin`
+  # uploaded as the `firmware-<board>` artifact.
+  # ---------------------------------------------------------------------------
+  build-firmware:
+    needs: install-esp-idf
+    name: Build firmware (${{ matrix.board }})
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - jc4827w543
+          - waveshare_s3_lcd_7b
+          - esp32_2432s028rv3
+          - elecrow_p4_lcd_7
+          - elecrow_s3_lcd_7
+          - elecrow_s3_lcd_7_adv
+    runs-on: ubuntu-latest
+    env:
+      IDF_VERSION: ${{ needs.install-esp-idf.outputs.idf-version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up shared Python/Poetry/just/proto tooling
+        uses: ./.github/actions/setup-python-poetry-just-proto
+
+      - name: Restore ESP-IDF toolchain from cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.espressif
+            ~/esp/esp-idf
+          key: ${{ runner.os }}-esp-idf-${{ env.IDF_VERSION }}-esp32-esp32s3-esp32p4
+
+      - name: Install libusb
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libusb-1.0-0
+
+      - name: Configure and build firmware
+        working-directory: ${{ github.workspace }}
+        env:
+          BOARD: ${{ matrix.board }}
+        run: |
+          SYS_PYTHON="$(command -v python3)"
+          export SYS_PYTHON
+          just build-proto-c
+          just firmware-reconfigure "${BOARD}"
+          just firmware-build
+
+      - name: Merge firmware into a single flashable binary
+        env:
+          BOARD: ${{ matrix.board }}
+        run: |
+          source "$HOME/esp/esp-idf/export.sh"
+          # Derive --chip from the generated sdkconfig.json so this works for
+          # every board (esp32, esp32s3, esp32p4) without an explicit lookup
+          # table. ESP-IDF writes this file to build/config/ after configure.
+          chip="$(python3 -c "import json,sys; print(json.load(open('firmware/build/config/sdkconfig.json'))['IDF_TARGET'])")"
+          if [ -z "${chip}" ]; then
+            echo "error: could not read IDF_TARGET from firmware/build/config/sdkconfig.json" >&2
+            exit 1
+          fi
+          echo "merging for chip=${chip}"
+          # Drive esptool directly so the merge step works even when the
+          # IDF venv has a pending version drift. flash_args already has
+          # bootloader/partition-table/app addr+file pairs in build/.
+          cd firmware/build
+          # Flatten flash_args (flags line + addr/file lines) into argv.
+          mapfile -t flash_args < flash_args
+          args=()
+          for line in "${flash_args[@]}"; do
+            read -ra words <<< "$line"
+            args+=("${words[@]}")
+          done
+          esptool --chip "${chip}" merge-bin -o "${GITHUB_WORKSPACE}/${BOARD}.bin" "${args[@]}"
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: firmware-${{ matrix.board }}
+          path: ${{ matrix.board }}.bin
+          if-no-files-found: error
