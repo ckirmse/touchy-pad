@@ -9,7 +9,7 @@ on:
       - "proto/**"
       - "rust/**"
       - "Justfile"
-      - ".github/workflows/app-ci.yml"
+      - ".github/**"
   pull_request:
     paths:
       - "app/**"
@@ -17,7 +17,7 @@ on:
       - "proto/**"
       - "rust/**"
       - "Justfile"
-      - ".github/workflows/app-ci.yml"
+      - ".github/**"
 
 jobs:
   # ---------------------------------------------------------------------------
