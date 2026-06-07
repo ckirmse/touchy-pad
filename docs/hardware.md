@@ -1,8 +1,8 @@
 # Supported hardware
 
-Currently this project supports two board types, but ali-express seems to have many similar cheap boards of different resolutions.  I'm happy to help anyone add a new supported board to this project - it is quite easy.  (Ping me if you want to do this and I'll flesh out these instructions).
+This project supports several board types. I'm happy to help anyone add a new supported board — it is quite easy. (Ping me if you want to do this and I'll flesh out these instructions).
 
-Currently the following two boards are supported
+Currently the following boards are supported:
 
 ## JC4827W543
 
@@ -23,7 +23,7 @@ corruption / dropped pixels. `BOARD_LCD_QSPI_CLK_HZ` in
 [firmware/boards/jc4827w543/board/board_pins.h](../firmware/boards/jc4827w543/board/board_pins.h)
 is set accordingly. At 32 MHz QSPI the raw wire bandwidth is ~16 MB/s,
 which caps a full-frame RGB565 redraw (480×272×2 ≈ 261 KB) at roughly
-~60 FPS regardless of how the host-side code is structured. 
+~60 FPS regardless of how the host-side code is structured.
 
 ## ESP32-2432S028Rv3: 2.8" resistive cheap-yellow-display variant (Also called "ESP32-2432S028R v3" or CYD2USB)
 
@@ -170,6 +170,49 @@ Notable quirks discovered during bring-up:
 
 Board id: `elecrow_p4_lcd_7`, IDF target `esp32p4`.
 
+## SQUiXL by Unexpected Maker (`squixl`)
+
+![squixl](images/squixl.jpg)
+
+The [SQUiXL](https://unexpectedmaker.com/shop.html#!/SQUiXL/p/743870537) is an ESP32-S3 development board from Unexpected Maker, featuring a 480×480 square capacitive touchscreen. Costs around $100 USD.
+
+**Full USB HID** — the ESP32-S3's USB-OTG port is wired directly to the USB-C connector (I²C uses GPIO 1/2, leaving GPIO 19/20 free), so mouse + keyboard emulation work out of the box.
+
+| Component | Specification |
+| :--- | :--- |
+| **SoC** | ESP32-S3 (dual-core Xtensa LX7 @ 240 MHz) |
+| **Flash** | 16 MB QIO |
+| **PSRAM** | 8 MB Octal @ 80 MHz |
+| **Display** | 4" 480×480 ST7701S (RGB parallel) |
+| **Touch** | GT911 capacitive multitouch, I²C |
+| **IO Expander** | LCA9555 16-bit (I²C 0x20) |
+
+The ST7701S requires a one-time register-init sequence via a 3-wire 9-bit SPI bus. On the SQUiXL that SPI bus (MOSI/CLK/CS) plus the LCD reset, backlight enable, and GT911 touch reset lines are all routed through the LCA9555 expander — the firmware bit-bangs them over I²C during `display_init()`.
+
+### Key GPIO assignments
+
+| Signal | GPIO / Notes |
+| :--- | :--- |
+| **I²C SCL** | GPIO 2 (GT911 + LCA9555) |
+| **I²C SDA** | GPIO 1 |
+| **GT911 INT** | GPIO 3 |
+| **LCD HSYNC** | GPIO 48 |
+| **LCD VSYNC** | GPIO 47 |
+| **LCD DE** | GPIO 38 |
+| **LCD PCLK** | GPIO 39 @ 12 MHz |
+| **LCD D0–D4 (B0–B4)** | GPIO 21, 18, 17, 16, 15 |
+| **LCD D5–D10 (G0–G5)** | GPIO 14, 13, 12, 11, 10, 9 |
+| **LCD D11–D15 (R0–R4)** | GPIO 8, 7, 6, 5, 4 |
+| **Backlight PWM** | GPIO 40 (12-bit LEDC @ 6 kHz) |
+| **Backlight enable** | LCA9555 pin 0 (BL\_EN) |
+| **LCD reset** | LCA9555 pin 1 |
+| **ST7701S SPI MOSI** | LCA9555 pin 2 |
+| **ST7701S SPI CLK** | LCA9555 pin 3 |
+| **ST7701S SPI CS** | LCA9555 pin 4 |
+| **GT911 reset** | LCA9555 pin 5 (TP\_RST) |
+
+Board id: `squixl`, IDF target `esp32s3`. The firmware uses the 16 MB partition table (`partitions/16M.csv`).
+
 ## Elecrow CrowPanel 7" ESP32-S3 (`elecrow_s3_lcd_7` / `elecrow_s3_lcd_7_adv`)
 
 Two variants of the Elecrow 7" ESP32-S3 board are supported: the [regular CrowPanel 7"](https://www.elecrow.com/esp32-display-7-inch-hmi-display-rgb-tft-lcd-touch-screen-support-lvgl.html) and the [CrowPanel Advance 7"](https://www.elecrow.com/crowpanel-advance-7-hmi-esp32-ai-display-800x480-ai-ips-touch-screen.html). Both use an ESP32-S3 with an 800×480 RGB panel and GT911 capacitive multitouch, and cost around $20–25 USD.
@@ -189,7 +232,7 @@ Two board IDs exist because the Advance variant requires slightly different sdkc
 
 ![sample hw](images/hw.png)
 
-## Screen+hardware 
+## Screen+hardware
 * https://www.aliexpress.us/item/3256808357526751.html
 * https://shopee.tw/ESP32-P4-WIFI6-7%E8%8B%B1%E5%AF%B8%E4%BA%94%E9%BB%9E%E8%A7%B8%E6%8E%A7%E5%B1%8F%E9%96%8B%E7%99%BC%E6%9D%BF-1024%C3%97600%E5%88%86%E8%BE%A8%E7%8E%87-%E5%9F%BA%E6%96%BCESP32-P4%E5%92%8CESP32-C6-%E6%94%AF-i.871575797.40371503863
 * https://shopee.tw/ESP32-S34.3%E5%AF%B85%E5%AF%B8LCD%E9%9B%BB%E5%AE%B9%E8%A7%B8%E6%91%B8%E5%B1%8FLVGL%E9%96%8B%E7%99%BC%E6%9D%BFIO%E6%93%B4%E5%B1%95-i.1578084179.44557771187?extraParams=%7B%22display_model_id%22%3A410687861211%2C%22model_selection_logic%22%3A3%7D&sp_atk=b636f0bc-1d2e-4669-8e72-0a2a2fb56695&xptdk=b636f0bc-1d2e-4669-8e72-0a2a2fb56695
@@ -203,6 +246,5 @@ Two board IDs exist because the Advance variant requires slightly different sdkc
 ## Haptics
 We plan to support haptics in a future release (to provide nice button press 'feel')
 
-Use this chip+motor TI DRV2605L https://www.adafruit.com/product/2305?srsltid=AfmBOopbcDSYZ7QqgK9jD2y2IHr5d2SBN0EGje71ejSgan9e44qDU4RJ 
+Use this chip+motor TI DRV2605L https://www.adafruit.com/product/2305?srsltid=AfmBOopbcDSYZ7QqgK9jD2y2IHr5d2SBN0EGje71ejSgan9e44qDU4RJ
 https://www.aliexpress.us/w/wholesale-haptic-motor.html?spm=a2g0o.productlist.search.0
-

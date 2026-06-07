@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Board-specific deps for SQUiXL.
+dependencies:
+  # GT911 capacitive multi-touch driver (esp_lcd_touch wrapper).
+  espressif/esp_lcd_touch_gt911: "^1.1.0"
+  # LCA9555 IO expander is driven directly from lca9555.cpp via i2c_master;
+  # no external component needed.

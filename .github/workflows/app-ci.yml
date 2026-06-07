@@ -103,7 +103,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: [jc4827w543, waveshare_s3_lcd_7b, esp32_2432s028rv3, elecrow_p4_lcd_7, elecrow_s3_lcd_7, elecrow_s3_lcd_7_adv]
+        board: [jc4827w543, waveshare_s3_lcd_7b, esp32_2432s028rv3, elecrow_p4_lcd_7, elecrow_s3_lcd_7, elecrow_s3_lcd_7_adv, squixl]
         os: [ubuntu-latest] # mac-os doesn't work yet macos-latest
     runs-on: ${{ matrix.os }}
     env:

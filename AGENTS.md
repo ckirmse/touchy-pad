@@ -2,7 +2,7 @@
 
 Open-source multitouch USB touchpad / button matrix with a built-in
 customisable LCD (ESP32-S3 and ESP32-P4; boards: jc4827w543, waveshare_s3_lcd_7b,
-elecrow_s3_lcd_7, elecrow_s3_lcd_7_adv, elecrow_p4_lcd_7).
+elecrow_s3_lcd_7, elecrow_s3_lcd_7_adv, elecrow_p4_lcd_7, squixl).
 The host-side companion is a Python package (`touchy-pad`) that ships a
 CLI (`touchy`), a high-level API, a Tkinter/PySide6 device simulator, and
 a StreamDeck-compatibility shim (`TouchyDeck`).
@@ -26,7 +26,7 @@ a StreamDeck-compatibility shim (`TouchyDeck`).
 | `VERSION` | Single-source version (read by Python + CMake) |
 
 ## Implementation status
-All stages 0–24.4, 50.2, 51, 64.1, 64.3, 64.4, 65, 65.1, 67, 68, 72, 81, 82, and 83 are **done**. Latest active wire-format:
+All stages 0–24.4, 50.2, 51, 64.1, 64.3, 64.4, 65, 65.1, 67, 68, 72, 81, 82, 83, and 84 are **done**. Latest active wire-format:
 `Screen.Version.CURRENT == 5`, `SysBoardInfoResponse.ProtocolVersion.CURRENT == 9`,
 `PreferencesFile.Version.CURRENT == 4`.
 Highlights worth remembering:
@@ -223,7 +223,10 @@ touches `usb.core.find()` must guard against `NoBackendError`
 ## Hardware
 - Display + touch panel ride a shared I²C-ish interface (board-specific);
   see `firmware/boards/<board>/`. GT911 multitouch on jc4827w543 /
-  waveshare. The CYD boards (`esp32_2432s028rv3` 2.8" ST7789,
+  waveshare / elecrow / squixl. The squixl board uses an LCA9555 16-bit IO expander
+  (I2C 0x20) for LCD reset, backlight enable, GT911 touch reset, and a
+  bit-banged 9-bit SPI init bus for the ST7701S panel controller; the
+  expander driver lives in `firmware/boards/squixl/board/lca9555.{h,cpp}`. The CYD boards (`esp32_2432s028rv3` 2.8" ST7789,
   `esp32_2432s024` 2.4" ILI9341) are an SPI panel over SPI2 +
   XPT2046 resistive single-touch over SPI3 (managed component
   `atanisoft/esp_lcd_touch_xpt2046`); BGR/INVERT/SWAP/MIRROR + backlight
