@@ -3708,6 +3708,66 @@ tests, and a `just firmware-build` for one S3 + one CYD board. Manual smoke:
 `touchy screen-load ...` and sleep-timeout still work via the new path; set
 `boot_delay_s` and confirm boot pauses.
 
+## Stage 84: SQUiXL board support ✅
+
+**Goal.** Add a `squixl` board target for the Unexpected Maker SQUiXL
+(ESP32-S3, ST7701S 480×480 RGB parallel display, GT911 multitouch,
+LCA9555 16-bit IO expander). The board has native USB (GPIO1/2 for I2C,
+GPIO19/20 free for USB D+/D-), 16 MB flash, 8 MB octal PSRAM.
+
+### Files added
+
+* `firmware/boards/squixl/target` — `esp32s3`
+* `firmware/boards/squixl/sdkconfig.defaults` — 16 MB flash, 8 MB octal
+  PSRAM, `CONFIG_TOUCHY_LOG_OVER_PROTO=y` (native USB)
+* `firmware/boards/squixl/board/board_pins.h` — pin constants
+* `firmware/boards/squixl/board/lca9555.h` / `lca9555.cpp` — LCA9555
+  IO expander driver (ported from the CIC project)
+* `firmware/boards/squixl/board/board.cpp` — I2C bus, LCA9555 init,
+  LEDC backlight PWM, GT911 touch reset via TP_RST expander pin
+* `firmware/boards/squixl/board/display.cpp` — ST7701S init via
+  bit-bang 9-bit SPI over LCA9555; RGB parallel panel; LVGL; BL_EN
+  enable after panel is ready
+* `firmware/boards/squixl/board/touch.cpp` — GT911 via I2C + LVGL
+* `firmware/boards/squixl/board/CMakeLists.txt` + `idf_component.yml`
+
+### Key design notes
+
+* The ST7701S is configured via a 3-wire 9-bit SPI interface (D/C bit
+  + 8 data bits). The SPI clock, MOSI, and CS lines are all routed
+  through the LCA9555 expander (bits 2–4), so the init sequence is
+  bit-banged via I2C writes — slow but correct for a one-time setup.
+* BL_EN (LCA9555 bit 0) is asserted only after `display_init()` completes
+  so the backlight comes on when the panel is ready. The LEDC duty is
+  already set by `backlight_init()` → `board_backlight_set()` beforehand.
+* GT911 reset (TP_RST = LCA9555 bit 5) is pulsed in `board_init()`.
+
+### Build
+
+```bash
+just firmware-reconfigure squixl   # sets esp32s3 target, writes sdkconfig.squixl
+just firmware-build BOARD=squixl
+just flash BOARD=squixl
+```
+
+### Bug fix: stale write transaction after USB disconnect
+
+If the host disconnects (or the `touchy` CLI is killed) while a
+`FileOpenWriteCmd` is in flight, `g_active_write_fs` in `fs.cpp` would
+remain set and every subsequent `FileOpenWriteCmd` would be rejected with
+`RESULT_IO_ERROR`. Fixed in two ways:
+
+1. `fs_open_write()` (`firmware/main/fs/fs.cpp`): if a stale transaction
+   is detected on entry, log a warning and auto-abort it before opening
+   the new one. Safe because the host would never start a new write while
+   genuinely mid-transaction.
+2. `host_api_task()` (`firmware/main/host_api.cpp`): track
+   `was_connected` across iterations; call `fs_abort_open_transaction()`
+   when the link drops (both on the `!connected()` polling path and when
+   `read_frame()` returns false mid-frame).
+
+---
+
 ## Stage 83: add probing for UART-based Touchys ✅
 
 **Goal.** Extend dynamic device discovery (today: native-USB Touchys + the

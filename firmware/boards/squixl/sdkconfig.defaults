@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Board-specific Kconfig defaults for the SQUiXL (Unexpected Maker).
+# Module: ESP32-S3 with 16 MB QIO flash, 8 MB octal PSRAM.
+# I2C is on GPIO1/2, leaving GPIO19/20 (USB D+/D-) free for native USB.
+
+# ----- Flash (16 MB, QIO @ 80 MHz) -----
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/16M.csv"
+
+# ----- PSRAM (8 MB, octal SPI @ 80 MHz) -----
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
+# ----- Host transport: native USB (vendor bulk + HID) -----
+# I2C is on GPIO1/2, leaving GPIO19/20 (USB D+/D-) free.
+CONFIG_TOUCHY_LOG_OVER_PROTO=y
